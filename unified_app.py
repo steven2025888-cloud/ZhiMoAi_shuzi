@@ -586,6 +586,21 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress()):
     # 保存两层进度信息
     step_progress = None  # 步骤进度 (3/4)
     frame_progress = None  # 帧进度 (13/21)
+    last_step_display = None  # 上次显示的步骤进度，用于避免频繁更新
+
+    # 生成步骤进度横幅HTML
+    def make_step_banner(s_pct, s_cur, s_total):
+        return (
+            f'<div style="background:linear-gradient(135deg,#1e293b,#0f172a);'
+            f'border:1.5px solid #6366f1;border-radius:10px;'
+            f'padding:10px 16px;margin:0 0 8px 0;'
+            f'box-shadow:0 4px 16px rgba(99,102,241,.25);">'
+            f'<div style="display:flex;align-items:center;gap:10px;">'
+            f'<span style="font-size:12px;font-weight:700;color:#94a3b8;font-family:Microsoft YaHei,sans-serif;">步骤进度</span>'
+            f'<span style="font-size:13px;font-weight:800;color:#e2e8f0;font-family:Microsoft YaHei,sans-serif;">'
+            f'{s_pct}% ({s_cur}/{s_total})</span>'
+            f'</div></div>'
+        )
 
     while True:
         line = proc.stdout.readline()
@@ -615,15 +630,17 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress()):
                 if frame_progress:
                     prog = 0.12 + (frame_progress[0] / 100.0) * 0.76
                     f_pct, f_cur, f_total = frame_progress
-                    # 如果有步骤进度，一起显示
-                    if step_progress:
-                        s_pct, s_cur, s_total = step_progress
-                        desc = f"生成帧画面 {f_pct}%({f_cur}/{f_total}) | 步骤 {s_pct}%({s_cur}/{s_total}) - {prog*100:.1f}%"
-                    else:
-                        desc = f"生成帧画面 {f_pct}%({f_cur}/{f_total}) - {prog*100:.1f}%"
+                    desc = f"生成帧画面 {f_pct}%({f_cur}/{f_total}) - {prog*100:.1f}%"
                 else:
                     prog = 0.12 + (pct / 100.0) * 0.76
                     desc = f"生成帧画面 {pct}%({cur}/{total}) - {prog*100:.1f}%"
+
+                # 只在步骤进度变化时才更新横幅（避免闪烁）
+                if step_progress and step_progress != last_step_display:
+                    s_pct, s_cur, s_total = step_progress
+                    banner_html = make_step_banner(s_pct, s_cur, s_total)
+                    last_step_display = step_progress
+                    yield None, "", gr.update(value=banner_html, visible=True)
         elif stage == "后处理":
             prog = 0.90 + (pct / 100.0) * 0.06
             desc = f"后处理 {pct}%  ({cur}/{total})"
@@ -659,7 +676,9 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress()):
             json.dump(hist[:50], hf, ensure_ascii=False)
     except Exception:
         pass
-    return out, "✅ 口型同步完成"
+
+    # 最后返回结果，隐藏横幅
+    yield out, "✅ 口型同步完成", gr.update(value='', visible=False)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -960,25 +979,38 @@ def build_ui():
 
         # 口型同步
         def ls_wrap(video, auto_a, custom_a, progress=gr.Progress()):
-            audio  = custom_a if custom_a else auto_a
-            out, _ = run_latentsync(video, audio, progress)
-            log_html = _make_log(True, "口型同步完成 — " + os.path.basename(out))
-            try:
-                ps = (
-                    "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
-                    "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom,ContentType=WindowsRuntime]|Out-Null;"
-                    "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(2);"
-                    "$x.GetElementsByTagName('text')[0].AppendChild($x.CreateTextNode('织梦AI — 合成完成'))|Out-Null;"
-                    "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('视频口型同步已完成！'))|Out-Null;"
-                    "$n=[Windows.UI.Notifications.ToastNotification]::new($x);"
-                    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('织梦AI').Show($n);"
-                )
-                subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", ps],
-                                 creationflags=subprocess.CREATE_NO_WINDOW,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
-            return out, log_html, gr.update(value='', visible=False)
+            audio = custom_a if custom_a else auto_a
+
+            # 调用生成器函数
+            final_result = None
+            for result in run_latentsync(video, audio, progress):
+                if result[0] is None:
+                    # 中间状态：只更新步骤进度横幅
+                    yield None, "", result[2]
+                else:
+                    # 最终结果
+                    final_result = result
+                    break
+
+            if final_result:
+                out = final_result[0]
+                log_html = _make_log(True, "口型同步完成 — " + os.path.basename(out))
+                try:
+                    ps = (
+                        "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
+                        "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom,ContentType=WindowsRuntime]|Out-Null;"
+                        "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(2);"
+                        "$x.GetElementsByTagName('text')[0].AppendChild($x.CreateTextNode('织梦AI — 合成完成'))|Out-Null;"
+                        "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('视频口型同步已完成！'))|Out-Null;"
+                        "$n=[Windows.UI.Notifications.ToastNotification]::new($x);"
+                        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('织梦AI').Show($n);"
+                    )
+                    subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", ps],
+                                     creationflags=subprocess.CREATE_NO_WINDOW,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                yield out, log_html, final_result[2]
 
         ls_btn.click(ls_wrap,
             inputs=[video_input, audio_for_ls, custom_audio],
