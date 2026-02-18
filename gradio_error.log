@@ -1,0 +1,20 @@
+[MODEL] Loading IndexTTS2...
+>> GPT weights restored from: D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\checkpoints\gpt.pth
+GPT2InferenceModel has generative capabilities, as `prepare_inputs_for_generation` is explicitly overwritten. However, it doesn't directly inherit from `GenerationMixin`. From \U0001f449v4.50\U0001f448 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+>> Failed to load custom CUDA kernel for BigVGAN. Falling back to torch.
+TypeError("unsupported operand type(s) for +: 'NoneType' and 'str'")
+>> semantic_codec weights restored from: D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\checkpoints\hf_cache\models--amphion--MaskGCT\snapshots\265c6cef07625665d0c28d2faafb1415562379dc\semantic_codec\model.safetensors
+cfm loaded
+length_regulator loaded
+gpt_layer loaded
+>> s2mel weights restored from: D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\checkpoints\s2mel.pth
+>> campplus_model weights restored from: D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\checkpoints\hf_cache\models--funasr--campplus\snapshots\fb71fe990cbf6031ae6987a2d76fe64f94377b7e\campplus_cn_common.bin
+Loading weights from nvidia/bigvgan_v2_22khz_80band_256x
+Removing weight norm...
+>> bigvgan weights restored from: nvidia/bigvgan_v2_22khz_80band_256x
+>> TextNormalizer loaded
+>> bpe model loaded from: D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\checkpoints\bpe.model
+[MODEL] OK
