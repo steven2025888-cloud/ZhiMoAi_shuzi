@@ -1,437 +1,555 @@
-﻿# -*- coding: utf-8 -*-
-import os, sys, time, gc, subprocess, traceback, shutil, threading
-from pathlib import Path
+# -*- coding: utf-8 -*-
+import os, sys, time, subprocess, traceback, shutil, re, json
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INDEXTTS_DIR = os.path.join(BASE_DIR, "IndexTTS2-SonicVale")
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+INDEXTTS_DIR  = os.path.join(BASE_DIR, "IndexTTS2-SonicVale")
 LATENTSYNC_DIR = os.path.join(BASE_DIR, "LatentSync")
-OUTPUT_DIR = os.path.join(BASE_DIR, "unified_outputs")
+OUTPUT_DIR    = os.path.join(BASE_DIR, "unified_outputs")
+HISTORY_FILE  = os.path.join(OUTPUT_DIR, "history.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 HF_CACHE_DIR = os.path.abspath(os.path.join(INDEXTTS_DIR, "checkpoints", "hf_cache"))
 os.makedirs(HF_CACHE_DIR, exist_ok=True)
-os.environ['HF_HUB_CACHE'] = HF_CACHE_DIR
-os.environ['HF_HOME'] = HF_CACHE_DIR
+os.environ['HF_HUB_CACHE']          = HF_CACHE_DIR
+os.environ['HF_HOME']               = HF_CACHE_DIR
 os.environ['HUGGINGFACE_HUB_CACHE'] = HF_CACHE_DIR
-os.environ['TRANSFORMERS_CACHE'] = HF_CACHE_DIR
-os.environ['TRANSFORMERS_OFFLINE'] = '1'
-os.environ['HF_HUB_OFFLINE'] = '1'
+os.environ['TRANSFORMERS_CACHE']    = HF_CACHE_DIR
+os.environ['TRANSFORMERS_OFFLINE']  = '1'
+os.environ['HF_HUB_OFFLINE']        = '1'
 
 LATENTSYNC_PYTHON = os.path.join(LATENTSYNC_DIR, "latents_env", "python.exe")
-LATENTSYNC_CKPT = os.path.join(LATENTSYNC_DIR, "checkpoints", "latentsync_unet.pt")
+LATENTSYNC_CKPT   = os.path.join(LATENTSYNC_DIR, "checkpoints", "latentsync_unet.pt")
 LATENTSYNC_CONFIG = os.path.join(LATENTSYNC_DIR, "configs", "unet", "stage2.yaml")
 
 sys.path.insert(0, INDEXTTS_DIR)
 sys.path.insert(0, os.path.join(INDEXTTS_DIR, "indextts"))
 
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
+import warnings; warnings.filterwarnings("ignore")
 import gradio as gr
-import torch
-
-# 抑制 asyncio 和 h11 的连接错误日志（Edge 视频预览断开连接是正常的）
 import logging
 logging.getLogger("h11").setLevel(logging.CRITICAL)
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
 tts = None
-GRADIO_PORT = 7870
+
+APP_NAME = "织梦AI大模型"
+APP_SUB  = "AI语音克隆 · 智能口型同步 · 专业级解决方案"
 
 
+# ══════════════════════════════════════════════════════════════
+#  安全 print（防 GBK 终端崩溃）
+# ══════════════════════════════════════════════════════════════
+def safe_print(msg: str):
+    try:
+        sys.stdout.write(msg + "\n"); sys.stdout.flush()
+    except Exception:
+        try:
+            sys.stdout.buffer.write((msg + "\n").encode("utf-8", errors="replace"))
+            sys.stdout.buffer.flush()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════
+#  页面 JS
+# ══════════════════════════════════════════════════════════════
+REMOVE_FOOTER_JS = """
+() => {
+    const S=['footer','.footer','.built-with','#footer','div[class*="footer"]',
+        '.show-api','.api-docs','a[href*="gradio.app"]','a[href*="huggingface"]',
+        'button[aria-label="Settings"]','.hamburger-menu','span.version'].join(',');
+    const rm=()=>document.querySelectorAll(S).forEach(e=>{e.style.cssText='display:none!important';try{e.remove()}catch(_){}});
+    rm(); new MutationObserver(rm).observe(document.documentElement,{childList:true,subtree:true});
+
+    const PREF='zdai_pref';
+    document.body.insertAdjacentHTML('beforeend',`
+      <div id="zdai-cm" style="display:none;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;">
+        <div style="position:absolute;inset:0;background:rgba(15,23,42,.5);backdrop-filter:blur(4px)" onclick="window._zm.hide()"></div>
+        <div style="position:relative;background:#fff;border-radius:18px;padding:32px 28px 24px;width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.18)">
+          <div style="font-size:36px;margin-bottom:8px">💡</div>
+          <div style="font-size:17px;font-weight:800;color:#0f172a;margin-bottom:6px">关闭 织梦AI</div>
+          <div style="font-size:13px;color:#64748b;margin-bottom:20px;line-height:1.6">最小化后程序在通知区域运行，不占用额外内存。</div>
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <button onclick="window._zm.minimize()" style="flex:1;padding:11px;border-radius:9px;border:1px solid #e2e8f0;background:#f8fafc;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">⊟ 最小化到通知区域</button>
+            <button onclick="window._zm.exit()" style="flex:1;padding:11px;border-radius:9px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">✕ 退出程序</button>
+          </div>
+          <label style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:#94a3b8;cursor:pointer">
+            <input type="checkbox" id="zdai-na" style="accent-color:#6366f1"> <span>记住选择，不再提示</span>
+          </label>
+        </div>
+      </div>`);
+
+    window._zm={
+        show(){const p=localStorage.getItem(PREF);if(p==='min'){this.minimize();return;}if(p==='exit'){this.exit();return;}document.getElementById('zdai-cm').style.display='flex';},
+        hide(){document.getElementById('zdai-cm').style.display='none';},
+        _save(v){if(document.getElementById('zdai-na')?.checked)localStorage.setItem(PREF,v);},
+        minimize(){this._save('min');this.hide();try{window.pywebview.api.minimize_to_tray();}catch(_){}},
+        exit(){this._save('exit');this.hide();try{window.pywebview.api.close_app();}catch(_){window.close();}}
+    };
+
+    if('Notification' in window && Notification.permission==='default') Notification.requestPermission();
+    window._zdaiNotify=(t,b)=>{
+        const go=()=>new Notification(t,{body:b});
+        if(Notification.permission==='granted')go();
+        else if(Notification.permission!=='denied')Notification.requestPermission().then(p=>{if(p==='granted')go();});
+    };
+}
+"""
+
+# ══════════════════════════════════════════════════════════════
+#  CSS
+# ══════════════════════════════════════════════════════════════
+CUSTOM_CSS = """
+footer,.footer,.built-with,#footer,.show-api,.api-docs,
+a[href*="gradio.app"],a[href*="huggingface"],
+button[aria-label="Settings"],.hamburger-menu,span.version
+{display:none!important;height:0!important;overflow:hidden!important;}
+.topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 24px;height:54px;
+ display:flex;align-items:center;justify-content:space-between;
+ box-shadow:0 1px 4px rgba(0,0,0,.06);position:sticky;top:0;z-index:100;}
+.topbar-brand{display:flex;align-items:center;gap:10px;}
+.topbar-logo{width:34px;height:34px;border-radius:9px;
+ background:linear-gradient(135deg,#6366f1,#8b5cf6);
+ display:flex;align-items:center;justify-content:center;
+ font-size:16px;font-weight:900;color:#fff;}
+.topbar-name{font-size:16px;font-weight:800;color:#0f172a;}
+.topbar-sub{font-size:11px;color:#94a3b8;}
+.badge-ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;
+ border-radius:20px;padding:3px 12px;font-size:11px;font-weight:600;}
+.badge-err{background:#fff1f2;border:1px solid #fecdd3;color:#be123c;
+ border-radius:20px;padding:3px 12px;font-size:11px;font-weight:600;}
+.workspace{padding:14px 16px 18px!important;gap:12px!important;}
+.panel{background:#fff!important;border:1px solid #e2e8f0!important;
+ border-radius:12px!important;padding:16px 14px!important;
+ box-shadow:0 1px 4px rgba(0,0,0,.05)!important;}
+.panel-head{display:flex;align-items:center;gap:6px;
+ font-size:13px;font-weight:700;color:#0f172a;
+ border-bottom:1px solid #f1f5f9;padding-bottom:10px;margin-bottom:12px;}
+.step-chip{width:22px;height:22px;border-radius:6px;
+ background:linear-gradient(135deg,#6366f1,#8b5cf6);
+ color:#fff;font-size:11px;font-weight:700;flex-shrink:0;
+ display:inline-flex;align-items:center;justify-content:center;}
+.divider{border:none;border-top:1px solid #f1f5f9;margin:10px 0;}
+.status-ok{color:#15803d!important;font-size:12px!important;font-weight:500;}
+.status-err{color:#dc2626!important;font-size:12px!important;font-weight:500;}
+.op-log-wrap{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+ padding:8px 12px;min-height:48px;max-height:130px;overflow-y:auto;}
+.op-log-item{display:flex;gap:8px;padding:4px 0;
+ border-bottom:1px solid #f1f5f9;font-size:12px;color:#334155;line-height:1.5;}
+.op-log-item:last-child{border-bottom:none;}
+.op-log-time{color:#94a3b8;font-size:11px;flex-shrink:0;}
+.op-log-ok{color:#16a34a;font-weight:700;flex-shrink:0;}
+.op-log-err{color:#dc2626;font-weight:700;flex-shrink:0;}
+input[type=range]{accent-color:#6366f1!important;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+"""
+
+
+# ══════════════════════════════════════════════════════════════
+#  模型加载
+# ══════════════════════════════════════════════════════════════
 def auto_load_model():
     global tts
     model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
     if not os.path.exists(model_dir):
-        print("[ERR] model dir not found: " + model_dir)
-        return
-    for f in ["bpe.model", "gpt.pth", "config.yaml", "s2mel.pth", "wav2vec2bert_stats.pt"]:
-        if not os.path.exists(os.path.join(model_dir, f)):
-            print("[ERR] missing: " + f)
-            return
+        safe_print("[ERR] model dir not found"); return
     original_cwd = os.getcwd()
     os.chdir(INDEXTTS_DIR)
     try:
-        print("[MODEL] Loading IndexTTS2...")
+        safe_print("[MODEL] Loading IndexTTS2...")
         from indextts.infer_v2 import IndexTTS2
-        tts = IndexTTS2(model_dir=model_dir, cfg_path=os.path.join(model_dir, "config.yaml"), use_fp16=True)
-        print("[MODEL] OK (v" + str(tts.model_version or "1.0") + ")")
+        tts = IndexTTS2(model_dir=model_dir,
+                        cfg_path=os.path.join(model_dir, "config.yaml"), use_fp16=True)
+        safe_print("[MODEL] OK")
     except Exception as e:
-        print("[MODEL] FAIL: " + str(e))
-        traceback.print_exc()
+        safe_print("[MODEL] FAIL: " + str(e)); traceback.print_exc()
     finally:
         os.chdir(original_cwd)
 
 
-def generate_speech(text, prompt_audio, emo_mode, emo_audio, emo_weight,
-                    vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8, progress=gr.Progress()):
+# ══════════════════════════════════════════════════════════════
+#  语音合成
+# ══════════════════════════════════════════════════════════════
+def generate_speech(text, prompt_audio, top_p, top_k, temperature, num_beams, 
+                   repetition_penalty, max_mel_tokens, progress=gr.Progress()):
     global tts
-    if tts is None:
-        raise gr.Error("\u6a21\u578b\u672a\u52a0\u8f7d\uff01")
-    if not text or not text.strip():
-        raise gr.Error("\u8bf7\u8f93\u5165\u6587\u672c\uff01")
-    if prompt_audio is None:
-        raise gr.Error("\u8bf7\u4e0a\u4f20\u53c2\u8003\u97f3\u9891\uff01")
-    timestamp = int(time.time())
-    output_path = os.path.join(OUTPUT_DIR, "tts_" + str(timestamp) + ".wav")
-    original_cwd = os.getcwd()
-    os.chdir(INDEXTTS_DIR)
+    if tts is None:    raise gr.Error("模型未加载，请等待初始化完成")
+    if not text.strip(): raise gr.Error("请输入要合成的文本内容")
+    if prompt_audio is None: raise gr.Error("请上传参考音频文件")
+
+    ts = int(time.time())
+    out = os.path.join(OUTPUT_DIR, f"tts_{ts}.wav")
+    cwd = os.getcwd(); os.chdir(INDEXTTS_DIR)
     try:
-        tts.gr_progress = progress
-        progress(0.1, desc="\u6b63\u5728\u5408\u6210...")
-        kwargs = {"do_sample": True, "top_p": 0.8, "top_k": 30, "temperature": 0.8,
-                  "length_penalty": 0.0, "num_beams": 3, "repetition_penalty": 10.0, "max_mel_tokens": 1500}
-        emo_ref = None
-        vec = None
-        if emo_mode == "\u4f7f\u7528\u60c5\u611f\u53c2\u8003\u97f3\u9891" and emo_audio:
-            emo_ref = emo_audio
-        elif emo_mode == "\u4f7f\u7528\u60c5\u611f\u5411\u91cf\u63a7\u5236":
-            vec = [vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8]
-            vec = tts.normalize_emo_vec(vec, apply_bias=True)
-        tts.infer(spk_audio_prompt=prompt_audio, text=text, output_path=output_path,
-                  emo_audio_prompt=emo_ref, emo_alpha=emo_weight, emo_vector=vec, use_emo_text=False, **kwargs)
-        os.chdir(original_cwd)
-        progress(1.0, desc="\u5b8c\u6210")
-        return output_path, "\u2705 \u8bed\u97f3\u5408\u6210\u5b8c\u6210\uff01", output_path
+        progress(0.1, desc="正在合成语音...")
+        kw = dict(
+            do_sample=True, 
+            top_p=float(top_p), 
+            top_k=int(top_k), 
+            temperature=float(temperature),
+            length_penalty=0.0, 
+            num_beams=int(num_beams), 
+            repetition_penalty=float(repetition_penalty), 
+            max_mel_tokens=int(max_mel_tokens)
+        )
+        tts.infer(spk_audio_prompt=prompt_audio, text=text,
+                  output_path=out, use_emo_text=False, **kw)
+        os.chdir(cwd); progress(1.0, desc="合成完成")
+        return out, "✅ 语音合成完成", out
     except Exception as e:
-        os.chdir(original_cwd)
-        traceback.print_exc()
-        raise gr.Error("TTS \u5931\u8d25: " + str(e))
+        os.chdir(cwd); traceback.print_exc()
+        raise gr.Error("TTS 失败: " + str(e))
 
 
-def setup_latentsync_env():
-    ckd = os.path.join(os.path.expanduser("~"), ".cache", "torch", "hub", "checkpoints")
-    os.makedirs(ckd, exist_ok=True)
-    for fn in ["2DFAN4-cd938726ad.zip", "s3fd-619a316812.pth"]:
-        dst = os.path.join(ckd, fn)
-        src = os.path.join(LATENTSYNC_DIR, "checkpoints", "auxiliary", fn)
-        if not os.path.exists(dst) and os.path.exists(src):
-            try:
-                os.symlink(src, dst)
-            except OSError:
-                shutil.copy2(src, dst)
-
-
-def run_latentsync(video_path, audio_path, progress=gr.Progress()):
-    if not video_path:
-        raise gr.Error("\u8bf7\u4e0a\u4f20\u89c6\u9891\uff01")
-    if not audio_path:
-        raise gr.Error("\u8bf7\u5148\u751f\u6210\u8bed\u97f3\u6216\u4e0a\u4f20\u97f3\u9891\uff01")
-    
-    # 验证视频文件是否完整可读
-    if not os.path.exists(video_path):
-        raise gr.Error("\u89c6\u9891\u6587\u4ef6\u672a\u627e\u5230\uff01\u8bf7\u7b49\u5f85\u4e0a\u4f20\u5b8c\u6210\u3002")
+# ══════════════════════════════════════════════════════════════
+#  进度行解析
+# ══════════════════════════════════════════════════════════════
+def parse_progress_line(line: str):
     try:
-        file_size = os.path.getsize(video_path)
-        if file_size < 1024:
-            raise gr.Error("\u89c6\u9891\u6587\u4ef6\u592a\u5c0f\uff0c\u4e0a\u4f20\u53ef\u80fd\u672a\u5b8c\u6210\u3002\u8bf7\u91cd\u8bd5\u3002")
-    except Exception as e:
-        raise gr.Error("\u65e0\u6cd5\u8bfb\u53d6\u89c6\u9891\u6587\u4ef6: " + str(e))
-    
-    if not os.path.exists(LATENTSYNC_PYTHON):
-        raise gr.Error("LatentSync Python \u672a\u627e\u5230: " + LATENTSYNC_PYTHON)
-    if not os.path.exists(LATENTSYNC_CKPT):
-        raise gr.Error("LatentSync \u6a21\u578b\u672a\u627e\u5230: " + LATENTSYNC_CKPT)
-    
-    timestamp = int(time.time())
-    
-    # 复制文件到安全目录，避免 Gradio 临时文件被清理
-    safe_video = os.path.join(OUTPUT_DIR, "input_video_" + str(timestamp) + os.path.splitext(video_path)[1])
-    safe_audio = os.path.join(OUTPUT_DIR, "input_audio_" + str(timestamp) + os.path.splitext(audio_path)[1])
-    try:
-        shutil.copy2(video_path, safe_video)
-        shutil.copy2(audio_path, safe_audio)
-    except Exception as e:
-        raise gr.Error("\u590d\u5236\u8f93\u5165\u6587\u4ef6\u5931\u8d25: " + str(e))
-    
-    output_path = os.path.join(OUTPUT_DIR, "lipsync_" + str(timestamp) + ".mp4")
-    setup_latentsync_env()
-    progress(0.05, desc="\u51c6\u5907\u4e2d...")
-    env = os.environ.copy()
-    ls_env = os.path.join(LATENTSYNC_DIR, "latents_env")
-    ffmpeg_path = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-    env["HF_HOME"] = os.path.join(LATENTSYNC_DIR, "huggingface")
-    env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
-    env["PATH"] = ls_env + ";" + os.path.join(ls_env, "Library", "bin") + ";" + ffmpeg_path + ";" + env.get("PATH", "")
-    env.pop("TRANSFORMERS_CACHE", None)
-    env.pop("HUGGINGFACE_HUB_CACHE", None)
-    env.pop("TRANSFORMERS_OFFLINE", None)
-    env.pop("HF_HUB_OFFLINE", None)
-    cmd = [LATENTSYNC_PYTHON, "-m", "scripts.inference",
-           "--unet_config_path", LATENTSYNC_CONFIG, "--inference_ckpt_path", LATENTSYNC_CKPT,
-           "--video_path", safe_video, "--audio_path", safe_audio, "--video_out_path", output_path,
-           "--inference_steps", "20", "--guidance_scale", "1.5", "--seed", "1247"]
-    print("[LatentSync] " + " ".join(cmd))
-    progress(0.1, desc="\u6b63\u5728\u751f\u6210\u53e3\u578b\u540c\u6b65\u89c6\u9891...")
+        if "|" not in line or "/" not in line: return None
+        low = line.lower()
+        if   "preprocess" in low or "loading" in low: stage = "预处理"
+        elif "inference"  in low:                     stage = "推理"
+        elif "postprocess" in low or "saving" in low: stage = "后处理"
+        else:                                          stage = "生成"
+        mp = re.search(r'(\d+)%', line)
+        ms = re.search(r'(\d+)/(\d+)', line)
+        if not mp or not ms: return None
+        return stage, int(mp.group(1)), int(ms.group(1)), int(ms.group(2))
+    except Exception:
+        return None
+
+
+# ══════════════════════════════════════════════════════════════
+#  视频格式转换
+# ══════════════════════════════════════════════════════════════
+def convert_video_for_browser(video_path, progress=gr.Progress()):
+    if not video_path or not os.path.exists(video_path): return None
+    ffmpeg = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin", "ffmpeg.exe")
+    if not os.path.exists(ffmpeg): return video_path
+    ts  = int(time.time())
+    out = os.path.join(OUTPUT_DIR, f"converted_{ts}.mp4")
+    progress(0.2, desc="转换视频格式...")
     try:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   text=True, cwd=LATENTSYNC_DIR, env=env,
-                                   encoding="utf-8", errors="replace", creationflags=flags)
-        log_lines = []
-        
-        while True:
-            line = process.stdout.readline()
-            if not line and process.poll() is not None:
-                break
-            if line:
-                line = line.strip()
-                log_lines.append(line)
-                print("[LS] " + line)
-                
-                # 解析详细进度信息，格式如: "Doing inference...:  55%|██████    | 29/53"
-                if "|" in line and "/" in line:
-                    try:
-                        # 提取阶段描述
-                        stage_desc = "\u63a8\u7406\u4e2d"
-                        if "preprocess" in line.lower() or "loading" in line.lower():
-                            stage_desc = "\u9884\u5904\u7406"
-                        elif "inference" in line.lower() or "doing inference" in line.lower():
-                            stage_desc = "\u63a8\u7406\u4e2d"
-                        elif "postprocess" in line.lower() or "saving" in line.lower():
-                            stage_desc = "\u540e\u5904\u7406"
-                        
-                        # 提取百分比
-                        percent_str = line.split("|")[0].split(":")[-1].strip().replace("%", "")
-                        percent = int(percent_str)
-                        
-                        # 提取当前步数/总步数
-                        steps_part = line.split("|")[-1].strip()
-                        if "/" in steps_part:
-                            current_step = steps_part.split("/")[0].strip()
-                            total_steps = steps_part.split("/")[1].split()[0].strip()
-                            
-                            # 计算总进度（假设推理阶段占主要时间 30-90%）
-                            total_progress = 0.3 + (percent / 100.0) * 0.6
-                            
-                            # 显示详细信息
-                            desc = f"{stage_desc} {percent}% ({current_step}/{total_steps})"
-                            progress(total_progress, desc=desc)
-                    except Exception as e:
-                        # 如果解析失败，尝试简单的百分比提取
-                        if "%" in line:
-                            try:
-                                pct = float(line.split("%")[0].split()[-1])
-                                progress(0.3 + (pct / 100.0) * 0.6, desc=f"\u5904\u7406\u4e2d {int(pct)}%")
-                            except Exception:
-                                pass
-                # 检测其他阶段关键词
-                elif "loading" in line.lower() or "preparing" in line.lower():
-                    progress(0.15, desc="\u52a0\u8f7d\u6a21\u578b...")
-                elif "saving" in line.lower() or "writing" in line.lower():
-                    progress(0.92, desc="\u4fdd\u5b58\u89c6\u9891...")
-        
-        if process.wait() != 0:
-            raise gr.Error("LatentSync \u5931\u8d25:\n" + "\n".join(log_lines[-10:]))
-        if os.path.exists(output_path):
-            progress(1.0, desc="\u5b8c\u6210")
-            # 清理临时输入文件
-            try:
-                if os.path.exists(safe_video):
-                    os.remove(safe_video)
-                if os.path.exists(safe_audio):
-                    os.remove(safe_audio)
-            except Exception:
-                pass
-            return output_path, "\u2705 \u53e3\u578b\u540c\u6b65\u89c6\u9891\u751f\u6210\u5b8c\u6210\uff01"
-        else:
-            raise gr.Error("\u8f93\u51fa\u6587\u4ef6\u672a\u627e\u5230")
+        p = subprocess.Popen(
+            [ffmpeg, "-i", video_path, "-c:v", "libx264", "-preset", "ultrafast",
+             "-crf", "23", "-c:a", "aac", "-b:a", "128k",
+             "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-y", out],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+        progress(0.6, desc="转换中...")
+        p.communicate(timeout=120)
+        progress(1.0, desc="视频就绪")
+        return out if p.returncode == 0 and os.path.exists(out) else video_path
+    except Exception:
+        return video_path
+
+
+# ══════════════════════════════════════════════════════════════
+#  口型同步
+# ══════════════════════════════════════════════════════════════
+def run_latentsync(video_path, audio_path, progress=gr.Progress()):
+    if not video_path:                      raise gr.Error("请上传人物视频")
+    if not audio_path:                      raise gr.Error("请选择或上传音频文件")
+    if not os.path.exists(video_path):      raise gr.Error("视频文件不存在，请重新上传")
+    if not os.path.exists(audio_path):      raise gr.Error("音频文件不存在，请重新选择")
+
+    ts   = int(time.time())
+    sv   = os.path.join(OUTPUT_DIR, f"in_v_{ts}{os.path.splitext(video_path)[1]}")
+    sa   = os.path.join(OUTPUT_DIR, f"in_a_{ts}{os.path.splitext(audio_path)[1]}")
+    out  = os.path.join(OUTPUT_DIR, f"lipsync_{ts}.mp4")
+    try:
+        shutil.copy2(video_path, sv); shutil.copy2(audio_path, sa)
+    except Exception as e:
+        raise gr.Error("复制文件失败: " + str(e))
+
+    progress(0.05, desc="初始化中...")
+    env = os.environ.copy()
+    ls_env = os.path.join(LATENTSYNC_DIR, "latents_env")
+    fb     = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
+    env["HF_HOME"]    = os.path.join(LATENTSYNC_DIR, "huggingface")
+    env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
+    env["PATH"]       = ";".join([ls_env, os.path.join(ls_env, "Library", "bin"), fb, env.get("PATH", "")])
+    for k in ("TRANSFORMERS_CACHE","HUGGINGFACE_HUB_CACHE","TRANSFORMERS_OFFLINE","HF_HUB_OFFLINE"):
+        env.pop(k, None)
+
+    cmd = [LATENTSYNC_PYTHON, "-m", "scripts.inference",
+           "--unet_config_path", LATENTSYNC_CONFIG, "--inference_ckpt_path", LATENTSYNC_CKPT,
+           "--video_path", sv, "--audio_path", sa, "--video_out_path", out,
+           "--inference_steps", "20", "--guidance_scale", "1.5", "--seed", "1247"]
+
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, cwd=LATENTSYNC_DIR, env=env,
+                                encoding="utf-8", errors="replace", creationflags=flags, bufsize=1)
     except subprocess.SubprocessError as e:
-        raise gr.Error("\u8fdb\u7a0b\u5931\u8d25: " + str(e))
+        raise gr.Error("启动生成引擎失败: " + str(e))
 
+    last = 0.05
+    progress(0.08, desc="正在加载模型权重...")
 
-def build_ui():
-    custom_css = """
-    .gradio-container {max-width: 100%!important}
-    .step-box {
-        border: 2px solid #e0e0e0;
-        border-radius: 8px;
-        padding: 20px;
-        margin: 10px 0;
-        background: #f8f9fa;
-    }
-    .step-title {
-        font-size: 1.2em;
-        font-weight: bold;
-        color: #2c3e50;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-    }
-    .step-number {
-        background: #4CAF50;
-        color: white;
-        border-radius: 50%;
-        width: 30px;
-        height: 30px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        margin-right: 10px;
-        font-weight: bold;
-    }
-    .video-container video {
-        max-height: 400px;
-        width: auto;
-        margin: 0 auto;
-        display: block;
-    }
-    """
-    
-    with gr.Blocks(css=custom_css, title="TTS + LipSync") as app:
-        gr.Markdown("# 🎙️ 语音合成 + 👄 口型同步工作台")
-        if tts:
-            gr.Markdown("✅ 模型已加载 (v" + str(tts.model_version or "1.0") + ")")
+    while True:
+        line = proc.stdout.readline()
+        if not line and proc.poll() is not None: break
+        if not line: continue
+        line = line.strip()
+        if not line: continue
+        safe_print("[LS] " + line)
+        parsed = parse_progress_line(line)
+        if not parsed: continue
+        stage, pct, cur, total = parsed
+
+        if stage == "预处理":
+            prog = 0.08 + (pct / 100.0) * 0.04
+            desc = f"预处理 {pct}%  ({cur}/{total})"
+        elif stage in ("推理", "生成"):
+            if pct >= 100:
+                prog = 0.89; desc = "推理完成，正在合成视频..."
+            else:
+                prog = 0.12 + (pct / 100.0) * 0.76
+                desc = f"生成帧画面  {pct}%  ({cur}/{total})"
+        elif stage == "后处理":
+            prog = 0.90 + (pct / 100.0) * 0.06
+            desc = f"后处理 {pct}%  ({cur}/{total})"
         else:
-            gr.Markdown("❌ 模型未加载")
-        
-        with gr.Row(equal_height=False):
-            # 左侧：语音合成
-            with gr.Column(scale=1):
-                with gr.Group(elem_classes="step-box"):
-                    gr.HTML('<div class="step-title"><span class="step-number">1</span>语音合成（可选）</div>')
-                    gr.Markdown("💡 如果已有音频，可跳过此步骤，直接在右侧上传")
-                    
-                    input_text = gr.TextArea(
-                        label="📝 输入文本",
-                        placeholder="请输入要合成的文字内容...",
-                        lines=4)
-                    prompt_audio = gr.Audio(
-                        label="🎤 音色参考音频",
-                        sources=["upload", "microphone"],
-                        type="filepath")
-                    
-                    with gr.Accordion("🎭 情感控制（高级选项）", open=False):
-                        emo_mode = gr.Radio(
-                            choices=["与音色参考音频相同", "使用情感参考音频", "使用情感向量控制"],
-                            value="与音色参考音频相同",
-                            label="情感控制方式")
-                        emo_audio = gr.Audio(label="情感参考音频", type="filepath", visible=False)
-                        emo_weight = gr.Slider(
-                            label="情感权重",
-                            minimum=0.0, maximum=1.0, value=0.65,
-                            step=0.01, visible=False)
-                        with gr.Group(visible=False) as vec_group:
-                            gr.Markdown("**情感向量调节**")
-                            with gr.Row():
-                                vec1 = gr.Slider(label="😊 喜", minimum=0, maximum=1, value=0, step=0.05)
-                                vec2 = gr.Slider(label="😠 怒", minimum=0, maximum=1, value=0, step=0.05)
-                                vec3 = gr.Slider(label="😢 哀", minimum=0, maximum=1, value=0, step=0.05)
-                                vec4 = gr.Slider(label="😨 惧", minimum=0, maximum=1, value=0, step=0.05)
-                            with gr.Row():
-                                vec5 = gr.Slider(label="🤢 厌恶", minimum=0, maximum=1, value=0, step=0.05)
-                                vec6 = gr.Slider(label="😔 低落", minimum=0, maximum=1, value=0, step=0.05)
-                                vec7 = gr.Slider(label="😲 惊喜", minimum=0, maximum=1, value=0, step=0.05)
-                                vec8 = gr.Slider(label="😌 平静", minimum=0, maximum=1, value=0, step=0.05)
-                    
-                    gen_btn = gr.Button("🎵 生成语音", variant="primary", size="lg")
-                    tts_status = gr.Markdown("")
-                    output_audio = gr.Audio(label="🔊 生成的语音", interactive=False)
-            
-            # 右侧：口型同步
-            with gr.Column(scale=1):
-                with gr.Group(elem_classes="step-box"):
-                    gr.HTML('<div class="step-title"><span class="step-number">2</span>上传视频和音频</div>')
-                    
-                    video_input = gr.Video(
-                        label="🎬 上传原始视频",
-                        sources=["upload"],
-                        height=400,
-                        show_label=True)
-                    
-                    with gr.Tabs():
-                        with gr.Tab("📥 使用左侧生成的语音"):
-                            audio_for_ls = gr.Audio(
-                                label="自动使用左侧生成的语音",
-                                type="filepath",
-                                interactive=False)
-                        with gr.Tab("📤 上传自定义音频"):
-                            custom_audio = gr.Audio(
-                                label="上传音频文件（支持 WAV/MP3）",
-                                sources=["upload"],
-                                type="filepath")
+            prog = last; desc = f"{stage} {pct}%  ({cur}/{total})"
+
+        prog = max(prog, last); last = prog
+        progress(prog, desc=desc)
+
+    if last < 0.93:
+        progress(0.94, desc="正在写入视频文件...")
+
+    if proc.wait() != 0:
+        raise gr.Error("口型同步生成失败，请检查视频/音频格式是否正确")
+    if not os.path.exists(out):
+        raise gr.Error("输出视频文件未找到，请重试")
+
+    progress(1.0, desc="✅ 生成完成")
+    for f in (sv, sa):
+        try:
+            if os.path.exists(f): os.remove(f)
+        except Exception:
+            pass
+    try:
+        entry = {"time": time.strftime("%Y-%m-%d %H:%M"), "video_path": out,
+                 "size_mb": round(os.path.getsize(out)/1048576, 1)}
+        hist = []
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as hf:
+                hist = json.load(hf)
+        hist.insert(0, entry)
+        with open(HISTORY_FILE, 'w', encoding='utf-8') as hf:
+            json.dump(hist[:50], hf, ensure_ascii=False)
+    except Exception:
+        pass
+    return out, "✅ 口型同步完成"
+
+
+# ══════════════════════════════════════════════════════════════
+#  构建 UI
+# ══════════════════════════════════════════════════════════════
+def build_ui():
+    badge = ('<span class="badge-ok">● 模型已就绪</span>' if tts
+             else '<span class="badge-err">● 模型加载失败</span>')
+
+    with gr.Blocks(
+        title=APP_NAME,
+        css=CUSTOM_CSS,
+        js=REMOVE_FOOTER_JS,
+        theme=gr.themes.Base(),
+    ) as app:
+
+        # ── 顶部导航栏 ──────────────────────────────────────
+        gr.HTML(f"""
+        <div class="topbar">
+          <div class="topbar-brand">
+            <div class="topbar-logo">织</div>
+            <div>
+              <div class="topbar-name">{APP_NAME}</div>
+              <div class="topbar-sub">{APP_SUB}</div>
+            </div>
+          </div>
+          <div>{badge}</div>
+        </div>
+        """)
+
+        # ── 三列工作区 ───────────────────────────────────────
+        with gr.Row(elem_classes="workspace", equal_height=True):
+
+            # ── 列 1：语音合成 ──────────────────────────────
+            with gr.Column(scale=1, elem_classes="panel"):
+                gr.HTML('<div class="panel-head"><span class="step-chip">1</span>语音合成</div>')
+                input_text = gr.TextArea(
+                    label="输入文本",
+                    placeholder="在此粘贴或输入需要合成的文字内容...",
+                    lines=4,
+                )
+                prompt_audio = gr.Audio(
+                    label="参考音频（3-10 秒，用于克隆音色）",
+                    sources=["upload"], type="filepath",
+                )
                 
-                with gr.Group(elem_classes="step-box"):
-                    gr.HTML('<div class="step-title"><span class="step-number">3</span>生成口型同步视频</div>')
-                    ls_btn = gr.Button("🎬 生成口型同步视频", variant="primary", size="lg")
-                    ls_status = gr.Markdown("")
-                    output_video = gr.Video(
-                        label="✨ 生成的视频",
-                        height=400,
-                        show_label=True)
-        def on_emo_change(mode):
-            return (gr.update(visible=(mode == "\u4f7f\u7528\u60c5\u611f\u53c2\u8003\u97f3\u9891")),
-                    gr.update(visible=(mode != "\u4e0e\u97f3\u8272\u53c2\u8003\u97f3\u9891\u76f8\u540c")),
-                    gr.update(visible=(mode == "\u4f7f\u7528\u60c5\u611f\u5411\u91cf\u63a7\u5236")))
-        emo_mode.change(on_emo_change, inputs=[emo_mode], outputs=[emo_audio, emo_weight, vec_group])
-        gen_btn.click(generate_speech,
-                      inputs=[input_text, prompt_audio, emo_mode, emo_audio, emo_weight, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8],
-                      outputs=[output_audio, tts_status, audio_for_ls])
-        
-        def run_lipsync_wrapper(video, auto_audio, custom_audio):
-            # 优先使用自定义音频，如果没有则使用自动生成的音频
-            audio_to_use = custom_audio if custom_audio else auto_audio
-            return run_latentsync(video, audio_to_use)
-        
-        ls_btn.click(run_lipsync_wrapper,
-                     inputs=[video_input, audio_for_ls, custom_audio],
-                     outputs=[output_video, ls_status])
+                # 高级设置（可折叠）
+                with gr.Accordion("⚙️ 高级设置", open=False):
+                    with gr.Row():
+                        top_p = gr.Slider(
+                            label="Top-P (采样概率阈值)",
+                            minimum=0.1, maximum=1.0, value=0.8, step=0.05,
+                            info="控制生成多样性，越高越随机"
+                        )
+                        top_k = gr.Slider(
+                            label="Top-K (候选词数量)",
+                            minimum=1, maximum=100, value=30, step=1,
+                            info="限制候选词数量"
+                        )
+                    with gr.Row():
+                        temperature = gr.Slider(
+                            label="Temperature (温度)",
+                            minimum=0.1, maximum=2.0, value=0.8, step=0.1,
+                            info="控制随机性，越高越随机"
+                        )
+                        num_beams = gr.Slider(
+                            label="Beam Search (束搜索)",
+                            minimum=1, maximum=10, value=3, step=1,
+                            info="束搜索数量，越大质量越好但速度越慢"
+                        )
+                    with gr.Row():
+                        repetition_penalty = gr.Slider(
+                            label="Repetition Penalty (重复惩罚)",
+                            minimum=1.0, maximum=20.0, value=10.0, step=0.5,
+                            info="防止重复，越大越不容易重复"
+                        )
+                        max_mel_tokens = gr.Slider(
+                            label="Max Mel Tokens (最大长度)",
+                            minimum=500, maximum=3000, value=1500, step=100,
+                            info="生成音频的最大长度"
+                        )
+                
+                gen_btn    = gr.Button("🎵  开始语音合成", variant="primary")
+                tts_status = gr.Markdown("", elem_classes="status-ok")
+                output_audio = gr.Audio(label="合成结果", interactive=False)
+
+            # ── 列 2：口型同步 ──────────────────────────────
+            with gr.Column(scale=1, elem_classes="panel"):
+                gr.HTML('<div class="panel-head"><span class="step-chip">2</span>口型同步</div>')
+                video_input = gr.Video(
+                    label="上传人物视频（上传后自动转换格式）",
+                    sources=["upload"], height=220,
+                )
+                video_status = gr.Markdown("", elem_classes="status-ok")
+                gr.HTML('<div class="divider"></div>')
+                with gr.Tabs():
+                    with gr.Tab("使用已合成的语音"):
+                        audio_for_ls = gr.Audio(
+                            label="自动引用第一步合成结果",
+                            type="filepath", interactive=False,
+                        )
+                    with gr.Tab("上传自定义音频"):
+                        custom_audio = gr.Audio(
+                            label="上传音频文件",
+                            sources=["upload"], type="filepath",
+                        )
+                ls_btn    = gr.Button("🚀  生成口型同步视频", variant="primary")
+                ls_status = gr.Markdown("", elem_classes="status-ok")
+
+            # ── 列 3：生成结果 ──────────────────────────────
+            with gr.Column(scale=1, elem_classes="panel"):
+                gr.HTML('<div class="panel-head"><span class="step-chip">3</span>生成结果</div>')
+                with gr.Group(elem_classes="compact-video"):
+                    output_video = gr.Video(label="最终合成视频", height=460)
+
+        # ── 底部：操作日志 + 历史记录 ────────────────────────
+        with gr.Row(elem_classes="workspace"):
+            with gr.Column(scale=1, elem_classes="panel"):
+                gr.HTML('<div class="panel-head"><span class="step-chip">📋</span>操作日志</div>')
+                op_log = gr.HTML(
+                    value='<div class="op-log-wrap"><div class="op-log-item"><span class="op-log-ok">●</span><span class="op-log-msg">系统就绪，等待操作...</span></div></div>'
+                )
+            with gr.Column(scale=2, elem_classes="panel"):
+                gr.HTML('<div class="panel-head"><span class="step-chip">📁</span>合成历史记录</div>')
+                with gr.Row():
+                    refresh_hist_btn = gr.Button("🔄 刷新", variant="secondary", scale=1, min_width=90)
+                    open_folder_btn  = gr.Button("📂 打开文件夹", variant="secondary", scale=1, min_width=120)
+                hist_dropdown = gr.Dropdown(
+                    label="历史合成视频（点击选择直接播放）",
+                    choices=[], value=None, interactive=True,
+                )
+                hist_video = gr.Video(label="视频预览", height=260, interactive=False)
+
+        # ── 事件绑定 ─────────────────────────────────────────
+        _log = []
+
+        def _log_add(ok, msg):
+            import time as _t
+            _log.append({"ok":ok,"t":_t.strftime("%H:%M:%S"),"msg":msg})
+            rows=""
+            for e in list(reversed(_log))[:6]:
+                ic='<span class="op-log-ok">✓</span>' if e["ok"] else '<span class="op-log-err">✗</span>'
+                rows+=f'<div class="op-log-item">{ic}<span class="op-log-time">{e["t"]}</span><span class="op-log-msg">{e["msg"]}</span></div>'
+            return f'<div class="op-log-wrap">{rows}</div>'
+
+        def _hist_choices():
+            if not os.path.exists(HISTORY_FILE): return []
+            try:
+                with open(HISTORY_FILE,'r',encoding='utf-8') as f: h=json.load(f)
+                return [(f'{"✅" if os.path.exists(i["video_path"]) else "❌"}  {i["time"]}  {os.path.basename(i["video_path"])}  ({i["size_mb"]}MB)',i["video_path"]) for i in h]
+            except: return []
+
+        def tts_wrap(text, pa, tp, tk, temp, nb, rp, mmt):
+            r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt)
+            return r[0], _log_add(True,"语音合成完成 — "+os.path.basename(r[0])), r[2]
+
+        gen_btn.click(tts_wrap,
+            inputs=[input_text,prompt_audio,top_p,top_k,temperature,num_beams,repetition_penalty,max_mel_tokens],
+            outputs=[output_audio,op_log,audio_for_ls])
+
+        def auto_convert(video, progress=gr.Progress()):
+            if not video: return None, _log_add(False,"未选择视频")
+            converted = convert_video_for_browser(video, progress)
+            if converted and converted != video and os.path.exists(converted):
+                return converted, _log_add(True,"视频就绪 — "+os.path.basename(converted))
+            return video, _log_add(True,"视频上传完成")
+
+        video_input.upload(auto_convert,
+            inputs=[video_input], outputs=[video_input,op_log])
+
+        def ls_wrap(video, auto_a, custom_a):
+            out, _ = run_latentsync(video, custom_a if custom_a else auto_a)
+            return out, _log_add(True,"口型同步完成 — "+os.path.basename(out)), gr.update(choices=_hist_choices())
+
+        ls_btn.click(ls_wrap,
+            inputs=[video_input,audio_for_ls,custom_audio],
+            outputs=[output_video,op_log,hist_dropdown])
+
+        refresh_hist_btn.click(lambda: gr.update(choices=_hist_choices(),value=None), outputs=[hist_dropdown])
+        open_folder_btn.click(lambda: (subprocess.Popen(["explorer",OUTPUT_DIR],creationflags=subprocess.CREATE_NO_WINDOW) if sys.platform=="win32" else None) or _log_add(True,"已打开文件夹"), outputs=[op_log])
+        hist_dropdown.change(lambda p: p if p and os.path.exists(p) else None, inputs=[hist_dropdown], outputs=[hist_video])
+
     return app
 
 
-def open_app_window(port):
-    edge_paths = [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                  r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"]
-    edge = None
-    for p in edge_paths:
-        if os.path.exists(p):
-            edge = p
-            break
-    if not edge:
-        print("[WARN] Edge not found, opening default browser")
-        import webbrowser
-        webbrowser.open("http://localhost:" + str(port))
-        return
-    url = "http://localhost:" + str(port)
-    try:
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        # 恢复 --app 模式
-        subprocess.Popen([edge, "--app=" + url, "--window-size=1400,900"], creationflags=flags)
-        print("[OK] Edge app window opened")
-    except Exception as e:
-        print("[WARN] Edge failed: " + str(e))
-        import webbrowser
-        webbrowser.open(url)
-
-
+# ══════════════════════════════════════════════════════════════
+#  入口
+# ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=GRADIO_PORT)
-    parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--no-window", action="store_true")
-    args = parser.parse_args()
-    print("=" * 50)
-    print("  TTS + LipSync Workspace")
-    print("=" * 50)
     auto_load_model()
-    setup_latentsync_env()
-    gradio_app = build_ui()
-    gradio_app.queue(default_concurrency_limit=20, max_size=50)
-    if args.no_window:
-        gradio_app.launch(server_name="0.0.0.0", server_port=args.port, inbrowser=True, 
-                         max_file_size="500mb", show_error=True)
-    else:
-        def start_gradio():
-            gradio_app.launch(server_name=args.host, server_port=args.port, inbrowser=False, quiet=True,
-                             max_file_size="500mb", show_error=True)
-        gt = threading.Thread(target=start_gradio, daemon=True)
-        gt.start()
-        time.sleep(3)
-        print("[OK] Gradio on http://localhost:" + str(args.port))
-        open_app_window(args.port)
+    app = build_ui()
+    app.queue()
+    for port in [7870, 7871, 7872, 7873, 7874]:
         try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("Shutting down...")
+            app.launch(
+                server_name="127.0.0.1",
+                server_port=port,
+                inbrowser=False,
+                quiet=True,
+                show_error=True,
+                share=False,
+                show_api=False,
+            )
+            break
+        except OSError:
+            continue
