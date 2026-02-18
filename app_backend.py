@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-# 启动应用_backend.py — 由 启动应用.vbs 通过 pythonw.exe 调用
+# app_backend.py — 由 启动应用.vbs 通过 pythonw.exe 调用
 #
-# 架构（主线程流程）：
+# 架构：
 #   1. 立即显示 tkinter 启动画面
 #   2. 后台线程：启动 Gradio 子进程
 #   3. 后台线程：轮询端口，就绪后通知主线程退出 mainloop
 #   4. 主线程：销毁 tkinter → 调用 webview.start()
-#   5. 任何异常 → 显示在错误窗口，不静默
 
 import os, sys, time, socket, threading, subprocess, signal, traceback
 
@@ -19,161 +18,302 @@ os.environ['https_proxy'] = ''
 
 gradio_process = None
 _cleaned_up    = False
-_gradio_url    = None        # 就绪后由子线程写入
-_root_ref      = [None]      # 保存 tkinter root，供子线程调用 root.after
-_webview_win   = [None]      # pywebview 窗口引用
-_tray_icon     = [None]      # 系统托盘图标引用
+_gradio_url    = None
+_root_ref      = [None]
+_webview_win   = [None]
+_tray_icon     = [None]
+_hwnd          = [None]   # 主窗口 HWND 缓存
 
 
 # ══════════════════════════════════════════════════════════════
-#  pywebview JS API（Gradio 页面 JS 可通过 pywebview.api.xxx() 调用）
+#  工具：查找主窗口 HWND（每次重新枚举）
+# ══════════════════════════════════════════════════════════════
+def _get_main_hwnd():
+    """实时枚举所有窗口，找到织梦AI主窗口句柄"""
+    try:
+        import ctypes
+        result = []
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_size_t, ctypes.POINTER(ctypes.c_int))
+
+        def callback(hwnd, _):
+            try:
+                if not ctypes.windll.user32.IsWindowVisible(hwnd):
+                    return True
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                if length <= 0:
+                    return True
+                buf = ctypes.create_unicode_buffer(length + 1)
+                ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                title = buf.value
+                # 匹配任意包含「织梦AI」或「专业版」的窗口
+                if '织梦AI' in title or '专业版' in title:
+                    result.append(hwnd)
+                    print(f"[HWND] 找到: hwnd={hwnd} title={title!r}")
+            except Exception:
+                pass
+            return True
+
+        ctypes.windll.user32.EnumWindows(WNDENUMPROC(callback), 0)
+        if result:
+            _hwnd[0] = result[0]
+            return result[0]
+    except Exception as e:
+        print(f"[HWND] 枚举失败: {e}")
+    return _hwnd[0]   # 返回上次缓存
+
+
+# ══════════════════════════════════════════════════════════════
+#  JS API（Gradio 页面可调用）
 # ══════════════════════════════════════════════════════════════
 class AppApi:
+
     def minimize_to_tray(self):
-        """最小化到系统通知区域（托盘）"""
-        w = _webview_win[0]
-        if w:
-            try: w.hide()
-            except Exception: pass
-        _start_tray_icon()
+        """最小化到系统托盘"""
+        print("[API] minimize_to_tray 被调用")
+
+        def _do():
+            # 1. 确保托盘图标已启动
+            if not _tray_icon[0]:
+                _start_tray_icon()
+                # 最多等 2 秒让 pystray 消息循环就绪
+                for _ in range(20):
+                    time.sleep(0.1)
+                    if _tray_icon[0]:
+                        break
+            else:
+                print("[API] 托盘图标已存在")
+
+            # 2. 用 ctypes 查找并隐藏窗口
+            hwnd = _get_main_hwnd()
+            print(f"[API] HWND={hwnd}")
+            if hwnd:
+                try:
+                    import ctypes
+                    u32 = ctypes.windll.user32
+                    # 隐藏窗口
+                    u32.ShowWindow(hwnd, 0)           # SW_HIDE = 0
+                    # 从任务栏移除（改为工具窗口样式）
+                    GWL_EXSTYLE      = -20
+                    WS_EX_APPWINDOW  = 0x00040000
+                    WS_EX_TOOLWINDOW = 0x00000080
+                    style = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                    style = (style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
+                    u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+                    print(f"[API] ✓ 窗口已隐藏至托盘 (hwnd={hwnd})")
+                except Exception as e:
+                    print(f"[API] ctypes 失败: {e}")
+                    # 兜底：尝试 pywebview 原生
+                    w = _webview_win[0]
+                    if w:
+                        try: w.minimize()
+                        except Exception: pass
+            else:
+                print("[API] ✗ 未找到主窗口 HWND，等待后重试...")
+                time.sleep(1.5)
+                hwnd2 = _get_main_hwnd()
+                if hwnd2:
+                    try:
+                        import ctypes
+                        ctypes.windll.user32.ShowWindow(hwnd2, 0)
+                        print(f"[API] ✓ 重试成功 (hwnd={hwnd2})")
+                    except Exception as e:
+                        print(f"[API] 重试失败: {e}")
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def close_app(self):
-        """用户确认退出，彻底关闭程序（必须在子线程，否则死锁）"""
-        import threading as _t
-        _t.Thread(target=cleanup, daemon=True).start()
+        """强制退出整个程序"""
+        print("[API] close_app 被调用")
+
+        def _do():
+            try:
+                if _tray_icon[0]:
+                    _tray_icon[0].stop()
+            except Exception:
+                pass
+            try:
+                if gradio_process and gradio_process.pid:
+                    kill_process_tree(gradio_process.pid)
+            except Exception:
+                pass
+            print("[API] os._exit(0)")
+            os._exit(0)
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def send_notification(self, title, body):
+        """发送 Windows Toast 通知"""
+        def _do():
+            try:
+                ps = (
+                    "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null;"
+                    "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType=WindowsRuntime] | Out-Null;"
+                    f"$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+                    f"$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode('{title}')) | Out-Null;"
+                    f"$xml.GetElementsByTagName('text')[1].AppendChild($xml.CreateTextNode('{body}')) | Out-Null;"
+                    "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml);"
+                    "$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('织梦AI');"
+                    "$notifier.Show($toast);"
+                )
+                subprocess.Popen(
+                    ["powershell", "-WindowStyle", "Hidden", "-Command", ps],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            except Exception:
+                pass
+        threading.Thread(target=_do, daemon=True).start()
+
 
 _api = AppApi()
 
 
+# ══════════════════════════════════════════════════════════════
+#  系统托盘图标
+# ══════════════════════════════════════════════════════════════
 def _start_tray_icon():
-    """在后台线程启动系统托盘图标（点击恢复窗口）"""
-    def run():
+    """在守护线程中启动 pystray 托盘图标"""
+    if _tray_icon[0]:
+        print("[TRAY] 已存在，跳过")
+        return
+
+    def _run():
         try:
             import pystray
-            from PIL import Image, ImageDraw
-            # 绘制简单图标（64x64 紫色圆形）
-            img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
-            d = ImageDraw.Draw(img)
-            d.ellipse([4, 4, 60, 60], fill='#6366f1')
-            try:
-                from PIL import ImageFont
-                font = ImageFont.truetype("msyh.ttc", 28)
-                d.text((32, 32), "织", font=font, fill='white', anchor='mm')
-            except Exception:
-                d.text((20, 18), "AI", fill='white')
+            from PIL import Image
+
+            # 加载图标
+            img = None
+            for path in [
+                os.path.join(BASE_DIR, "logo.ico"),
+                os.path.join(BASE_DIR, "logo.jpg"),
+            ]:
+                if os.path.exists(path):
+                    try:
+                        img = Image.open(path).convert("RGBA")
+                        if img.size[0] > 64:
+                            img = img.resize((64, 64), Image.Resampling.LANCZOS)
+                        print(f"[TRAY] 加载图标: {path}")
+                        break
+                    except Exception as e:
+                        print(f"[TRAY] 加载失败 {path}: {e}")
+
+            if img is None:
+                from PIL import ImageDraw
+                img = Image.new("RGBA", (64, 64), (99, 102, 241, 255))
+                ImageDraw.Draw(img).text((18, 18), "AI", fill="white")
+                print("[TRAY] 使用默认图标")
 
             def on_restore(icon, item):
+                print("[TRAY] 恢复窗口")
                 icon.stop()
                 _tray_icon[0] = None
-                w = _webview_win[0]
-                if w:
-                    try: w.show()
-                    except Exception: pass
+                hwnd = _get_main_hwnd()
+                if hwnd:
+                    try:
+                        import ctypes
+                        u32 = ctypes.windll.user32
+                        # 恢复任务栏样式
+                        GWL_EXSTYLE      = -20
+                        WS_EX_APPWINDOW  = 0x00040000
+                        WS_EX_TOOLWINDOW = 0x00000080
+                        style = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                        style = (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW
+                        u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+                        u32.ShowWindow(hwnd, 9)          # SW_RESTORE = 9
+                        u32.SetForegroundWindow(hwnd)
+                        print(f"[TRAY] ✓ 窗口已恢复 (hwnd={hwnd})")
+                    except Exception as e:
+                        print(f"[TRAY] ctypes 恢复失败: {e}")
+                        w = _webview_win[0]
+                        if w:
+                            try: w.show()
+                            except Exception: pass
+                else:
+                    w = _webview_win[0]
+                    if w:
+                        try: w.show()
+                        except Exception as e:
+                            print(f"[TRAY] w.show() 失败: {e}")
 
             def on_exit(icon, item):
                 icon.stop()
                 cleanup()
 
             menu = pystray.Menu(
-                pystray.MenuItem('打开织梦AI', on_restore, default=True),
-                pystray.MenuItem('退出程序', on_exit),
+                pystray.MenuItem("打开织梦AI", on_restore, default=True),
+                pystray.MenuItem("退出程序",   on_exit),
             )
-            icon = pystray.Icon('ZhiMoAI', img, '织梦AI大模型', menu)
+            icon = pystray.Icon("ZhiMoAI", img, "织梦AI大模型", menu)
             _tray_icon[0] = icon
+            print("[TRAY] 启动 icon.run()")
             icon.run()
-        except Exception:
-            # pystray 不可用时降级为普通最小化
-            w = _webview_win[0]
-            if w:
-                try: w.minimize()
-                except Exception: pass
+            print("[TRAY] icon.run() 结束")
+        except ImportError as e:
+            print(f"[TRAY] 缺少依赖（pystray / PIL）: {e}")
+        except Exception as e:
+            print(f"[TRAY] 启动失败: {e}")
+            traceback.print_exc()
 
-    threading.Thread(target=run, daemon=True).start()
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    print(f"[TRAY] 线程已启动 id={t.ident}")
 
 
 # ══════════════════════════════════════════════════════════════
 #  读取 .env 配置
 # ══════════════════════════════════════════════════════════════
 def load_env_config():
-    """读取.env配置文件"""
-    config = {
-        'DEBUG_MODE': False,
-        'SERVER_PORT_START': 7870,
-        'SERVER_PORT_END': 7874
-    }
-    
+    config = {'DEBUG_MODE': False, 'SERVER_PORT_START': 7870, 'SERVER_PORT_END': 7874}
     env_path = os.path.join(BASE_DIR, '.env')
     if os.path.exists(env_path):
         try:
             with open(env_path, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip()
-                        
-                        if key == 'DEBUG_MODE':
-                            config['DEBUG_MODE'] = value.lower() in ('true', '1', 'yes', 'on')
-                        elif key == 'SERVER_PORT_START':
-                            config['SERVER_PORT_START'] = int(value)
-                        elif key == 'SERVER_PORT_END':
-                            config['SERVER_PORT_END'] = int(value)
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    key, value = line.split('=', 1)
+                    key = key.strip(); value = value.strip()
+                    if   key == 'DEBUG_MODE':          config['DEBUG_MODE'] = value.lower() in ('true','1','yes','on')
+                    elif key == 'SERVER_PORT_START':   config['SERVER_PORT_START'] = int(value)
+                    elif key == 'SERVER_PORT_END':     config['SERVER_PORT_END']   = int(value)
         except Exception:
             pass
-    
     return config
 
-# 加载配置
 ENV_CONFIG = load_env_config()
 
 
 # ══════════════════════════════════════════════════════════════
-#  错误弹窗（在 tkinter 窗口中展示，不静默）
+#  错误弹窗
 # ══════════════════════════════════════════════════════════════
 def show_error_window(title: str, msg: str):
-    """销毁当前启动画面，弹出错误详情窗口"""
     import tkinter as tk
     from tkinter import scrolledtext
-
-    # 先关闭已有的 splash
     if _root_ref[0]:
-        try:
-            _root_ref[0].destroy()
-        except Exception:
-            pass
-
-    err_root = tk.Tk()
-    err_root.title(f"VocalSync AI Studio — {title}")
-    err_root.configure(bg="#ffffff")
-    err_root.resizable(True, True)
-
+        try: _root_ref[0].destroy()
+        except Exception: pass
+    err = tk.Tk()
+    err.title(f"织梦AI — {title}")
+    err.configure(bg="#ffffff")
+    err.resizable(True, True)
     W, H = 560, 340
-    sw, sh = err_root.winfo_screenwidth(), err_root.winfo_screenheight()
-    err_root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
-
-    import tkinter as tk
-    # 标题
-    tk.Label(err_root, text=f"⚠  {title}", font=("Microsoft YaHei", 12, "bold"),
-             bg="#ffffff", fg="#dc2626").pack(anchor="w", padx=16, pady=(16, 4))
-
-    # 错误内容（可滚动、可选中复制）
-    box = scrolledtext.ScrolledText(
-        err_root, font=("Consolas", 9), bg="#fef2f2", fg="#7f1d1d",
-        wrap="word", bd=0, relief="flat", padx=8, pady=8,
-    )
-    box.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+    sw, sh = err.winfo_screenwidth(), err.winfo_screenheight()
+    err.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+    tk.Label(err, text=f"⚠  {title}", font=("Microsoft YaHei", 12, "bold"),
+             bg="#ffffff", fg="#dc2626").pack(anchor="w", padx=16, pady=(16,4))
+    box = scrolledtext.ScrolledText(err, font=("Consolas", 9), bg="#fef2f2", fg="#7f1d1d",
+                                    wrap="word", bd=0, relief="flat", padx=8, pady=8)
+    box.pack(fill="both", expand=True, padx=16, pady=(0,8))
     box.insert("end", msg)
     box.configure(state="disabled")
-
-    tk.Label(err_root, text="请截图此错误信息并联系技术支持",
+    tk.Label(err, text="请截图此错误信息并联系技术支持",
              font=("Microsoft YaHei", 9), bg="#ffffff", fg="#94a3b8").pack(pady=(0,4))
-
-    tk.Button(err_root, text="关闭", command=err_root.destroy,
+    tk.Button(err, text="关闭", command=err.destroy,
               font=("Microsoft YaHei", 10), bg="#2563eb", fg="#fff",
-              bd=0, padx=20, pady=6, cursor="hand2").pack(pady=(0, 14))
-
-    err_root.mainloop()
+              bd=0, padx=20, pady=6, cursor="hand2").pack(pady=(0,14))
+    err.mainloop()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -189,7 +329,8 @@ def kill_process_tree(pid):
             pass
     else:
         try:
-            import signal as _s; os.killpg(os.getpgid(pid), _s.SIGKILL)
+            import signal as _s
+            os.killpg(os.getpgid(pid), _s.SIGKILL)
         except Exception:
             pass
 
@@ -204,24 +345,16 @@ def cleanup():
 
 
 # ══════════════════════════════════════════════════════════════
-#  启动 Gradio 子进程（后台线程）
+#  启动 Gradio 子进程
 # ══════════════════════════════════════════════════════════════
 def start_gradio():
     global gradio_process
     python_path = os.path.join(INDEXTTS_DIR, "installer_files", "env", "python.exe")
     script_path = os.path.join(BASE_DIR, "unified_app.py")
-
-    # 路径检查
     if not os.path.exists(python_path):
-        _notify_error("Python 解释器未找到",
-                      f"路径不存在：\n{python_path}\n\n"
-                      "请确认 IndexTTS2-SonicVale\\installer_files\\env\\python.exe 存在。")
-        return
+        _notify_error("Python 解释器未找到", f"路径不存在：\n{python_path}"); return
     if not os.path.exists(script_path):
-        _notify_error("主程序未找到",
-                      f"路径不存在：\n{script_path}\n\n"
-                      "请确认 unified_app.py 与启动脚本在同一目录。")
-        return
+        _notify_error("主程序未找到", f"路径不存在：\n{script_path}"); return
 
     flags = 0
     if sys.platform == "win32":
@@ -247,7 +380,6 @@ def start_gradio():
 
 
 def _notify_error(title: str, detail: str):
-    """从子线程安全地通知主线程显示错误窗口"""
     root = _root_ref[0]
     if root:
         try:
@@ -255,40 +387,35 @@ def _notify_error(title: str, detail: str):
             return
         except Exception:
             pass
-    # 主线程 tkinter 已不可用，直接弹
     show_error_window(title, detail)
 
 
 def _do_show_error(title: str, detail: str):
-    """在主线程中运行：关闭 splash，打开错误窗口"""
     root = _root_ref[0]
     if root:
         try: root.quit()
         except Exception: pass
-    # 稍延迟，让 mainloop 先退出
     threading.Thread(target=lambda: (time.sleep(0.3), show_error_window(title, detail)),
                      daemon=True).start()
 
 
 # ══════════════════════════════════════════════════════════════
-#  轮询端口（后台线程）
+#  轮询端口
 # ══════════════════════════════════════════════════════════════
 def wait_for_gradio(timeout=180):
     global _gradio_url
-    # 使用配置文件中的端口范围
     port_start = ENV_CONFIG['SERVER_PORT_START']
-    port_end = ENV_CONFIG['SERVER_PORT_END']
-    ports = tuple(range(port_start, port_end + 1))
-    
-    deadline = time.time() + timeout
+    port_end   = ENV_CONFIG['SERVER_PORT_END']
+    ports      = tuple(range(port_start, port_end + 1))
+    deadline   = time.time() + timeout
     while time.time() < deadline:
         for port in ports:
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(0.3)
                 if s.connect_ex(('127.0.0.1', port)) == 0:
-                    s.close(); _gradio_url = f'http://127.0.0.1:{port}'
-                    # 通知主线程退出 mainloop
+                    s.close()
+                    _gradio_url = f'http://127.0.0.1:{port}'
                     root = _root_ref[0]
                     if root:
                         try: root.after(0, root.quit)
@@ -298,7 +425,6 @@ def wait_for_gradio(timeout=180):
             except Exception:
                 pass
         time.sleep(0.8)
-    # 超时：用默认 URL 继续
     _gradio_url = f'http://127.0.0.1:{ports[0]}'
     root = _root_ref[0]
     if root:
@@ -307,7 +433,7 @@ def wait_for_gradio(timeout=180):
 
 
 # ══════════════════════════════════════════════════════════════
-#  启动画面状态文案时间表
+#  启动画面
 # ══════════════════════════════════════════════════════════════
 STATUS_TIMELINE = [
     ( 0,  "正在启动运行环境，请稍候..."),
@@ -322,126 +448,105 @@ STATUS_TIMELINE = [
 ]
 
 
-# ══════════════════════════════════════════════════════════════
-#  构建 tkinter 启动画面
-# ══════════════════════════════════════════════════════════════
 def build_splash():
     import tkinter as tk
     from tkinter import ttk
-
     root = tk.Tk()
     _root_ref[0] = root
-
     root.title("织梦AI大模型")
     root.resizable(False, False)
-    root.overrideredirect(True)   # 无系统标题栏
-
+    root.overrideredirect(True)
     W, H = 520, 300
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
     root.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
     root.configure(bg="#0f172a")
     root.attributes("-topmost", True)
 
-    # 外框（模拟阴影）
     outer = tk.Frame(root, bg="#1e293b", bd=0)
     outer.place(x=3, y=3, width=W-3, height=H-3)
-
     card = tk.Frame(root, bg="#ffffff", bd=0)
     card.place(x=0, y=0, width=W-3, height=H-3)
+    tk.Frame(card, bg="#6366f1", height=6).pack(fill="x", side="top")
 
-    # 顶部渐变彩条
-    gradient_frame = tk.Frame(card, bg="#6366f1", height=6)
-    gradient_frame.pack(fill="x", side="top")
-
-    # Logo + 标题
     logo_row = tk.Frame(card, bg="#ffffff")
     logo_row.pack(pady=(28, 0))
 
-    # Logo圆形
-    logo_box = tk.Canvas(logo_row, width=52, height=52, bg="#ffffff", highlightthickness=0)
-    logo_box.pack(side="left", padx=(0, 14))
-    # 绘制渐变圆形
-    logo_box.create_oval(2, 2, 50, 50, fill="#6366f1", outline="#8b5cf6", width=2)
-    logo_box.create_text(26, 26, text="织", font=("Microsoft YaHei", 18, "bold"), fill="#ffffff")
+    logo_path = os.path.join(BASE_DIR, "logo.jpg")
+    if os.path.exists(logo_path):
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(logo_path).resize((52, 52), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            lbl = tk.Label(logo_row, image=photo, bg="#ffffff")
+            lbl.image = photo
+            lbl.pack(side="left", padx=(0, 14))
+        except Exception:
+            _splash_default_logo(logo_row)
+    else:
+        _splash_default_logo(logo_row)
 
     title_col = tk.Frame(logo_row, bg="#ffffff")
     title_col.pack(side="left")
     tk.Label(title_col, text="织梦AI大模型",
-             font=("Microsoft YaHei", 18, "bold"),
-             bg="#ffffff", fg="#0f172a").pack(anchor="w")
+             font=("Microsoft YaHei", 18, "bold"), bg="#ffffff", fg="#0f172a").pack(anchor="w")
     tk.Label(title_col, text="AI语音克隆 · 智能口型同步 · 专业级解决方案",
-             font=("Microsoft YaHei", 9),
-             bg="#ffffff", fg="#64748b").pack(anchor="w", pady=(2, 0))
+             font=("Microsoft YaHei", 9), bg="#ffffff", fg="#64748b").pack(anchor="w", pady=(2,0))
 
-    # 分割线
     tk.Frame(card, bg="#e2e8f0", height=1).pack(fill="x", padx=28, pady=(20, 0))
-
-    # 状态文字（可更新）
     status_var = tk.StringVar(value=STATUS_TIMELINE[0][1])
     tk.Label(card, textvariable=status_var,
              font=("Microsoft YaHei", 10), bg="#ffffff", fg="#6366f1",
              anchor="w").pack(fill="x", padx=32, pady=(16, 8))
 
-    # 进度条
     style = ttk.Style()
     style.theme_use("default")
     style.configure("B.Horizontal.TProgressbar",
                     troughcolor="#e2e8f0", background="#6366f1",
                     bordercolor="#e2e8f0", lightcolor="#6366f1", darkcolor="#6366f1")
     pb = ttk.Progressbar(card, style="B.Horizontal.TProgressbar",
-                         mode="indeterminate", length=456)
+                          mode="indeterminate", length=456)
     pb.pack(padx=32, pady=(0, 18))
     pb.start(8)
 
-    # 底部小字
     tk.Frame(card, bg="#e2e8f0", height=1).pack(fill="x", padx=28)
-    bottom_frame = tk.Frame(card, bg="#ffffff")
-    bottom_frame.pack(pady=12)
-    tk.Label(bottom_frame, text="🔒 本地运行 · 数据安全",
-             font=("Microsoft YaHei", 8), bg="#ffffff", fg="#94a3b8"
-             ).pack(side="left", padx=8)
-    tk.Label(bottom_frame, text="·",
-             font=("Microsoft YaHei", 8), bg="#ffffff", fg="#cbd5e1"
-             ).pack(side="left")
-    tk.Label(bottom_frame, text="v2.0 商业版",
-             font=("Microsoft YaHei", 8), bg="#ffffff", fg="#94a3b8"
-             ).pack(side="left", padx=8)
+    bf = tk.Frame(card, bg="#ffffff")
+    bf.pack(pady=12)
+    for txt in ["🔒 本地运行 · 数据安全", "·", "v2.0 商业版"]:
+        tk.Label(bf, text=txt, font=("Microsoft YaHei", 8),
+                 bg="#ffffff", fg="#94a3b8" if txt != "·" else "#cbd5e1").pack(side="left", padx=6)
 
-    # ── 鼠标拖动移动窗口 ─────────────────────────────────
     _drag = {"x": 0, "y": 0}
-
     def on_press(e):
         _drag["x"] = e.x_root - root.winfo_x()
         _drag["y"] = e.y_root - root.winfo_y()
-
     def on_drag(e):
         root.geometry(f"+{e.x_root - _drag['x']}+{e.y_root - _drag['y']}")
-
-    root.bind("<ButtonPress-1>", on_press)
-    root.bind("<B1-Motion>", on_drag)
-    card.bind("<ButtonPress-1>", on_press)
-    card.bind("<B1-Motion>", on_drag)
-
+    for w in (root, card):
+        w.bind("<ButtonPress-1>", on_press)
+        w.bind("<B1-Motion>",     on_drag)
     return root, status_var
 
 
-# ══════════════════════════════════════════════════════════════
-#  主线程：运行启动画面 + 轮询更新状态文案
-# ══════════════════════════════════════════════════════════════
+def _splash_default_logo(parent):
+    import tkinter as tk
+    c = tk.Canvas(parent, width=52, height=52, bg="#ffffff", highlightthickness=0)
+    c.pack(side="left", padx=(0, 14))
+    c.create_oval(2, 2, 50, 50, fill="#6366f1", outline="#8b5cf6", width=2)
+    c.create_text(26, 26, text="织", font=("Microsoft YaHei", 18, "bold"), fill="#ffffff")
+
+
 def run_splash(root, status_var):
-    start_time   = time.time()
-    tl_idx       = [0]
+    start_time = time.time()
+    tl_idx = [0]
 
     def tick():
         elapsed = time.time() - start_time
-        # 更新文案
         i = tl_idx[0]
         while i + 1 < len(STATUS_TIMELINE) and elapsed >= STATUS_TIMELINE[i+1][0]:
             i += 1
         if i != tl_idx[0]:
             tl_idx[0] = i
             status_var.set(STATUS_TIMELINE[i][1])
-        # Gradio 就绪 → 更新提示后退出
         if _gradio_url is not None:
             status_var.set("✅ 界面服务已就绪，正在打开窗口...")
             root.after(700, root.quit)
@@ -456,29 +561,41 @@ def run_splash(root, status_var):
 #  主入口
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    signal.signal(signal.SIGINT,  lambda s, f: cleanup())
+    # ── 单实例检查 ─────────────────────────────────────────
+    _lock_socket = None
+    try:
+        _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _lock_socket.bind(('127.0.0.1', 17870))
+        print("[LOCK] 单实例锁已获取")
+    except OSError:
+        print("[LOCK] 程序已在运行，激活现有窗口...")
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(('127.0.0.1', 17871))
+            s.send(b'ACTIVATE')
+            s.close()
+        except Exception:
+            pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, lambda s, f: cleanup())
     if hasattr(signal, 'SIGTERM'):
         signal.signal(signal.SIGTERM, lambda s, f: cleanup())
 
-    # ── 后台线程：启动 Gradio & 等待端口 ────────────────
-    threading.Thread(target=start_gradio,   daemon=True).start()
+    threading.Thread(target=start_gradio,    daemon=True).start()
     threading.Thread(target=wait_for_gradio, daemon=True).start()
 
-    # ── 主线程：显示启动画面（含实时状态） ──────────────
     try:
         root, status_var = build_splash()
         run_splash(root, status_var)
         try: root.destroy()
         except Exception: pass
-    except Exception as e:
-        # tkinter 初始化失败也要继续（极少见）
+    except Exception:
         pass
 
-    # ── 确保有 URL ───────────────────────────────────────
     if _gradio_url is None:
         _gradio_url = 'http://127.0.0.1:7870'
 
-    # ── 主线程：启动 WebView ─────────────────────────────
     try:
         import webview
     except ImportError:
@@ -490,41 +607,107 @@ if __name__ == "__main__":
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
             import webview
-        except Exception as e:
-            show_error_window("pywebview 安装失败",
-                              f"自动安装 pywebview 失败：\n\n{traceback.format_exc()}\n\n"
-                              f"请手动运行：\n{python_path} -m pip install pywebview")
+        except Exception:
+            show_error_window("pywebview 安装失败", traceback.format_exc())
             cleanup()
 
     try:
-        # 根据配置决定是否启用开发者工具
         debug_mode = ENV_CONFIG['DEBUG_MODE']
-        
+
+        # logo.ico：优先使用已有 ico，否则从 logo.jpg 生成
+        icon_path = os.path.join(BASE_DIR, "logo.ico")
+        if not os.path.exists(icon_path):
+            logo_jpg = os.path.join(BASE_DIR, "logo.jpg")
+            if os.path.exists(logo_jpg):
+                try:
+                    from PIL import Image
+                    Image.open(logo_jpg).save(icon_path, format='ICO', sizes=[(256,256),(64,64),(32,32),(16,16)])
+                    print(f"[ICON] 已生成 logo.ico")
+                except Exception as e:
+                    print(f"[ICON] 生成 ico 失败: {e}")
+                    icon_path = None
+            else:
+                icon_path = None
+
         window = webview.create_window(
-            '织梦AI大模型 - 专业版', _gradio_url,
+            title='织梦AI大模型 - 专业版',
+            url=_gradio_url,
             js_api=_api,
             width=1480, height=940, resizable=True,
             min_size=(1200, 800), text_select=True, easy_drag=False,
         )
         _webview_win[0] = window
 
-        # ── 拦截窗口 X 关闭按钮：注入 JS 弹出自定义弹窗 ──
-        # 用 closing 事件（返回 False = 阻止关闭）并通过 JS 显示弹窗
-        # 注意：只在弹窗用户主动选"退出"时才真正关闭
+        # 设置窗口图标（异步，窗口创建后）
+        def _set_icon_later():
+            time.sleep(2.0)   # 等待 webview 渲染引擎初始化
+            ico = os.path.join(BASE_DIR, "logo.ico")
+            hwnd = _get_main_hwnd()
+            print(f"[ICON] 设置图标 hwnd={hwnd} ico_exists={os.path.exists(ico) if ico else False}")
+            if hwnd and os.path.exists(ico):
+                try:
+                    import ctypes
+                    u32 = ctypes.windll.user32
+                    WM_SETICON      = 0x0080
+                    IMAGE_ICON      = 1
+                    LR_LOADFROMFILE = 0x10
+                    hs = u32.LoadImageW(None, ico, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+                    hb = u32.LoadImageW(None, ico, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+                    u32.SendMessageW(hwnd, WM_SETICON, 0, hs)   # ICON_SMALL
+                    u32.SendMessageW(hwnd, WM_SETICON, 1, hb)   # ICON_BIG
+                    print(f"[ICON] ✓ 图标设置成功")
+                except Exception as e:
+                    print(f"[ICON] ✗ {e}")
+
+        threading.Thread(target=_set_icon_later, daemon=True).start()
+
+        # 拦截 X 按钮
         def on_closing():
-            try:
-                window.evaluate_js("window._zm && window._zm.show()")
-            except Exception:
-                pass
-            return False   # 阻止默认关闭，交由弹窗决定
+            def _inject():
+                try:
+                    window.evaluate_js("window._zm && window._zm.show()")
+                except Exception:
+                    cleanup()
+            threading.Thread(target=_inject, daemon=True).start()
+            return False
 
         window.events.closing += on_closing
 
-        # 根据配置启用或禁用调试模式
-        if debug_mode:
-            webview.start(debug=True)
-        else:
-            webview.start(debug=False)
+        # 单实例激活监听
+        def activation_listener():
+            try:
+                srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                srv.bind(('127.0.0.1', 17871))
+                srv.listen(1)
+                srv.settimeout(1.0)
+                print("[ACTIVATE] 监听已启动")
+                while True:
+                    try:
+                        conn, _ = srv.accept()
+                        if conn.recv(1024) == b'ACTIVATE':
+                            hwnd = _get_main_hwnd()
+                            if hwnd:
+                                try:
+                                    import ctypes
+                                    ctypes.windll.user32.ShowWindow(hwnd, 9)
+                                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                                except Exception:
+                                    pass
+                            try: window.show()
+                            except Exception: pass
+                        conn.close()
+                    except socket.timeout:
+                        continue
+                    except Exception:
+                        break
+            except Exception as e:
+                print(f"[ACTIVATE] 异常: {e}")
+
+        threading.Thread(target=activation_listener, daemon=True).start()
+
+        webview.start(debug=debug_mode)
+
     except Exception:
         show_error_window("WebView 启动失败", traceback.format_exc())
 

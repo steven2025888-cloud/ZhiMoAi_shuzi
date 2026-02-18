@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip show:*)",
+      "Bash(pip index versions:*)",
+      "Bash(python -m py_compile:*)"
+    ]
+  }
+}
