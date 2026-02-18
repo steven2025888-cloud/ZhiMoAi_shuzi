@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, time, subprocess, traceback, shutil, re, json
+import os, sys, time, subprocess, traceback, shutil, re, json, queue as _queue, threading
 
 # ── 清除代理 ──
 for _k in ('http_proxy','https_proxy','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','all_proxy'):
@@ -305,8 +305,13 @@ a[href*="gradio.app"],a[href*="huggingface"],
 button[aria-label="Settings"],.hamburger-menu,span.version
 {display:none!important;height:0!important;overflow:hidden!important;}
 
+/* ── 全局背景 & 容器 ── */
 body, .gradio-container { background:#f1f5f9!important; }
-.gradio-container { padding-bottom:58px!important; }
+.gradio-container {
+  padding-bottom:54px!important;
+  min-height:0!important;
+  overflow-x:hidden!important;
+}
 
 /* ── 顶栏 ── */
 .topbar {
@@ -342,36 +347,37 @@ body, .gradio-container { background:#f1f5f9!important; }
 }
 
 /* ── 工作区 ── */
-.workspace { padding:16px!important; gap:14px!important; }
+.workspace { padding:12px!important; gap:12px!important; }
 
 /* ── 面板 ── */
 .panel {
   background:#fff!important;
   border:1px solid #e2e8f0!important;
   border-radius:14px!important;
-  padding:18px 16px!important;
+  padding:14px 14px!important;
   box-shadow:0 2px 8px rgba(0,0,0,.05)!important;
   transition:box-shadow .2s!important;
 }
 .panel:hover { box-shadow:0 4px 16px rgba(0,0,0,.09)!important; }
 
-/* ── 面板标题 ── */
+/* ── 面板标题（编号 chip 与标题同行显示）── */
 .panel-head {
   display:flex;align-items:center;gap:8px;
   font-size:14px;font-weight:800;color:#0f172a;
   border-bottom:2px solid #f1f5f9;
-  padding-bottom:12px;margin-bottom:14px;
+  padding-bottom:10px;margin-bottom:12px;
+  line-height:1.3;
 }
 .step-chip {
-  width:24px;height:24px;border-radius:7px;
+  width:24px;height:24px;border-radius:7px;flex-shrink:0;
   background:linear-gradient(135deg,#6366f1,#8b5cf6);
-  color:#fff;font-size:12px;font-weight:800;flex-shrink:0;
+  color:#fff;font-size:12px;font-weight:800;
   display:inline-flex;align-items:center;justify-content:center;
   box-shadow:0 2px 6px rgba(99,102,241,.4);
 }
 
 /* ── 分割线 ── */
-.divider { border:none;border-top:1px solid #f1f5f9;margin:12px 0; }
+.divider { border:none;border-top:1px solid #f1f5f9;margin:10px 0; }
 
 /* ── 状态文字 ── */
 .status-ok  { color:#15803d!important;font-size:12px!important;font-weight:600!important; }
@@ -387,19 +393,61 @@ button.primary    { box-shadow:0 2px 8px rgba(99,102,241,.3)!important; }
 ::-webkit-scrollbar-thumb { background:#cbd5e1;border-radius:4px; }
 ::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
 
-/* ── Gradio 默认撑高修复 ── */
+/* ── Gradio flex 高度修复 ── */
 .stretch > div > .column > *,
 .stretch > div > .column > .form > * { flex-grow:0!important; }
-
-/* ── 覆盖 Gradio 内部的 flex-grow ── */
 .stretch.svelte-1xp0cw7>.column>*,
-.stretch.svelte-1xp0cw7>.column>.form>* {
-  flex-grow: 0!important;
-  flex-shrink: 0;
+.stretch.svelte-1xp0cw7>.column>.form>* { flex-grow:0!important;flex-shrink:0; }
+
+/* ── 生成结果列：让视频自然撑满，不被裁剪 ── */
+#output-video-col {
+  overflow:visible!important;
+}
+/* 视频组件本体，限制最大高度避免溢出到日志栏 */
+#output-video video {
+  max-height:calc(100vh - 240px)!important;
+  width:100%!important;
+  object-fit:contain!important;
+  border-radius:8px!important;
+  background:#0f172a!important;
+  display:block!important;
+}
+/* 进度详情卡片 */
+#ls-detail-box {
+  margin-bottom:8px;
 }
 
 /* ── 历史视频 ── */
-.hist-tab video { max-height:380px; }
+.hist-tab video { max-height:360px; }
+
+/* ── 进度描述支持换行（步骤信息独占一行）── */
+.progress-description, [class*="progress"] p,
+.progress-text, tqdm { white-space:pre-wrap!important; }
+
+/* ── 清空历史弹窗：position:fixed 全屏居中遮罩 ── */
+#clear-confirm-overlay {
+  position:fixed!important;
+  top:0!important; left:0!important;
+  width:100vw!important; height:100vh!important;
+  z-index:9990!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  background:rgba(15,23,42,0.70)!important;
+  backdrop-filter:blur(8px)!important;
+  padding:0!important; margin:0!important;
+  border:none!important; border-radius:0!important;
+  box-shadow:none!important;
+}
+#clear-confirm-overlay > div.form {
+  background:#fff!important;
+  border-radius:20px!important;
+  padding:36px 32px 28px!important;
+  max-width:460px!important;
+  width:90%!important;
+  box-shadow:0 24px 64px rgba(0,0,0,.3)!important;
+  border:none!important;
+}
 
 /* ── 日志数据源（视觉隐藏，DOM中存在）── */
 #zdai-log-src {
@@ -422,6 +470,7 @@ button.primary    { box-shadow:0 2px 8px rgba(99,102,241,.3)!important; }
 /* ── Tab 标签美化 ── */
 .tabs > .tabitem { border:none!important; }
 """
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -545,9 +594,46 @@ def convert_video_for_browser(video_path, progress=gr.Progress()):
 
 
 # ══════════════════════════════════════════════════════════════
+#  进度详情 HTML 构建（用于步骤 / 帧双行显示）
+# ══════════════════════════════════════════════════════════════
+def _make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog):
+    bar_f = max(2, f_pct)
+    bar_s = max(2, s_pct)
+    return (
+        f'''<div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+            border:1.5px solid #6366f1;border-radius:12px;
+            padding:14px 16px 12px;margin:0 0 10px;
+            font-family:Microsoft YaHei,system-ui,sans-serif;
+            box-shadow:0 4px 16px rgba(99,102,241,.18);">
+          <!-- 帧进度 -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="font-size:11px;color:#94a3b8;width:32px;flex-shrink:0;">帧</span>
+            <div style="flex:1;background:rgba(99,102,241,.15);border-radius:4px;height:7px;overflow:hidden;">
+              <div style="height:100%;width:{bar_f}%;background:linear-gradient(90deg,#6366f1,#8b5cf6);
+                border-radius:4px;transition:width .35s;"></div>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:#6366f1;width:48px;text-align:right;flex-shrink:0;">{f_pct}%</span>
+            <span style="font-size:11px;color:#64748b;flex-shrink:0;">{f_cur}/{f_total}</span>
+          </div>
+          <!-- 步骤进度 -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <span style="font-size:11px;color:#94a3b8;width:32px;flex-shrink:0;">步骤</span>
+            <div style="flex:1;background:rgba(139,92,246,.15);border-radius:4px;height:7px;overflow:hidden;">
+              <div style="height:100%;width:{bar_s}%;background:linear-gradient(90deg,#8b5cf6,#a78bfa);
+                border-radius:4px;transition:width .35s;"></div>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:#8b5cf6;width:48px;text-align:right;flex-shrink:0;">{s_pct}%</span>
+            <span style="font-size:11px;color:#64748b;flex-shrink:0;">{s_cur}/{s_total}</span>
+          </div>
+          <!-- 总进度 -->
+          <div style="font-size:11px;color:#64748b;text-align:right;">总进度 {prog*100:.1f}%</div>
+        </div>'''
+    )
+
+# ══════════════════════════════════════════════════════════════
 #  口型同步（带进度更新）
 # ══════════════════════════════════════════════════════════════
-def run_latentsync(video_path, audio_path, progress=gr.Progress()):
+def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None):
     if not video_path:                 raise gr.Error("请上传人物视频")
     if not audio_path:                 raise gr.Error("请选择或上传音频文件")
     if not os.path.exists(video_path): raise gr.Error("视频文件不存在，请重新上传")
@@ -625,12 +711,14 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress()):
                     # 显示帧进度和步骤进度（用空格分隔，模拟两行效果）
                     if step_progress:
                         s_pct, s_cur, s_total = step_progress
-                        desc = f"生成帧画面 {f_pct}%({f_cur}/{f_total}) - {prog*100:.1f}%    步骤 {s_pct}%({s_cur}/{s_total})"
+                        desc = f"帧 {f_pct}%({f_cur}/{f_total})  步骤 {s_pct}%({s_cur}/{s_total})  总 {prog*100:.1f}%"
+                        if detail_cb:
+                            detail_cb(_make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog))
                     else:
-                        desc = f"生成帧画面 {f_pct}%({f_cur}/{f_total}) - {prog*100:.1f}%"
+                        desc = f"帧画面 {f_pct}%（{f_cur}/{f_total}）  总进度 {prog*100:.1f}%"
                 else:
                     prog = 0.12 + (pct / 100.0) * 0.76
-                    desc = f"生成帧画面 {pct}%({cur}/{total}) - {prog*100:.1f}%"
+                    desc = f"帧画面 {pct}%（{cur}/{total}）  总进度 {prog*100:.1f}%"
         elif stage == "后处理":
             prog = 0.90 + (pct / 100.0) * 0.06
             desc = f"后处理 {pct}%  ({cur}/{total})"
@@ -735,7 +823,7 @@ def build_ui():
 
             # ── Tab 1：工作台 ────────────────────────────────
             with gr.Tab("🎬  工作台"):
-                with gr.Row(elem_classes="workspace", equal_height=True):
+                with gr.Row(elem_classes="workspace"):
 
                     # 列 1：语音合成
                     with gr.Column(scale=1, elem_classes="panel"):
@@ -821,9 +909,10 @@ def build_ui():
                         ls_btn = gr.Button("🚀  生成口型同步视频", variant="primary", size="lg")
 
                     # 列 3：生成结果
-                    with gr.Column(scale=1, elem_classes="panel"):
+                    with gr.Column(scale=2, elem_classes="panel", elem_id="output-video-col"):
                         gr.HTML('<div class="panel-head"><span class="step-chip">3</span>生成结果</div>')
-                        output_video = gr.Video(label="最终合成视频", height=460)
+                        ls_detail_html = gr.HTML(value="", visible=False, elem_id="ls-detail-box")
+                        output_video = gr.Video(label="最终合成视频", height=520, elem_id="output-video")
 
             # ── Tab 2：合成历史 ──────────────────────────────
             with gr.Tab("📁  合成历史", elem_classes="hist-tab"):
@@ -833,6 +922,7 @@ def build_ui():
                         with gr.Row():
                             refresh_hist_btn = gr.Button("🔄  刷新列表", variant="secondary", scale=1, min_width=100)
                             open_folder_btn  = gr.Button("📂  打开文件夹", variant="secondary", scale=1, min_width=120)
+                            clear_hist_btn   = gr.Button("🗑  清空历史", variant="stop", scale=1, min_width=100)
                         hist_dropdown = gr.Dropdown(
                             label="选择记录（点击直接播放）",
                             choices=[], value=None, interactive=True)
@@ -840,6 +930,33 @@ def build_ui():
                         hist_info = gr.HTML(
                             value='<div style="font-size:12px;color:#94a3b8;padding:8px 0">尚无记录，完成一次口型同步后自动保存。</div>'
                         )
+
+                        # ── 清空确认弹窗（默认隐藏）──
+                        with gr.Group(visible=False, elem_id="clear-confirm-overlay") as clear_confirm_group:
+                            gr.HTML("""
+                            <div style="text-align:center;padding-bottom:8px;">
+                              <div style="width:52px;height:52px;border-radius:14px;
+                                background:linear-gradient(135deg,#fbbf24,#f59e0b);
+                                display:flex;align-items:center;justify-content:center;
+                                margin:0 auto 16px;font-size:26px;">🗑</div>
+                              <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:10px;">
+                                清空历史记录
+                              </div>
+                              <div style="font-size:13px;color:#64748b;line-height:1.8;margin-bottom:4px;">
+                                请选择清空方式：
+                              </div>
+                              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+                                padding:12px 14px;text-align:left;font-size:12px;color:#475569;line-height:1.9;">
+                                <b>🗂 仅移除记录</b> — 清空历史列表，磁盘视频文件<b>保留不动</b><br>
+                                <b>🗑 连同文件删除</b> — 清空列表并<b>彻底删除</b>所有已生成视频
+                              </div>
+                            </div>
+                            """)
+                            with gr.Row():
+                                cancel_clear_btn    = gr.Button("取消", variant="secondary", scale=1)
+                                clear_records_btn   = gr.Button("🗂 仅移除记录", variant="secondary", scale=1)
+                                clear_all_files_btn = gr.Button("🗑 连同文件一起删除", variant="stop", scale=1)
+
                     with gr.Column(scale=2, elem_classes="panel"):
                         gr.HTML('<div class="panel-head"><span class="step-chip">▶</span>视频预览</div>')
                         hist_video = gr.Video(label="", height=420, interactive=False)
@@ -968,7 +1085,47 @@ def build_ui():
         # 口型同步
         def ls_wrap(video, auto_a, custom_a, progress=gr.Progress()):
             audio  = custom_a if custom_a else auto_a
-            out, _ = run_latentsync(video, audio, progress)
+            q      = _queue.Queue()
+            result = {"out": None, "err": None}
+
+            def _detail_cb(html):
+                q.put(("detail", html))
+
+            def _run():
+                try:
+                    out, _ = run_latentsync(video, audio, progress, detail_cb=_detail_cb)
+                    result["out"] = out
+                except Exception as e:
+                    result["err"] = e
+                finally:
+                    q.put(("done",))
+
+            threading.Thread(target=_run, daemon=True).start()
+
+            # 显示加载状态
+            loading_html = (
+                '<div style="background:linear-gradient(135deg,#1e293b,#0f172a);' +
+                'border:1.5px solid #6366f1;border-radius:12px;padding:12px 16px;' +
+                'font-family:Microsoft YaHei,sans-serif;font-size:12px;color:#94a3b8;text-align:center;">' +
+                '<span style="color:#6366f1;font-weight:700;">⏳ 正在生成...</span></div>'
+            )
+            yield gr.update(), gr.update(), gr.update(value=loading_html, visible=True)
+
+            while True:
+                try:
+                    item = q.get(timeout=0.3)
+                    if item[0] == "done":
+                        break
+                    elif item[0] == "detail":
+                        yield gr.update(), gr.update(), gr.update(value=item[1], visible=True)
+                except _queue.Empty:
+                    yield gr.update(), gr.update(), gr.update()
+
+            if result["err"]:
+                yield gr.update(), _make_log(False, f"口型同步失败: {result['err']}"), gr.update(visible=False)
+                raise gr.Error(str(result["err"]))
+
+            out      = result["out"]
             log_html = _make_log(True, "口型同步完成 — " + os.path.basename(out))
             try:
                 ps = (
@@ -985,16 +1142,21 @@ def build_ui():
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
-            return out, log_html, gr.update(value='', visible=False)
+            yield gr.update(value=out), log_html, gr.update(visible=False)
 
         ls_btn.click(ls_wrap,
             inputs=[video_input, audio_for_ls, custom_audio],
-            outputs=[output_video, op_log_html, progress_banner])
+            outputs=[output_video, op_log_html, ls_detail_html])
 
         # 历史操作
         def _do_refresh():
             return gr.update(choices=_hist_choices(), value=None), _hist_info_html(), _make_log(True, "历史记录已刷新")
         refresh_hist_btn.click(_do_refresh, outputs=[hist_dropdown, hist_info, op_log_html])
+
+        # 初始化时自动刷新历史列表
+        def _auto_refresh():
+            return gr.update(choices=_hist_choices(), value=None), _hist_info_html()
+        app.load(_auto_refresh, outputs=[hist_dropdown, hist_info])
 
         open_folder_btn.click(
             lambda: (
@@ -1004,6 +1166,88 @@ def build_ui():
                 _make_log(True, "已打开输出文件夹")
             )[1],
             outputs=[op_log_html])
+
+        # 清空历史：显示确认弹窗
+        clear_hist_btn.click(
+            lambda: gr.update(visible=True),
+            outputs=[clear_confirm_group])
+
+        # 取消
+        cancel_clear_btn.click(
+            lambda: gr.update(visible=False),
+            outputs=[clear_confirm_group])
+
+        # 仅移除记录条目（不删文件）
+        def _clear_records_only():
+            try:
+                if os.path.exists(HISTORY_FILE):
+                    os.remove(HISTORY_FILE)
+            except Exception:
+                pass
+            return (gr.update(visible=False),
+                    gr.update(choices=[], value=None),
+                    '<div style="font-size:12px;color:#94a3b8;padding:8px 0">记录已清空，视频文件仍保留在磁盘上。</div>',
+                    _make_log(True, "历史记录条目已清空（文件保留）"))
+
+        clear_records_btn.click(
+            _clear_records_only,
+            outputs=[clear_confirm_group, hist_dropdown, hist_info, op_log_html])
+
+        # 彻底删除（连同文件）
+        def _clear_all_with_files():
+            deleted, failed = 0, 0
+            deleted_paths = set()
+
+            # 第一步：从 history.json 中读取所有记录路径
+            try:
+                if os.path.exists(HISTORY_FILE):
+                    with open(HISTORY_FILE, 'r', encoding='utf-8') as hf:
+                        hist = json.load(hf)
+                    for item in hist:
+                        vp = item.get("video_path", "")
+                        if not vp:
+                            continue
+                        # 兼容正反斜杠
+                        vp = os.path.normpath(vp)
+                        deleted_paths.add(vp)
+                        try:
+                            if os.path.exists(vp):
+                                os.remove(vp)
+                                deleted += 1
+                        except Exception:
+                            failed += 1
+                    os.remove(HISTORY_FILE)
+            except Exception:
+                pass
+
+            # 第二步：扫描 OUTPUT_DIR，删除所有 lipsync_ / converted_ / tts_ 文件
+            try:
+                prefixes = ("lipsync_", "converted_", "in_v_", "in_a_")
+                for fname in os.listdir(OUTPUT_DIR):
+                    if any(fname.startswith(p) for p in prefixes):
+                        fpath = os.path.normpath(os.path.join(OUTPUT_DIR, fname))
+                        if fpath not in deleted_paths:
+                            try:
+                                os.remove(fpath)
+                                deleted += 1
+                                deleted_paths.add(fpath)
+                            except Exception:
+                                failed += 1
+            except Exception:
+                pass
+
+            info_msg = (f'<div style="font-size:12px;color:#94a3b8;padding:8px 0">'
+                        f'已彻底清空，共删除 <b>{deleted}</b> 个文件'
+                        f'{f"，{failed} 个删除失败（可能已被占用）" if failed else ""}。</div>')
+            return (gr.update(visible=False),
+                    gr.update(choices=[], value=None),
+                    info_msg,
+                    None,
+                    _make_log(True, f"历史记录及 {deleted} 个文件已彻底删除"))
+
+        clear_all_files_btn.click(
+            _clear_all_with_files,
+            outputs=[clear_confirm_group, hist_dropdown, hist_info, hist_video, op_log_html])
 
         def _load_hist(p):
             if not p: return None, ""
