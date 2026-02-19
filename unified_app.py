@@ -469,6 +469,13 @@ button.primary    { box-shadow:0 2px 8px rgba(99,102,241,.3)!important; }
 
 /* ── Tab 标签美化 ── */
 .tabs > .tabitem { border:none!important; }
+/* ── 批量任务：任务列表 ── */
+#bt-task-list { min-height:80px; }
+#bt-status-list { margin-top:8px; }
+#bt-progress-box { margin-top:8px; }
+#bt-audio-mode label, #bt-video-mode label {
+  font-size:13px!important;
+}
 """
 
 
@@ -633,7 +640,7 @@ def _make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog):
 # ══════════════════════════════════════════════════════════════
 #  口型同步（带进度更新）
 # ══════════════════════════════════════════════════════════════
-def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None):
+def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None, output_path_override=None):
     if not video_path:                 raise gr.Error("请上传人物视频")
     if not audio_path:                 raise gr.Error("请选择或上传音频文件")
     if not os.path.exists(video_path): raise gr.Error("视频文件不存在，请重新上传")
@@ -642,7 +649,7 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
     ts  = int(time.time())
     sv  = os.path.join(OUTPUT_DIR, f"in_v_{ts}{os.path.splitext(video_path)[1]}")
     sa  = os.path.join(OUTPUT_DIR, f"in_a_{ts}{os.path.splitext(audio_path)[1]}")
-    out = os.path.join(OUTPUT_DIR, f"lipsync_{ts}.mp4")
+    out = output_path_override if output_path_override else os.path.join(OUTPUT_DIR, f"lipsync_{ts}.mp4")
     try:
         shutil.copy2(video_path, sv); shutil.copy2(audio_path, sa)
     except Exception as e:
@@ -757,6 +764,52 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
     return out, "✅ 口型同步完成"
 
 
+
+# ══════════════════════════════════════════════════════════════
+#  批量任务辅助函数
+# ══════════════════════════════════════════════════════════════
+def generate_speech_batch(text, prompt_audio, out_path,
+                          top_p=0.8, top_k=30, temperature=0.8,
+                          num_beams=3, repetition_penalty=10.0, max_mel_tokens=1500):
+    global tts
+    if tts is None: raise RuntimeError("模型未加载")
+    if not text.strip(): raise RuntimeError("文本为空")
+    if not prompt_audio: raise RuntimeError("缺少参考音频")
+    cwd = os.getcwd(); os.chdir(INDEXTTS_DIR)
+    try:
+        kw = dict(do_sample=True, top_p=float(top_p), top_k=int(top_k),
+                  temperature=float(temperature), length_penalty=0.0,
+                  num_beams=int(num_beams), repetition_penalty=float(repetition_penalty),
+                  max_mel_tokens=int(max_mel_tokens))
+        tts.infer(spk_audio_prompt=prompt_audio, text=text, output_path=out_path,
+                  emo_audio_prompt=None, emo_alpha=0.5,
+                  emo_vector=None, use_emo_text=False, emo_text=None, use_random=False, **kw)
+        return out_path
+    finally:
+        os.chdir(cwd)
+
+
+def _render_task_list(tasks):
+    if not tasks:
+        return '<div style="text-align:center;padding:32px;color:#94a3b8;font-family:Microsoft YaHei,sans-serif;"><div style="font-size:26px;margin-bottom:8px;">\U0001f4cb</div><div>暂无任务，请在左侧表单添加</div></div>'
+    status_colors = {"等待中": "#64748b", "进行中": "#6366f1", "\u2705 完成": "#16a34a", "\u274c 失败": "#dc2626"}
+    rows = ""
+    for i, t in enumerate(tasks):
+        idx = i + 1
+        status = t.get("status", "等待中")
+        sc = status_colors.get(status, "#64748b")
+        ab = '<span style="background:#ede9fe;color:#6d28d9;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;">文字合成</span>' if t.get("audio_mode") == "tts" else '<span style="background:#e0f2fe;color:#0369a1;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;">上传音频</span>'
+        vb = '<span style="background:#fce7f3;color:#9d174d;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;">公共视频</span>' if t.get("video_mode") == "shared" else '<span style="background:#f0fdf4;color:#166534;border-radius:4px;padding:1px 7px;font-size:10px;font-weight:700;">专属视频</span>'
+        rows += f'<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 8px;font-weight:700;color:#6366f1;font-size:13px;">#{idx}</td><td style="padding:10px 8px;font-size:13px;color:#0f172a;font-weight:600;">{t.get("name","任务"+str(idx))}</td><td style="padding:10px 8px;">{ab}</td><td style="padding:10px 8px;">{vb}</td><td style="padding:10px 8px;font-size:12px;font-weight:700;color:{sc};">{status}</td></tr>'
+    return f'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:Microsoft YaHei,sans-serif;"><thead><tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;"><th style="padding:9px 8px;text-align:left;font-size:12px;color:#64748b;">序号</th><th style="padding:9px 8px;text-align:left;font-size:12px;color:#64748b;">任务名称</th><th style="padding:9px 8px;text-align:left;font-size:12px;color:#64748b;">音频</th><th style="padding:9px 8px;text-align:left;font-size:12px;color:#64748b;">视频</th><th style="padding:9px 8px;text-align:left;font-size:12px;color:#64748b;">状态</th></tr></thead><tbody>{rows}</tbody></table></div>'
+
+
+def _render_batch_prog(done, total, cur_name, status, msg, out_folder=""):
+    pct = int(done / total * 100) if total else 0
+    sc = {"运行中": "#6366f1", "已完成": "#16a34a", "失败": "#dc2626"}.get(status, "#64748b")
+    folder_hint = f'<div style="font-size:11px;color:#64748b;margin-top:8px;">' + '\U0001f4c1' + f' 输出目录：{out_folder}</div>' if out_folder else ""
+    return f'<div style="background:linear-gradient(135deg,#1e293b,#0f172a);border:1.5px solid #6366f1;border-radius:12px;padding:14px 16px;font-family:Microsoft YaHei,sans-serif;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span style="width:10px;height:10px;border-radius:50%;background:{sc};flex-shrink:0;"></span><span style="font-size:13px;font-weight:700;color:#e2e8f0;">{status}</span><span style="margin-left:auto;font-size:13px;font-weight:800;color:#6366f1;">{done}/{total}</span></div><div style="background:rgba(99,102,241,.15);border-radius:6px;height:8px;overflow:hidden;margin-bottom:8px;"><div style="height:100%;width:{pct}%;background:linear-gradient(90deg,#6366f1,#8b5cf6);border-radius:6px;"></div></div><div style="font-size:12px;color:#94a3b8;">{msg}</div>{folder_hint}</div>'
+
 # ══════════════════════════════════════════════════════════════
 #  构建 UI
 # ══════════════════════════════════════════════════════════════
@@ -837,14 +890,14 @@ def build_ui():
                             sources=["upload"], type="filepath")
                         with gr.Accordion("⚙️ 高级设置", open=False):
                             with gr.Row():
-                                top_p = gr.Slider(label="Top-P", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
-                                top_k = gr.Slider(label="Top-K", minimum=1, maximum=100, value=30, step=1)
+                                top_p = gr.Slider(label="词语多样性", info="越高输出越随机，建议 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
+                                top_k = gr.Slider(label="候选词数量", info="限制每步候选词，越小越保守，建议 20~50", minimum=1, maximum=100, value=30, step=1)
                             with gr.Row():
-                                temperature = gr.Slider(label="Temperature", minimum=0.1, maximum=2.0, value=0.8, step=0.1)
-                                num_beams   = gr.Slider(label="Beam Search", minimum=1, maximum=10, value=3, step=1)
+                                temperature = gr.Slider(label="语气活跃度", info="越高语气越有变化，越低越平稳", minimum=0.1, maximum=2.0, value=0.8, step=0.1)
+                                num_beams   = gr.Slider(label="精确搜索强度", info="越高越精确但更慢，建议 1~5", minimum=1, maximum=10, value=3, step=1)
                             with gr.Row():
-                                repetition_penalty = gr.Slider(label="Repetition Penalty", minimum=1.0, maximum=20.0, value=10.0, step=0.5)
-                                max_mel_tokens     = gr.Slider(label="Max Mel Tokens", minimum=500, maximum=3000, value=1500, step=100)
+                                repetition_penalty = gr.Slider(label="避免重复程度", info="越高越不会重复相同词语", minimum=1.0, maximum=20.0, value=10.0, step=0.5)
+                                max_mel_tokens     = gr.Slider(label="最大音频长度", info="更长文本需要更大数值，建议 1000~2000", minimum=500, maximum=3000, value=1500, step=100)
                             gr.HTML('<div class="divider"></div>')
                             gr.Markdown("### 🎭 情感控制")
                             emo_mode = gr.Radio(
@@ -853,7 +906,7 @@ def build_ui():
                                 value="与音色参考音频相同")
                             with gr.Group(visible=False) as emo_audio_group:
                                 emo_audio  = gr.Audio(label="情感参考音频", sources=["upload"], type="filepath")
-                                emo_weight = gr.Slider(label="情感权重", minimum=0.0, maximum=1.0, value=0.6, step=0.1)
+                                emo_weight = gr.Slider(label="情感强度", info="0=不混合情感，1=完全使用情感参考", minimum=0.0, maximum=1.0, value=0.6, step=0.1)
                             with gr.Group(visible=False) as emo_vec_group:
                                 gr.Markdown("调整8个情感向量维度（-1.0 到 1.0）")
                                 with gr.Row():
@@ -960,6 +1013,251 @@ def build_ui():
                     with gr.Column(scale=2, elem_classes="panel"):
                         gr.HTML('<div class="panel-head"><span class="step-chip">▶</span>视频预览</div>')
                         hist_video = gr.Video(label="", height=420, interactive=False)
+
+
+            # ── Tab 3：批量任务 ──────────────────────────────
+            with gr.Tab("⚡  批量任务"):
+                with gr.Row(elem_classes="workspace"):
+
+                    # ── 左列：新建任务表单 ──
+                    with gr.Column(scale=1, elem_classes="panel"):
+                        gr.HTML('<div class="panel-head"><span class="step-chip">＋</span>新建任务</div>')
+
+                        bt_name = gr.Textbox(
+                            label="任务名称",
+                            placeholder="例如：产品介绍、开场白……（留空自动编号）",
+                            max_lines=1)
+
+                        gr.HTML('<div class="divider"></div>')
+                        gr.HTML('<div style="font-size:12px;font-weight:700;color:#6366f1;margin-bottom:6px;">🎵 音频来源</div>')
+                        bt_audio_mode = gr.Radio(
+                            choices=["文字合成语音", "上传音频文件"],
+                            value="文字合成语音",
+                            label="",
+                            elem_id="bt-audio-mode")
+
+                        with gr.Group(visible=True) as bt_tts_group:
+                            bt_text = gr.Textbox(
+                                label="合成文字内容",
+                                placeholder="在此输入要合成语音的文字...",
+                                lines=3)
+                            bt_ref_audio = gr.Audio(
+                                label="参考音色（3~10秒）",
+                                sources=["upload"], type="filepath")
+
+                        with gr.Group(visible=False) as bt_custom_audio_group:
+                            bt_custom_audio = gr.Audio(
+                                label="上传音频文件",
+                                sources=["upload"], type="filepath")
+
+                        gr.HTML('<div class="divider"></div>')
+                        gr.HTML('<div style="font-size:12px;font-weight:700;color:#6366f1;margin-bottom:6px;">🎬 视频来源</div>')
+                        bt_video_mode = gr.Radio(
+                            choices=["上传专属视频", "使用公共视频"],
+                            value="上传专属视频",
+                            label="",
+                            elem_id="bt-video-mode")
+
+                        with gr.Group(visible=True) as bt_own_video_group:
+                            bt_own_video = gr.File(
+                                label="专属视频（仅此任务使用）",
+                                file_types=["video"], type="filepath")
+
+                        bt_add_btn = gr.Button("➕  添加到任务队列", variant="primary", size="lg")
+
+                    # ── 右列：任务队列 + 公共视频 + 执行控制 ──
+                    with gr.Column(scale=2, elem_classes="panel"):
+                        gr.HTML('<div class="panel-head"><span class="step-chip">📋</span>任务队列</div>')
+
+                        # 公共视频
+                        with gr.Group():
+                            gr.HTML('<div style="font-size:12px;font-weight:700;color:#6366f1;margin-bottom:6px;">🎬 公共视频（使用公共视频的任务共享此素材）</div>')
+                            bt_shared_video = gr.File(
+                                label="上传公共人物视频",
+                                file_types=["video"], type="filepath")
+
+                        gr.HTML('<div class="divider"></div>')
+
+                        # 批量名称
+                        bt_batch_name = gr.Textbox(
+                            label="本批次名称",
+                            value="",
+                            placeholder="用于命名输出文件夹，留空则使用时间戳",
+                            max_lines=1)
+
+                        # 任务列表
+                        bt_task_list_html = gr.HTML(
+                            value=_render_task_list([]),
+                            elem_id="bt-task-list")
+
+                        with gr.Row():
+                            bt_start_btn = gr.Button("🚀  开始批量生成", variant="primary", scale=2)
+                            bt_clear_btn = gr.Button("🗑  清空队列", variant="stop", scale=1)
+
+                        # 执行进度
+                        bt_progress_html = gr.HTML(value="", visible=False, elem_id="bt-progress-box")
+
+                        # 任务状态列表（实时更新）
+                        bt_status_list_html = gr.HTML(value="", visible=False, elem_id="bt-status-list")
+
+                # ── 任务队列 State ──
+                bt_tasks_state = gr.State([])
+
+                # ── 事件：切换音频来源 ──
+                def _bt_audio_mode_change(mode):
+                    return (gr.update(visible=(mode == "文字合成语音")),
+                            gr.update(visible=(mode == "上传音频文件")))
+                bt_audio_mode.change(
+                    _bt_audio_mode_change,
+                    inputs=[bt_audio_mode],
+                    outputs=[bt_tts_group, bt_custom_audio_group])
+
+                # ── 事件：切换视频来源 ──
+                def _bt_video_mode_change(mode):
+                    return gr.update(visible=(mode == "上传专属视频"))
+                bt_video_mode.change(
+                    _bt_video_mode_change,
+                    inputs=[bt_video_mode],
+                    outputs=[bt_own_video_group])
+
+                # ── 事件：添加任务 ──
+                def _bt_add_task(tasks, name, audio_mode, text, ref_audio, custom_audio,
+                                 video_mode, own_video):
+                    idx = len(tasks) + 1
+                    task_name = name.strip() if name.strip() else f"任务{idx}"
+                    # 校验
+                    if audio_mode == "文字合成语音":
+                        if not text.strip():
+                            return tasks, _render_task_list(tasks), "⚠️ 请填写合成文字内容"
+                        if not ref_audio:
+                            return tasks, _render_task_list(tasks), "⚠️ 请上传参考音色"
+                    else:
+                        if not custom_audio:
+                            return tasks, _render_task_list(tasks), "⚠️ 请上传音频文件"
+                    if video_mode == "上传专属视频" and not own_video:
+                        return tasks, _render_task_list(tasks), "⚠️ 请上传专属视频，或切换为公共视频"
+
+                    new_task = {
+                        "id": idx,
+                        "name": task_name,
+                        "audio_mode": "tts" if audio_mode == "文字合成语音" else "custom",
+                        "text": text,
+                        "ref_audio": ref_audio,
+                        "audio_path": custom_audio,
+                        "video_mode": "shared" if video_mode == "使用公共视频" else "own",
+                        "video_path": own_video,
+                        "status": "等待中",
+                    }
+                    new_tasks = tasks + [new_task]
+                    return new_tasks, _render_task_list(new_tasks), f"✅ 已添加《{task_name}》"
+
+                bt_add_hint = gr.HTML(value="")
+
+                bt_add_btn.click(
+                    _bt_add_task,
+                    inputs=[bt_tasks_state, bt_name, bt_audio_mode, bt_text, bt_ref_audio,
+                            bt_custom_audio, bt_video_mode, bt_own_video],
+                    outputs=[bt_tasks_state, bt_task_list_html, bt_add_hint])
+
+                # ── 事件：清空队列 ──
+                def _bt_clear():
+                    return [], _render_task_list([]), "", gr.update(visible=False), gr.update(visible=False)
+                bt_clear_btn.click(
+                    _bt_clear,
+                    outputs=[bt_tasks_state, bt_task_list_html, bt_add_hint,
+                             bt_progress_html, bt_status_list_html])
+
+                # ── 事件：开始批量生成（generator）──
+                def _bt_run_batch(tasks, shared_video, batch_name, progress=gr.Progress()):
+                    if not tasks:
+                        yield (gr.update(visible=True,
+                               value='<div style="color:#dc2626;padding:8px;font-family:Microsoft YaHei;">⚠️ 请先添加至少一个任务</div>'),
+                               gr.update(), gr.update())
+                        return
+
+                    # 创建输出文件夹
+                    ts_str = time.strftime("%Y%m%d_%H%M%S")
+                    safe_name = re.sub(r'[\\/:*?"<>|]', '', batch_name.strip()) if batch_name.strip() else ""
+                    folder_name = f"{ts_str}_{safe_name}" if safe_name else ts_str
+                    batch_dir = os.path.join(OUTPUT_DIR, folder_name)
+                    os.makedirs(batch_dir, exist_ok=True)
+
+                    # 深拷贝任务列表（防止修改 state）
+                    import copy
+                    run_tasks = copy.deepcopy(tasks)
+                    total = len(run_tasks)
+
+                    def _yield(done, status, msg):
+                        prog_html = _render_batch_prog(done, total, "", status, msg, batch_dir)
+                        list_html = _render_task_list(run_tasks)
+                        return (gr.update(visible=True, value=prog_html),
+                                gr.update(visible=True, value=list_html),
+                                gr.update())
+
+                    yield _yield(0, "运行中", "准备开始批量生成...")
+
+                    for i, task in enumerate(run_tasks):
+                        idx = i + 1
+                        task_name = task.get("name", f"任务{idx}")
+                        run_tasks[i]["status"] = "进行中"
+                        yield _yield(i, "运行中", f"正在处理 {task_name}（{idx}/{total}）")
+
+                        try:
+                            # ─ 第一步：音频 ─
+                            if task.get("audio_mode") == "tts":
+                                audio_out = os.path.join(batch_dir, f"音频_{idx}.wav")
+                                progress(0.1, desc=f"[{idx}/{total}] {task_name} — 合成语音...")
+                                generate_speech_batch(
+                                    task["text"], task["ref_audio"], audio_out)
+                                audio_path = audio_out
+                            else:
+                                audio_path = task.get("audio_path")
+                                if not audio_path or not os.path.exists(audio_path):
+                                    raise RuntimeError("音频文件不存在")
+                                # 复制到批量目录
+                                ext = os.path.splitext(audio_path)[1]
+                                dst = os.path.join(batch_dir, f"音频_{idx}{ext}")
+                                shutil.copy2(audio_path, dst)
+                                audio_path = dst
+
+                            # ─ 第二步：视频 ─
+                            if task.get("video_mode") == "shared":
+                                if not shared_video or not os.path.exists(shared_video):
+                                    raise RuntimeError("公共视频未上传或文件不存在")
+                                video_path = shared_video
+                            else:
+                                video_path = task.get("video_path")
+                                if not video_path or not os.path.exists(video_path):
+                                    raise RuntimeError("专属视频文件不存在")
+
+                            # ─ 第三步：口型同步 ─
+                            out_path = os.path.join(batch_dir, f"任务{idx}.mp4")
+                            progress(0.3, desc=f"[{idx}/{total}] {task_name} — 口型同步中...")
+                            run_latentsync(video_path, audio_path,
+                                          output_path_override=out_path)
+
+                            run_tasks[i]["status"] = "✅ 完成"
+                            yield _yield(idx, "运行中", f"✅ {task_name} 完成 → 任务{idx}.mp4")
+
+                        except Exception as e:
+                            run_tasks[i]["status"] = "❌ 失败"
+                            err_msg = str(e)[:100]
+                            yield _yield(i, "运行中", f"❌ {task_name} 失败：{err_msg}")
+
+                    # 全部完成
+                    done_count = sum(1 for t in run_tasks if t["status"] == "✅ 完成")
+                    fail_count = total - done_count
+                    final_msg = f"全部完成！✅ {done_count} 成功"
+                    if fail_count: final_msg += f"  ❌ {fail_count} 失败"
+                    final_msg += f"  · 输出目录：{folder_name}"
+                    yield (gr.update(visible=True, value=_render_batch_prog(total, total, "", "已完成", final_msg, batch_dir)),
+                           gr.update(visible=True, value=_render_task_list(run_tasks)),
+                           gr.update(value=run_tasks))
+
+                bt_start_btn.click(
+                    _bt_run_batch,
+                    inputs=[bt_tasks_state, bt_shared_video, bt_batch_name],
+                    outputs=[bt_progress_html, bt_status_list_html, bt_tasks_state])
 
         # ── 日志数据源（Gradio 渲染到 DOM，CSS 视觉隐藏）────
         op_log_html = gr.HTML(
