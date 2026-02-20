@@ -3,7 +3,19 @@
     "allow": [
       "Bash(pip show:*)",
       "Bash(pip index versions:*)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(timeout 10 cmd:*)",
+      "Bash(timeout 15 cmd:*)",
+      "Bash(pip install:*)",
+      "Bash(set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1)",
+      "Bash(timeout 20 cmd:*)",
+      "Bash(git restore:*)"
     ]
   }
 }

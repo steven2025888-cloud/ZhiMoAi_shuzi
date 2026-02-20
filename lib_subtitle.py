@@ -147,34 +147,79 @@ def build_ass(words, font_name, font_size,
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
 
-    # ── 将词按行分组（每 GROUP 个词一行），每行持续整组时间 ──
-    GROUP = 8
+    # ── 优化：按标点符号分句，保持完整句子 ──
     events = ""
-    groups = [words[i:i+GROUP] for i in range(0, max(len(words), 1), GROUP)]
-
-    for grp in groups:
-        if not grp:
+    
+    # 定义句子结束标点
+    sentence_ends = {'。', '！', '？', '.', '!', '?', '；', ';', '，', ',', '、'}
+    
+    current_sentence = []
+    sentences = []
+    
+    # 将词按标点分组成句子
+    for i, w in enumerate(words):
+        word_text = w["word"].strip()
+        if not word_text:
             continue
-        t_start = grp[0]["start"]
-        t_end   = grp[-1]["end"]
-        if t_end <= t_start:
-            t_end = t_start + 0.5
-
-        # 构建这一行文本，关键词单独标记
+            
+        current_sentence.append(w)
+        
+        # 检查是否是句子结束（包含标点或达到最大长度）
+        has_punctuation = any(p in word_text for p in sentence_ends)
+        is_last = (i == len(words) - 1)
+        is_long = len(current_sentence) >= 15  # 最多15个词一句
+        
+        if has_punctuation or is_last or is_long:
+            if current_sentence:
+                sentences.append(current_sentence[:])
+                current_sentence = []
+    
+    # 如果还有剩余的词
+    if current_sentence:
+        sentences.append(current_sentence)
+    
+    # 为每个句子生成字幕
+    for sentence in sentences:
+        if not sentence:
+            continue
+            
+        t_start = sentence[0]["start"]
+        t_end = sentence[-1]["end"]
+        
+        # 确保字幕有合理的显示时长
+        duration = t_end - t_start
+        if duration < 0.8:  # 最短显示0.8秒
+            t_end = t_start + 0.8
+        elif t_end <= t_start:
+            t_end = t_start + 1.0
+        
+        # 构建句子文本，去掉标点符号
         parts = []
-        for w in grp:
+        for w in sentence:
             wt = w["word"].strip()
             if not wt:
                 continue
-            if kws and _is_keyword(wt, kws):
+            
+            # 去掉标点符号
+            wt_clean = wt
+            for p in sentence_ends:
+                wt_clean = wt_clean.replace(p, '')
+            
+            if not wt_clean:  # 如果去掉标点后为空，跳过
+                continue
+            
+            if kws and _is_keyword(wt_clean, kws):
                 # 关键词：换高亮色 + 放大 + 加粗
                 parts.append(
-                    f"{{\\c{hc}\\fs{hi_fs}\\b1}}{wt}{{\\r}}"
+                    f"{{\\c{hc}\\fs{hi_fs}\\b1}}{wt_clean}{{\\r}}"
                 )
             else:
-                parts.append(wt)
-
-        line_text = "  ".join(parts)
+                parts.append(wt_clean)
+        
+        if not parts:  # 如果没有有效内容，跳过
+            continue
+        
+        line_text = " ".join(parts)  # 词间用单空格分隔
         ts = _ass_time(t_start)
         te = _ass_time(max(float(t_end), float(t_start) + 0.05))
         events += f"Dialogue: 0,{ts},{te},Default,,0,0,0,,{line_text}\n"

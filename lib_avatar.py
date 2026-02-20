@@ -74,13 +74,16 @@ def del_avatar(name):
                 p = m.get("path", "")
                 if p and os.path.exists(p):
                     os.remove(p)
-            except Exception:
-                pass
+                    print(f"[删除] 已删除文件: {p}")
+            except Exception as e:
+                print(f"[删除] 删除文件失败: {e}")
             deleted = True
         else:
             new_meta.append(m)
     if deleted:
         save_meta(new_meta)
+        print(f"[删除] 已保存元数据，剩余 {len(new_meta)} 个数字人")
+        print(f"[删除] 元数据文件: {AVATARS_META}")
         return True, f"已删除「{name}」"
     return False, "未找到该数字人"
 
@@ -88,9 +91,7 @@ def del_avatar(name):
 def render_gallery(del_trigger_id="av-del-input"):
     """
     渲染数字人卡片 HTML。
-    每张卡片末尾有一个删除按钮，点击时把名称写入
-    id=del_trigger_id 的隐藏 input，然后触发 change 事件，
-    Gradio 监听该 input 即可实现行内删除。
+    每张卡片末尾有一个删除按钮，点击时弹窗确认后再删除。
     """
     meta = load_meta()
     if not meta:
@@ -115,12 +116,9 @@ def render_gallery(del_trigger_id="av-del-input"):
                 sz = f" · {os.path.getsize(path)/1048576:.1f}MB"
             except Exception:
                 pass
-        # JS：把名称塞进隐藏 textbox，然后 dispatchEvent 触发 Gradio 监听
-        js_click = (
-            f"var el=document.getElementById('{del_trigger_id}');"
-            f"if(el){{el.value='{name}';"
-            f"el.dispatchEvent(new Event('input',{{bubbles:true}}));}}"
-        )
+        # JS：使用自定义删除对话框
+        name_escaped = name.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+        js_click = f"window._zdaiTriggerDel('{del_trigger_id}','{name_escaped}','avatar');"
         cards += f"""
 <div style="display:flex;align-items:center;gap:12px;
   background:#fff;border:1.5px solid #e5e7eb;border-radius:12px;

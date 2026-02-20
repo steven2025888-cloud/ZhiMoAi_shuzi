@@ -11,6 +11,20 @@ except Exception as _libs_err:
     _LIBS_OK = False
     import warnings
     warnings.warn(f"[扩展模块加载失败] {_libs_err}")
+    # 创建安全存根，避免模块未加载时 NameError
+    class _StubLib:
+        def get_choices(self): return ["（模块未加载）"]
+        def get_path(self, n): return None
+        def render_gallery(self, *a, **kw): return '<div style="color:#dc2626;padding:12px;">⚠ 扩展模块加载失败，请检查 lib_avatar/lib_voice/lib_subtitle.py</div>'
+        def add_avatar(self, *a): return False, "模块未加载"
+        def del_avatar(self, *a): return False, "模块未加载"
+        def add_voice(self, *a): return False, "模块未加载"
+        def del_voice(self, *a): return False, "模块未加载"
+        def get_font_choices(self): return ["默认字体"]
+        def burn_subtitles(self, *a, **kw): raise RuntimeError("字幕模块未加载")
+    _av  = _StubLib()
+    _vc  = _StubLib()
+    _sub = _StubLib()
 
 # ── 清除代理 ──
 for _k in ('http_proxy','https_proxy','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','all_proxy'):
@@ -37,7 +51,7 @@ for _e, _v in [
 
 LATENTSYNC_PYTHON = os.path.join(LATENTSYNC_DIR, "latents_env", "python.exe")
 LATENTSYNC_CKPT   = os.path.join(LATENTSYNC_DIR, "checkpoints", "latentsync_unet.pt")
-LATENTSYNC_CONFIG = os.path.join(LATENTSYNC_DIR, "configs", "unet", "stage2.yaml")
+LATENTSYNC_CONFIG = os.path.join(LATENTSYNC_DIR, "configs", "unet", "stage2_efficient.yaml")
 
 sys.path.insert(0, INDEXTTS_DIR)
 sys.path.insert(0, os.path.join(INDEXTTS_DIR, "indextts"))
@@ -256,7 +270,116 @@ INIT_JS = r"""
         try { if (window.pywebview?.api) window.pywebview.api.send_notification(t, b); } catch(_){}
     };
 
-    /* ── 8. 关闭/最小化逻辑 ── */
+    /* ── 8. 删除确认对话框（自定义UI）── */
+    document.body.insertAdjacentHTML('beforeend', `
+      <div id="zdai-del-modal" style="display:none;position:fixed;inset:0;z-index:99998;align-items:center;justify-content:center;">
+        <div style="position:absolute;inset:0;background:rgba(15,23,42,.7);backdrop-filter:blur(8px)" onclick="window._zdaiDelModal.hide()"></div>
+        <div style="position:relative;background:#fff;border-radius:20px;padding:32px 28px 24px;width:420px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.25);animation:zdai-modal-in .2s ease-out">
+          <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#ef4444,#dc2626);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:32px;box-shadow:0 8px 24px rgba(239,68,68,.3)">🗑</div>
+          <div style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:10px" id="zdai-del-title">确认删除</div>
+          <div style="font-size:14px;color:#64748b;margin-bottom:8px;line-height:1.8" id="zdai-del-msg">确定要删除此项吗？</div>
+          <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:12px 14px;margin-bottom:24px">
+            <div style="font-size:13px;font-weight:700;color:#dc2626;margin-bottom:4px">⚠️ 警告</div>
+            <div style="font-size:12px;color:#991b1b;line-height:1.6">删除后无法恢复，文件将被永久删除！</div>
+          </div>
+          <div style="display:flex;gap:12px">
+            <button onclick="window._zdaiDelModal.hide()" style="flex:1;padding:14px;border-radius:12px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;color:#475569;transition:all .15s">取消</button>
+            <button onclick="window._zdaiDelModal.confirm()" style="flex:1;padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;box-shadow:0 4px 12px rgba(239,68,68,.3)">确认删除</button>
+          </div>
+        </div>
+      </div>
+      <style>
+        @keyframes zdai-modal-in {
+          from { opacity:0; transform:scale(.95) translateY(-10px); }
+          to { opacity:1; transform:scale(1) translateY(0); }
+        }
+        #zdai-del-modal button:hover {
+          transform:translateY(-1px);
+        }
+      </style>
+    `);
+
+    window._zdaiDelModal = {
+        _callback: null,
+        show(title, msg, callback) {
+            document.getElementById('zdai-del-title').textContent = title || '确认删除';
+            document.getElementById('zdai-del-msg').textContent = msg || '确定要删除此项吗？';
+            document.getElementById('zdai-del-modal').style.display = 'flex';
+            this._callback = callback;
+        },
+        hide() {
+            document.getElementById('zdai-del-modal').style.display = 'none';
+            this._callback = null;
+        },
+        confirm() {
+            if (this._callback) this._callback();
+            this.hide();
+        }
+    };
+
+    /* ── 9. 删除触发辅助函数（数字人/音色库删除按钮用）── */
+    window._zdaiTriggerDel = function(elemId, name, type) {
+        var typeText = type === 'avatar' ? '数字人' : '音色';
+        window._zdaiDelModal.show(
+            '删除' + typeText,
+            '确定要删除' + typeText + '「' + name + '」吗？',
+            function() {
+                // 尝试多次查找元素，因为Gradio可能延迟渲染
+                var tryCount = 0;
+                var maxTries = 10;
+                
+                function tryTrigger() {
+                    tryCount++;
+                    var wrap = document.getElementById(elemId);
+                    
+                    if (!wrap) { 
+                        if (tryCount < maxTries) {
+                            console.log('[zdai] 第' + tryCount + '次尝试查找元素:', elemId);
+                            setTimeout(tryTrigger, 200);
+                            return;
+                        }
+                        console.error('[zdai] 找不到桥接元素:', elemId, '已尝试', tryCount, '次'); 
+                        alert('删除失败：找不到隐藏输入框元素 ' + elemId);
+                        return;
+                    }
+                    
+                    var el = wrap.querySelector('textarea') || wrap.querySelector('input[type="text"]') || wrap.querySelector('input');
+                    if (!el) { 
+                        if (tryCount < maxTries) {
+                            console.log('[zdai] 第' + tryCount + '次尝试查找input/textarea');
+                            setTimeout(tryTrigger, 200);
+                            return;
+                        }
+                        console.error('[zdai] 找不到 textarea/input in', elemId); 
+                        console.log('[zdai] wrap内容:', wrap.innerHTML);
+                        alert('删除失败：找不到输入框元素');
+                        return; 
+                    }
+                    
+                    // 找到元素，触发删除
+                    try {
+                        var proto = Object.getPrototypeOf(el);
+                        var desc = Object.getOwnPropertyDescriptor(proto, 'value') ||
+                                   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value') ||
+                                   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+                        if (desc && desc.set) { desc.set.call(el, name); }
+                        else { el.value = name; }
+                    } catch(e) { 
+                        console.log('[zdai] 使用简单赋值');
+                        el.value = name; 
+                    }
+                    
+                    el.dispatchEvent(new Event('input',  {bubbles:true, cancelable:true}));
+                    el.dispatchEvent(new Event('change', {bubbles:true, cancelable:true}));
+                    console.log('[zdai] 删除触发成功 elemId=' + elemId + ' name=' + name);
+                }
+                
+                tryTrigger();
+            }
+        );
+    };
+
+    /* ── 10. 关闭/最小化逻辑 ── */
     window._zm = {
         show() {
             const p = localStorage.getItem(PREF);
@@ -456,22 +579,23 @@ input[type=range]{accent-color:#6366f1!important;}
 audio{border-radius:8px!important;}
 
 /* ── ColorPicker 美化（弹窗选色）── */
-/* 让 Gradio ColorPicker 的整体容器有最小宽度，避免被裁剪 */
 .gr-color-picker, [class*="color-picker"], .colorpicker{
   min-width:90px!important;
 }
-/* 颜色色块本体 */
+/* 颜色色块本体：固定样式，确保白色等浅色可见 */
 input[type=color]{
   width:100%!important;min-width:80px!important;
   height:42px!important;cursor:pointer!important;
-  border-radius:10px!important;border:2px solid #e5e7eb!important;
-  padding:3px!important;background:#fff!important;
-  box-shadow:inset 0 1px 3px rgba(0,0,0,.08)!important;
+  border-radius:10px!important;
+  border:2px solid #94a3b8!important;
+  padding:3px!important;
+  background:#fff!important;
+  box-shadow:inset 0 0 0 1.5px #94a3b8, 0 1px 4px rgba(0,0,0,.1)!important;
   transition:border-color .2s,box-shadow .2s!important;
 }
 input[type=color]:hover{
   border-color:#6366f1!important;
-  box-shadow:0 0 0 3px rgba(99,102,241,.15)!important;
+  box-shadow:inset 0 0 0 1.5px #6366f1, 0 0 0 3px rgba(99,102,241,.15)!important;
 }
 /* 字幕面板内颜色行：固定高度，防止拉伸变形 */
 .subtitle-panel .gr-row > *{ min-width:90px!important; }
@@ -485,8 +609,8 @@ input[type=color]:hover{
 
 /* ── 字幕面板 ── */
 .subtitle-panel{
-  background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);
-  border:2px solid #fde68a;
+  background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);
+  border:2px solid #bae6fd;
   border-radius:14px;padding:14px;margin-top:12px;
 }
 .subtitle-panel-head{
@@ -495,14 +619,14 @@ input[type=color]:hover{
 }
 .subtitle-panel-icon{
   width:28px;height:28px;border-radius:8px;
-  background:linear-gradient(135deg,#f59e0b,#d97706);
+  background:linear-gradient(135deg,#0ea5e9,#0284c7);
   display:flex;align-items:center;justify-content:center;
   font-size:14px;flex-shrink:0;
-  box-shadow:0 2px 6px rgba(245,158,11,.3);
+  box-shadow:0 2px 6px rgba(14,165,233,.3);
 }
-.subtitle-panel-title{font-size:14px;font-weight:800;color:#92400e;}
-.subtitle-panel-tip{margin-left:auto;font-size:10px;color:#b45309;
-  background:#fef3c7;border:1px solid #fde68a;
+.subtitle-panel-title{font-size:14px;font-weight:800;color:#0c4a6e;}
+.subtitle-panel-tip{margin-left:auto;font-size:10px;color:#0369a1;
+  background:#e0f2fe;border:1px solid #bae6fd;
   padding:2px 8px;border-radius:20px;}
 
 /* ── 字幕位置选择器 ── */
@@ -517,13 +641,13 @@ input[type=color]:hover{
   background:#fff!important;min-width:0!important;
 }
 .sub-pos-radio label:has(input:checked){
-  border-color:#f59e0b!important;background:#fffbeb!important;color:#92400e!important;
+  border-color:#0ea5e9!important;background:#e0f2fe!important;color:#0c4a6e!important;
 }
 
 /* ── 关键词高亮 checkbox ── */
 .kw-checkbox label{font-weight:700!important;font-size:13px!important;}
 .kw-checkbox input[type=checkbox]{
-  accent-color:#f59e0b!important;width:16px!important;height:16px!important;
+  accent-color:#0ea5e9!important;width:16px!important;height:16px!important;
 }
 
 /* ── 数字人/音色 库卡片 ── */
@@ -611,8 +735,52 @@ input[type=color]:hover{
 ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px;}
 ::-webkit-scrollbar-thumb:hover{background:#94a3b8;}
 
+/* ── 删除桥接控件（不显示但保持DOM中以便JS触发）── */
+#av-del-input, #vc-del-input {
+  position:fixed!important;left:-10000px!important;
+  width:1px!important;height:1px!important;
+  overflow:hidden!important;opacity:0!important;
+  pointer-events:none!important;z-index:-1!important;
+}
+
+/* ── 按钮状态颜色增强 ── */
+.gr-button-primary:active,button.primary:active{
+  transform:translateY(0px)!important;
+  box-shadow:0 2px 8px rgba(99,102,241,.3)!important;
+}
+
+/* ── 工作台面板阴影优化 ── */
+.panel {
+  box-shadow: 0 4px 20px rgba(0,0,0,.06)!important;
+  border-radius: 16px!important;
+}
+
+/* ── 模型状态徽章 ── */
+.badge-ok {
+  background: linear-gradient(135deg,#dcfce7,#bbf7d0);
+  color: #166534; border: 1.5px solid #86efac;
+  border-radius: 20px; padding: 4px 14px;
+  font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.badge-err {
+  background: linear-gradient(135deg,#fee2e2,#fecaca);
+  color: #991b1b; border: 1.5px solid #fca5a5;
+  border-radius: 20px; padding: 4px 14px;
+  font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+
 /* ── Gradio flex 修复 ── */
 .stretch>div>.column>*,.stretch>div>.column>.form>*{flex-grow:0!important;}
+
+/* ── 描边颜色选择器加粗边框 ── */
+#sub-outline-color input[type="color"],
+#sub-outline-color .color-picker-input,
+#sub-outline-color input{
+  border-width:3px!important;
+  border-color:#64748b!important;
+}
 """
 
 
@@ -626,10 +794,38 @@ def auto_load_model():
     original_cwd = os.getcwd()
     os.chdir(INDEXTTS_DIR)
     try:
-        safe_print("[MODEL] Loading IndexTTS2...")
+        safe_print("[MODEL] 正在加载 IndexTTS2 声学模型...")
         from indextts.infer_v2 import IndexTTS2
         tts = IndexTTS2(model_dir=model_dir,
                         cfg_path=os.path.join(model_dir, "config.yaml"), use_fp16=True)
+        safe_print("[MODEL] 模型加载完成，正在预热引擎...")
+        # 预热：触发一次推理内部初始化（CUDA图/JIT编译等），避免首次合成卡顿
+        try:
+            import tempfile, numpy as np
+            _dummy_wav = os.path.join(OUTPUT_DIR, "_warmup.wav")
+            # 找任意一个已有音色作为 prompt 进行预热
+            _voice_meta = os.path.join(BASE_DIR, "voices", "meta.json")
+            _prompt = None
+            if os.path.exists(_voice_meta):
+                import json as _json
+                _vm = _json.load(open(_voice_meta, encoding='utf-8'))
+                if _vm and os.path.exists(_vm[0].get("path","")):
+                    _prompt = _vm[0]["path"]
+            if _prompt:
+                tts.infer(spk_audio_prompt=_prompt, text="你好。",
+                          output_path=_dummy_wav,
+                          do_sample=True, top_p=0.8, top_k=30,
+                          temperature=0.8, length_penalty=0.0,
+                          num_beams=1, repetition_penalty=10.0,
+                          max_mel_tokens=200,
+                          emo_audio_prompt=None, emo_alpha=0.5,
+                          emo_vector=None, use_emo_text=False,
+                          emo_text=None, use_random=False)
+                try: os.remove(_dummy_wav)
+                except Exception: pass
+                safe_print("[MODEL] 引擎预热完成，首次合成将直接输出")
+        except Exception as _we:
+            safe_print("[MODEL] 预热跳过（无音色文件或预热失败）: " + str(_we))
         safe_print("[MODEL] OK")
     except Exception as e:
         safe_print("[MODEL] FAIL: " + str(e)); traceback.print_exc()
@@ -653,7 +849,7 @@ def generate_speech(text, prompt_audio, top_p, top_k, temperature, num_beams,
     out = os.path.join(OUTPUT_DIR, f"tts_{ts}.wav")
     cwd = os.getcwd(); os.chdir(INDEXTTS_DIR)
     try:
-        progress(0.1, desc="正在合成语音...")
+        progress(0.25, desc="🎯 配置生成参数...")
         kw = dict(
             do_sample=True, top_p=float(top_p), top_k=int(top_k),
             temperature=float(temperature), length_penalty=0.0,
@@ -663,12 +859,15 @@ def generate_speech(text, prompt_audio, top_p, top_k, temperature, num_beams,
         emo_ref_path, vec, use_emo_text = None, None, False
         if emo_mode == "使用情感参考音频":
             emo_ref_path = emo_audio
+            progress(0.30, desc="🎭 加载情感参考...")
         elif emo_mode == "使用情感向量控制":
             vec = tts.normalize_emo_vec([vec1,vec2,vec3,vec4,vec5,vec6,vec7,vec8], apply_bias=True)
+            progress(0.30, desc="🎭 应用情感向量...")
         elif emo_mode == "使用情感描述文本控制":
             use_emo_text = True
+            progress(0.30, desc="🎭 解析情感描述...")
 
-        progress(0.3, desc="生成音频中...")
+        progress(0.35, desc="🚀 开始生成音频（请耐心等待）...")
         final_emo_text = None
         if emo_text and isinstance(emo_text, str) and emo_text.strip():
             final_emo_text = emo_text.strip()
@@ -679,7 +878,9 @@ def generate_speech(text, prompt_audio, top_p, top_k, temperature, num_beams,
             emo_vector=vec, use_emo_text=use_emo_text, emo_text=final_emo_text,
             use_random=False, **kw
         )
-        os.chdir(cwd); progress(1.0, desc="合成完成")
+        os.chdir(cwd)
+        progress(0.90, desc="💾 保存音频文件...")
+        progress(1.0, desc="✅ 合成完成")
         return out, "✅ 语音合成完成", out
     except Exception as e:
         os.chdir(cwd); traceback.print_exc()
@@ -805,7 +1006,7 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
            "--inference_ckpt_path", LATENTSYNC_CKPT,
            "--video_path", sv, "--audio_path", sa,
            "--video_out_path", out,
-           "--inference_steps", "20", "--guidance_scale", "1.5", "--seed", "1247"]
+           "--inference_steps", "12", "--guidance_scale", "1.2", "--seed", "1247"]
 
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
@@ -816,11 +1017,16 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
         raise gr.Error("启动生成引擎失败: " + str(e))
 
     last = 0.05
-    progress(0.08, desc="正在加载模型权重...")
+    progress(0.08, desc="🔄 正在启动生成引擎...")
 
     # 保存两层进度信息
     step_progress = None  # 步骤进度 (3/4)
     frame_progress = None  # 帧进度 (13/21)
+    
+    # 模型加载阶段的进度模拟
+    loading_stage = 0
+    loading_keywords = ["Loading", "loading", "Initializing", "initializing", "model", "checkpoint"]
+    first_output = True
 
     while True:
         line = proc.stdout.readline()
@@ -829,6 +1035,20 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
         line = line.strip()
         if not line: continue
         safe_print("[LS] " + line)
+        
+        # 检测模型加载阶段
+        if first_output or any(kw in line for kw in loading_keywords):
+            first_output = False
+            loading_stage += 1
+            if loading_stage <= 3:
+                progress(0.08 + loading_stage * 0.01, desc="⏳ 正在加载 UNet 模型...")
+            elif loading_stage <= 6:
+                progress(0.08 + loading_stage * 0.01, desc="⏳ 正在加载 VAE 解码器...")
+            elif loading_stage <= 10:
+                progress(0.08 + loading_stage * 0.01, desc="⏳ 正在初始化音频编码器...")
+            else:
+                progress(0.12, desc="✓ 模型加载完成，开始处理...")
+        
         parsed = parse_progress_line(line)
         if not parsed: continue
         stage, pct, cur, total, progress_type = parsed
@@ -1020,8 +1240,8 @@ def _render_batch_prog(done, total, cur_name, status, msg, out_folder=""):
 #  构建 UI
 # ══════════════════════════════════════════════════════════════
 def build_ui():
-    badge = ('<span class="badge-ok">● 模型已就绪</span>' if tts
-             else '<span class="badge-err">● 模型加载失败</span>')
+    badge = ('<span class="badge-ok">● 引擎已就绪 · 可直接合成</span>' if tts
+             else '<span class="badge-err">● 模型加载失败，请重启</span>')
 
     # logo 路径：使用相对路径或base64编码
     logo_path = os.path.join(BASE_DIR, 'logo.jpg')
@@ -1035,13 +1255,15 @@ def build_ui():
     with gr.Blocks(
         title=APP_NAME,
         css=CUSTOM_CSS,
-        js=INIT_JS,
         theme=gr.themes.Base(
             primary_hue=gr.themes.colors.indigo,
             secondary_hue=gr.themes.colors.purple,
             font=[gr.themes.GoogleFont("Noto Sans SC"), "Microsoft YaHei", "system-ui"],
         ),
     ) as app:
+
+        # ── 注入JS代码 ──
+        gr.HTML(f"<script>({INIT_JS})()</script>")
 
         # ── 顶部导航栏 ────────────────────────────────────────
         logo_img_html = ''
@@ -1066,6 +1288,14 @@ def build_ui():
                 padding:3px 10px;border-radius:20px;border:1px solid #334155;">
               v2.0 专业版
             </span>
+            <button onclick="try{{window._zm.show()}}catch(e){{if(window.pywebview?.api?.close_window)window.pywebview.api.close_window();else window.close()}}"
+                style="background:rgba(239,68,68,.15);border:1.5px solid rgba(239,68,68,.3);
+                color:#fca5a5;width:32px;height:32px;border-radius:8px;cursor:pointer;
+                font-size:16px;display:flex;align-items:center;justify-content:center;
+                transition:all .15s;font-family:inherit;padding:0;"
+                onmouseover="this.style.background='#dc2626';this.style.borderColor='#dc2626';this.style.color='#fff'"
+                onmouseout="this.style.background='rgba(239,68,68,.15)';this.style.borderColor='rgba(239,68,68,.3)';this.style.color='#fca5a5'"
+                title="关闭程序">✕</button>
           </div>
         </div>
         """)
@@ -1118,10 +1348,10 @@ def build_ui():
                                 top_p = gr.Slider(label="词语多样性", info="越高输出越随机，建议 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
                                 top_k = gr.Slider(label="候选词数量", info="限制每步候选词，越小越保守，建议 20~50", minimum=1, maximum=100, value=30, step=1)
                             with gr.Row():
-                                temperature = gr.Slider(label="语气活跃度", info="越高语气越有变化，越低越平稳", minimum=0.1, maximum=2.0, value=0.8, step=0.1)
-                                num_beams   = gr.Slider(label="精确搜索强度", info="越高越精确但更慢，建议 1~5", minimum=1, maximum=10, value=3, step=1)
+                                temperature = gr.Slider(label="语气活跃度", info="越高语气越有变化，越低越平稳", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
+                                num_beams   = gr.Slider(label="精确搜索强度", info="越高越精确但更慢，建议 1~3", minimum=1, maximum=10, value=1, step=1)
                             with gr.Row():
-                                repetition_penalty = gr.Slider(label="避免重复程度", info="越高越不会重复相同词语", minimum=1.0, maximum=20.0, value=10.0, step=0.5)
+                                repetition_penalty = gr.Slider(label="避免重复程度", info="越高越不会重复相同词语", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
                                 max_mel_tokens     = gr.Slider(label="最大音频长度", info="更长文本需要更大数值，建议 1000~2000", minimum=500, maximum=3000, value=1500, step=100)
                             gr.HTML('<div class="divider"></div>')
                             gr.Markdown("### 🎭 情感控制")
@@ -1208,9 +1438,9 @@ def build_ui():
                         with gr.Group(elem_classes="subtitle-panel"):
                             gr.HTML(
                                 '<div class="subtitle-panel-head">'
-                                '<div class="subtitle-panel-icon">📝</div>'
+                                '<div class="subtitle-panel-icon">✏️</div>'
                                 '<span class="subtitle-panel-title">智能字幕</span>'
-                                '<span class="subtitle-panel-tip">支持关键词高亮</span>'
+                                '<span class="subtitle-panel-tip">✨ 支持关键词高亮</span>'
                                 '</div>'
                             )
                             # 行1：字体 字号 位置
@@ -1233,10 +1463,11 @@ def build_ui():
                                     label="高亮颜色", value="#FFD700", scale=1)
                             with gr.Row():
                                 sub_outline_txt = gr.ColorPicker(
-                                    label="描边颜色", value="#000000", scale=1)
+                                    label="描边颜色", value="#000000", scale=1,
+                                    elem_id="sub-outline-color")
                                 sub_outline_size = gr.Slider(
-                                    label="描边宽度 px", minimum=0, maximum=6,
-                                    value=2, step=1, scale=1)
+                                    label="描边宽度 px", minimum=0, maximum=8,
+                                    value=4, step=1, scale=1)
                             # 行3：关键词高亮
                             with gr.Row():
                                 sub_kw_enable = gr.Checkbox(
@@ -1351,17 +1582,10 @@ def build_ui():
                         av_gallery = gr.HTML(
                             value=_av.render_gallery("av-del-input") if _LIBS_OK else "")
                         # JS桥接：卡片上的🗑按钮写入此隐藏textbox触发删除
-                        av_del_js_input = gr.Textbox(
-                            elem_id="av-del-input", visible=False, value="")
+                        with gr.Row(visible=False):
+                            av_del_js_input = gr.Textbox(
+                                elem_id="av-del-input", value="", interactive=True)
                         av_del_real_hint = gr.HTML(value="")
-                        # 底部下拉删除（备用，与卡片共享同一 handler）
-                        with gr.Row():
-                            av_del_sel = gr.Dropdown(
-                                label="或从列表选择删除", show_label=True,
-                                choices=_av.get_choices() if _LIBS_OK else [],
-                                value=None, scale=4)
-                            av_del_real_btn = gr.Button("🗑 删除", variant="stop",
-                                                        scale=1, min_width=80)
                         gr.HTML('<div class="divider"></div>')
                         gr.HTML('<div class="section-label">🔍 预览</div>')
                         av_prev_dd = gr.Dropdown(
@@ -1410,16 +1634,10 @@ def build_ui():
                         )
                         vc_gallery = gr.HTML(
                             value=_vc.render_gallery("vc-del-input") if _LIBS_OK else "")
-                        vc_del_js_input = gr.Textbox(
-                            elem_id="vc-del-input", visible=False, value="")
+                        with gr.Row(visible=False):
+                            vc_del_js_input = gr.Textbox(
+                                elem_id="vc-del-input", value="", interactive=True)
                         vc_del_real_hint = gr.HTML(value="")
-                        with gr.Row():
-                            vc_del_sel = gr.Dropdown(
-                                label="或从列表选择删除", show_label=True,
-                                choices=_vc.get_choices() if _LIBS_OK else [],
-                                value=None, scale=4)
-                            vc_del_real_btn = gr.Button("🗑 删除", variant="stop",
-                                                        scale=1, min_width=80)
                         gr.HTML('<div class="divider"></div>')
                         gr.HTML('<div class="section-label">🔊 试听</div>')
                         vc_prev_dd = gr.Dropdown(
@@ -1737,59 +1955,46 @@ def build_ui():
                      progress=gr.Progress()):
             # 参数验证
             if not text or not text.strip():
-                yield None, _make_log(False,"请输入文本"), None; return
+                raise gr.Error("请输入文本")
             if pa is None:
-                yield None, _make_log(False,"请先选择音色或上传参考音频"), None; return
-
-            result = {"out": None, "err": None}
-
-            def _run():
-                try:
-                    # 子线程里不能用 Gradio progress，传 noop lambda
-                    def _noop_progress(*a, **kw): pass
-                    r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt,
-                                        emo_m, emo_a, emo_w, emo_t,
-                                        v1, v2, v3, v4, v5, v6, v7, v8,
-                                        progress=_noop_progress)
-                    result["out"] = r
-                except Exception as e:
-                    result["err"] = e
-
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
-
-            # 等待完成，期间每 0.4s yield 一次保持UI响应
-            steps = ["正在加载音色...", "正在合成语音...", "生成音频中...", "优化输出..."]
-            si = 0
-            while t.is_alive():
-                progress(0.1 + min(0.7, si * 0.12), desc=steps[min(si, len(steps)-1)])
-                si += 1
-                t.join(timeout=0.4)
-                yield gr.update(), gr.update(), gr.update()
-
-            if result["err"]:
-                yield None, _make_log(False, f"合成失败: {result['err']}"), None; return
-
-            r = result["out"]
-            out_path = r[0]
-            # Windows Toast
+                raise gr.Error("请先选择音色或上传参考音频")
             try:
-                ps = (
-                    "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
-                    "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom,ContentType=WindowsRuntime]|Out-Null;"
-                    "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(2);"
-                    "$x.GetElementsByTagName('text')[0].AppendChild($x.CreateTextNode('织梦AI — 语音合成完成'))|Out-Null;"
-                    "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('音频已生成，可以进行口型同步。'))|Out-Null;"
-                    "$n=[Windows.UI.Notifications.ToastNotification]::new($x);"
-                    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('织梦AI').Show($n);"
-                )
-                subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", ps],
-                                 creationflags=subprocess.CREATE_NO_WINDOW,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
-            progress(1.0, desc="合成完成 ✓")
-            yield out_path, _make_log(True, "语音合成完成 — " + os.path.basename(out_path)), out_path
+                progress(0.02, desc="🎤 准备合成...")
+                progress(0.05, desc="📝 分析文本内容...")
+                progress(0.10, desc="🎵 加载音色特征...")
+                progress(0.15, desc="⚙️ 初始化生成器...")
+                progress(0.20, desc="🔄 正在生成语音（这可能需要 10-30 秒）...")
+                
+                r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt,
+                                    emo_m, emo_a, emo_w, emo_t,
+                                    v1, v2, v3, v4, v5, v6, v7, v8,
+                                    progress=progress)
+                out_path = r[0]
+                
+                progress(0.95, desc="✨ 优化音频质量...")
+                progress(1.0, desc="✅ 合成完成！")
+                
+                # Windows Toast
+                try:
+                    ps = (
+                        "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
+                        "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom,ContentType=WindowsRuntime]|Out-Null;"
+                        "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(2);"
+                        "$x.GetElementsByTagName('text')[0].AppendChild($x.CreateTextNode('织梦AI — 语音合成完成'))|Out-Null;"
+                        "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('音频已生成，可以进行口型同步。'))|Out-Null;"
+                        "$n=[Windows.UI.Notifications.ToastNotification]::new($x);"
+                        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('织梦AI').Show($n);"
+                    )
+                    subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", ps],
+                                     creationflags=subprocess.CREATE_NO_WINDOW,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+                return out_path, _make_log(True, "语音合成完成 — " + os.path.basename(out_path)), out_path
+            except gr.Error:
+                raise
+            except Exception as e:
+                raise gr.Error("合成失败: " + str(e))
 
         gen_btn.click(tts_wrap,
             inputs=[input_text, prompt_audio, top_p, top_k, temperature,
@@ -1853,7 +2058,7 @@ def build_ui():
         def _save_avatar(video, name, progress=gr.Progress()):
             if not _LIBS_OK: return _hint_html("error","扩展模块未加载"), "", gr.update(), gr.update(), gr.update()
             if not video:
-                return _hint_html("warning","请先上传视频"), _av.render_gallery(), gr.update(), gr.update(), gr.update()
+                return _hint_html("warning","请先上传视频"), (_av.render_gallery() if _LIBS_OK else ""), gr.update(), gr.update(), gr.update()
             # 先转码保证存储的是可播放格式
             try:
                 converted = convert_video_for_browser(video, progress)
@@ -1870,13 +2075,13 @@ def build_ui():
 
         # ── 数字人 Tab 事件 ──────────────────────────────────
         def _av_all_outputs(hint_html):
-            """统一返回格式：hint + gallery + 三个下拉刷新"""
-            ch = _av.get_choices()
+            """统一返回格式：hint + gallery + 两个下拉刷新 + 清空隐藏输入框"""
+            ch = _av.get_choices() if _LIBS_OK else []
             return (hint_html,
-                    _av.render_gallery("av-del-input"),
+                    _av.render_gallery("av-del-input") if _LIBS_OK else "",
                     gr.update(choices=ch, value=None),
                     gr.update(choices=ch, value=None),
-                    gr.update(choices=ch, value=None))
+                    gr.update(value=""))  # 清空隐藏输入框
 
         def _save_avatar_handler(video, name, progress=gr.Progress()):
             if not _LIBS_OK:
@@ -1893,24 +2098,32 @@ def build_ui():
 
         av_save_btn.click(_save_avatar_handler,
             inputs=[av_upload, av_name],
-            outputs=[av_save_hint, av_gallery, avatar_select, av_del_sel, av_prev_dd])
+            outputs=[av_save_hint, av_gallery, avatar_select, av_prev_dd, av_del_js_input])
 
         def _del_avatar_handler(name):
+            print(f"[DEBUG] _del_avatar_handler 被调用，name='{name}'")
             if not _LIBS_OK:
+                print("[DEBUG] 扩展模块未加载")
                 return _av_all_outputs(_hint_html("error","扩展模块未加载"))
             if not name or not name.strip() or name.startswith("（"):
+                print(f"[DEBUG] 名称无效: '{name}'")
                 return _av_all_outputs(_hint_html("warning","请先选择要删除的数字人"))
+            print(f"[DEBUG] 调用 del_avatar('{name.strip()}')")
             ok, msg = _av.del_avatar(name.strip())
-            return _av_all_outputs(_hint_html("ok" if ok else "warning", msg))
+            print(f"[DEBUG] del_avatar 返回: ok={ok}, msg={msg}")
+            # 返回时需要清空隐藏输入框，避免重复触发
+            ch = _av.get_choices()
+            print(f"[DEBUG] 更新后的选项: {ch}")
+            return (_hint_html("ok" if ok else "warning", msg),
+                    _av.render_gallery("av-del-input"),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None),
+                    gr.update(value=""))  # 清空隐藏输入框
 
         # 卡片内 🗑 按钮 → JS 写入隐藏 textbox → change 事件触发
         av_del_js_input.change(_del_avatar_handler,
             inputs=[av_del_js_input],
-            outputs=[av_del_real_hint, av_gallery, avatar_select, av_del_sel, av_prev_dd])
-        # 底部下拉+按钮备用删除
-        av_del_real_btn.click(_del_avatar_handler,
-            inputs=[av_del_sel],
-            outputs=[av_del_real_hint, av_gallery, avatar_select, av_del_sel, av_prev_dd])
+            outputs=[av_del_real_hint, av_gallery, avatar_select, av_prev_dd, av_del_js_input])
 
         def _preview_avatar(name):
             if not _LIBS_OK or not name or name.startswith("（"):
@@ -1924,12 +2137,12 @@ def build_ui():
 
         # ── 音色 Tab 事件 ──────────────────────────────────
         def _vc_all_outputs(hint_html):
-            ch = _vc.get_choices()
+            ch = _vc.get_choices() if _LIBS_OK else []
             return (hint_html,
-                    _vc.render_gallery("vc-del-input"),
+                    _vc.render_gallery("vc-del-input") if _LIBS_OK else "",
                     gr.update(choices=ch, value=None),
                     gr.update(choices=ch, value=None),
-                    gr.update(choices=ch, value=None))
+                    gr.update(value=""))  # 清空隐藏输入框
 
         def _save_voice(audio, name):
             if not _LIBS_OK:
@@ -1939,24 +2152,32 @@ def build_ui():
 
         vc_save_btn.click(_save_voice,
             inputs=[vc_upload, vc_name],
-            outputs=[vc_save_hint, vc_gallery, voice_select, vc_del_sel, vc_prev_dd])
+            outputs=[vc_save_hint, vc_gallery, voice_select, vc_prev_dd, vc_del_js_input])
 
         def _del_voice_handler(name):
+            print(f"[DEBUG] _del_voice_handler 被调用，name='{name}'")
             if not _LIBS_OK:
+                print("[DEBUG] 扩展模块未加载")
                 return _vc_all_outputs(_hint_html("error","扩展模块未加载"))
             if not name or not name.strip() or name.startswith("（"):
+                print(f"[DEBUG] 名称无效: '{name}'")
                 return _vc_all_outputs(_hint_html("warning","请先选择要删除的音色"))
+            print(f"[DEBUG] 调用 del_voice('{name.strip()}')")
             ok, msg = _vc.del_voice(name.strip())
-            return _vc_all_outputs(_hint_html("ok" if ok else "warning", msg))
+            print(f"[DEBUG] del_voice 返回: ok={ok}, msg={msg}")
+            # 返回时需要清空隐藏输入框，避免重复触发
+            ch = _vc.get_choices()
+            print(f"[DEBUG] 更新后的选项: {ch}")
+            return (_hint_html("ok" if ok else "warning", msg),
+                    _vc.render_gallery("vc-del-input"),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None),
+                    gr.update(value=""))  # 清空隐藏输入框
 
         # 卡片内 🗑 按钮 → JS bridge
         vc_del_js_input.change(_del_voice_handler,
             inputs=[vc_del_js_input],
-            outputs=[vc_del_real_hint, vc_gallery, voice_select, vc_del_sel, vc_prev_dd])
-        # 底部下拉备用
-        vc_del_real_btn.click(_del_voice_handler,
-            inputs=[vc_del_sel],
-            outputs=[vc_del_real_hint, vc_gallery, voice_select, vc_del_sel, vc_prev_dd])
+            outputs=[vc_del_real_hint, vc_gallery, voice_select, vc_prev_dd, vc_del_js_input])
 
         vc_prev_dd.change(
             lambda n: (_vc.get_path(n) if (_LIBS_OK and n and not n.startswith("（")) else None),
@@ -2039,12 +2260,20 @@ def build_ui():
 
             threading.Thread(target=_run, daemon=True).start()
 
-            # 显示加载状态
+            # 显示加载状态 - 更详细的提示
             loading_html = (
                 '<div style="background:linear-gradient(135deg,#1e293b,#0f172a);' +
-                'border:1.5px solid #6366f1;border-radius:12px;padding:12px 16px;' +
-                'font-family:Microsoft YaHei,sans-serif;font-size:12px;color:#94a3b8;text-align:center;">' +
-                '<span style="color:#6366f1;font-weight:700;">⏳ 正在生成...</span></div>'
+                'border:1.5px solid #6366f1;border-radius:12px;padding:16px 20px;' +
+                'font-family:Microsoft YaHei,sans-serif;">' +
+                '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">' +
+                '<div style="width:10px;height:10px;border-radius:50%;background:#6366f1;animation:pulse 1.5s infinite;"></div>' +
+                '<span style="color:#e2e8f0;font-weight:700;font-size:14px;">正在启动生成引擎</span></div>' +
+                '<div style="font-size:12px;color:#94a3b8;line-height:1.8;">' +
+                '⏳ 正在加载深度学习模型（首次启动需要 10-30 秒）<br>' +
+                '📦 加载 UNet、VAE、音频编码器等组件<br>' +
+                '💡 请耐心等待，模型加载完成后会立即开始生成</div>' +
+                '<style>@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}</style>' +
+                '</div>'
             )
             yield gr.update(), gr.update(), gr.update(value=loading_html, visible=True)
 
