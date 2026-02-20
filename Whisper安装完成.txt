@@ -1,0 +1,95 @@
+═══════════════════════════════════════════════════════════
+  Whisper 安装完成通知
+═══════════════════════════════════════════════════════════
+
+✓ Whisper 已成功安装！
+
+版本信息：
+- Whisper: 20250625（最新版）
+- Tiktoken: 0.12.0（依赖包）
+
+安装位置：
+IndexTTS2-SonicVale/installer_files/env/Lib/site-packages/whisper/
+
+可执行文件：
+IndexTTS2-SonicVale/installer_files/env/Scripts/whisper.exe
+
+
+【可用模型】
+
+已可以使用以下模型（首次使用时自动下载）：
+
+1. tiny（39MB）- 最快，适合测试
+2. base（74MB）- 日常使用
+3. small（244MB）- 推荐，平衡速度和准确度
+4. medium（769MB）- 高准确度
+5. large（1550MB）- 最高准确度
+6. turbo（809MB）- 新版本，速度快准确度高
+
+
+【快速开始】
+
+Python 代码示例：
+```python
+import whisper
+
+# 加载模型
+model = whisper.load_model("base")
+
+# 转录音频
+result = model.transcribe("audio.mp3", language="zh")
+
+# 获取文本
+print(result["text"])
+```
+
+命令行使用：
+```bash
+IndexTTS2-SonicVale\installer_files\env\Scripts\whisper.exe audio.mp3 --language Chinese
+```
+
+
+【重要提示】
+
+1. FFmpeg 依赖
+   Whisper 需要 FFmpeg 处理音频文件
+   织梦AI 已包含 FFmpeg：LatentSync/ffmpeg-7.1/bin/ffmpeg.exe
+   
+   如果遇到 FFmpeg 错误，请将 FFmpeg 添加到系统 PATH
+
+2. 首次使用
+   首次使用某个模型时会自动下载
+   模型保存在：C:\Users\用户名\.cache\whisper\
+   
+3. GPU 加速
+   如果有 NVIDIA 显卡，Whisper 会自动使用 GPU 加速
+   CPU 模式下请设置 fp16=False
+
+
+【相关文件】
+
+- Whisper使用说明.txt - 详细使用教程
+- test_whisper.py - 测试脚本
+- 测试Whisper.bat - 快速测试
+
+
+【下一步】
+
+1. 查看"Whisper使用说明.txt"了解详细用法
+2. 运行"测试Whisper.bat"测试功能
+3. 在你的项目中集成 Whisper
+
+
+【更新安装依赖脚本】
+
+"安装依赖.bat"已更新，现在包含 Whisper 安装
+客户运行此脚本时会自动安装：
+- pystray（系统托盘）
+- pywin32（Windows API）
+- Whisper（语音识别）
+
+
+═══════════════════════════════════════════════════════════
+  安装日期：2026-02-20
+  状态：✓ 安装成功，可以使用
+═══════════════════════════════════════════════════════════

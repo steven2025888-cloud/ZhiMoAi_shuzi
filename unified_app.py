@@ -1,6 +1,17 @@
 # -*- coding: utf-8 -*-
 import os, sys, time, subprocess, traceback, shutil, re, json, queue as _queue, threading
 
+# ── 新功能模块（数字人 / 音色 / 字幕）──
+try:
+    import lib_avatar as _av
+    import lib_voice  as _vc
+    import lib_subtitle as _sub
+    _LIBS_OK = True
+except Exception as _libs_err:
+    _LIBS_OK = False
+    import warnings
+    warnings.warn(f"[扩展模块加载失败] {_libs_err}")
+
 # ── 清除代理 ──
 for _k in ('http_proxy','https_proxy','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','all_proxy'):
     os.environ.pop(_k, None)
@@ -299,210 +310,313 @@ INIT_JS = r"""
 #  CSS
 # ══════════════════════════════════════════════════════════════
 CUSTOM_CSS = """
-/* ── 全局重置 ── */
+/* ════════════════════════════════════════
+   织梦AI — 商业UI主题  v4.0
+   ════════════════════════════════════════ */
+
+/* ── 隐藏Gradio系统元素 ── */
 footer,.footer,.built-with,#footer,.show-api,.api-docs,
 a[href*="gradio.app"],a[href*="huggingface"],
 button[aria-label="Settings"],.hamburger-menu,span.version
 {display:none!important;height:0!important;overflow:hidden!important;}
 
-/* ── 全局背景 & 容器 ── */
-body, .gradio-container { background:#f1f5f9!important; }
-.gradio-container {
-  padding-bottom:54px!important;
-  min-height:0!important;
-  overflow-x:hidden!important;
-}
+/* ── 全局 ── */
+*{box-sizing:border-box;}
+body,.gradio-container{background:#f0f2f7!important;font-family:'Microsoft YaHei',system-ui,sans-serif!important;}
+.gradio-container{padding-bottom:60px!important;min-height:0!important;overflow-x:hidden!important;}
 
 /* ── 顶栏 ── */
-.topbar {
-  background:#fff;
-  border-bottom:1px solid #e2e8f0;
-  padding:0 24px;height:56px;
+.topbar{
+  background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e1b4b 100%);
+  border-bottom:1px solid rgba(255,255,255,.08);
+  padding:0 28px;height:60px;
   display:flex;align-items:center;justify-content:space-between;
-  box-shadow:0 1px 6px rgba(0,0,0,.06);
+  box-shadow:0 2px 16px rgba(99,102,241,.25);
   position:sticky;top:0;z-index:100;
 }
-.topbar-brand { display:flex;align-items:center;gap:12px; }
-.topbar-logo  {
-  width:36px;height:36px;border-radius:10px;
-  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+.topbar-brand{display:flex;align-items:center;gap:14px;}
+.topbar-logo{
+  width:38px;height:38px;border-radius:10px;
+  background:linear-gradient(135deg,#6366f1,#a78bfa);
   display:flex;align-items:center;justify-content:center;
-  font-size:18px;font-weight:900;color:#fff;
-  box-shadow:0 2px 8px rgba(99,102,241,.35);
+  font-size:18px;box-shadow:0 2px 8px rgba(99,102,241,.4);
+  border:1.5px solid rgba(255,255,255,.2);
 }
-.topbar-name  { font-size:16px;font-weight:800;color:#0f172a;letter-spacing:.3px; }
-.topbar-sub   { font-size:11px;color:#94a3b8;margin-top:1px; }
+.topbar-title{font-size:17px;font-weight:800;color:#fff;letter-spacing:.3px;}
+.topbar-sub{font-size:11px;color:rgba(255,255,255,.55);letter-spacing:.5px;margin-top:2px;}
 
-/* ── 状态徽章 ── */
-.badge-ok  {
-  background:linear-gradient(135deg,#f0fdf4,#dcfce7);
-  border:1px solid #bbf7d0;color:#15803d;
-  border-radius:20px;padding:4px 14px;font-size:11px;font-weight:700;
-  box-shadow:0 1px 3px rgba(0,0,0,.05);
+/* ── Tab 导航 ── */
+.tabs button[role=tab]{
+  font-size:13px!important;font-weight:600!important;
+  padding:10px 20px!important;border-radius:8px 8px 0 0!important;
+  color:#64748b!important;border:none!important;background:transparent!important;
+  transition:all .2s!important;
 }
-.badge-err {
-  background:linear-gradient(135deg,#fff1f2,#ffe4e6);
-  border:1px solid #fecdd3;color:#be123c;
-  border-radius:20px;padding:4px 14px;font-size:11px;font-weight:700;
+.tabs button[role=tab][aria-selected=true]{
+  color:#6366f1!important;font-weight:700!important;
+  border-bottom:3px solid #6366f1!important;
+  background:rgba(99,102,241,.06)!important;
 }
 
-/* ── 工作区 ── */
-.workspace { padding:12px!important; gap:12px!important; }
+/* ── 工作台布局 ── */
+.workspace{gap:14px!important;padding:14px 14px 0!important;align-items:stretch!important;}
 
-/* ── 面板 ── */
-.panel {
+/* ── 面板卡片 ── */
+.panel{
   background:#fff!important;
-  border:1px solid #e2e8f0!important;
-  border-radius:14px!important;
-  padding:14px 14px!important;
-  box-shadow:0 2px 8px rgba(0,0,0,.05)!important;
+  border:1px solid #e5e7eb!important;
+  border-radius:16px!important;
+  padding:18px!important;
+  box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04)!important;
   transition:box-shadow .2s!important;
+  overflow:visible!important;
 }
-.panel:hover { box-shadow:0 4px 16px rgba(0,0,0,.09)!important; }
+.panel:hover{box-shadow:0 2px 8px rgba(0,0,0,.07),0 8px 24px rgba(0,0,0,.06)!important;}
 
-/* ── 面板标题（编号 chip 与标题同行显示）── */
-.panel-head {
-  display:flex;align-items:center;gap:8px;
-  font-size:14px;font-weight:800;color:#0f172a;
-  border-bottom:2px solid #f1f5f9;
-  padding-bottom:10px;margin-bottom:12px;
-  line-height:1.3;
+/* ── 步骤标题栏 ── */
+.step-header{
+  display:flex;align-items:center;gap:10px;
+  padding-bottom:14px;margin-bottom:14px;
+  border-bottom:1.5px solid #f1f5f9;
 }
-.step-chip {
-  width:24px;height:24px;border-radius:7px;flex-shrink:0;
+.step-num{
+  width:28px;height:28px;border-radius:8px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:800;color:#fff;
   background:linear-gradient(135deg,#6366f1,#8b5cf6);
-  color:#fff;font-size:12px;font-weight:800;
-  display:inline-flex;align-items:center;justify-content:center;
-  box-shadow:0 2px 6px rgba(99,102,241,.4);
+  box-shadow:0 2px 6px rgba(99,102,241,.35);
+}
+.step-title{font-size:15px;font-weight:800;color:#0f172a;letter-spacing:.2px;}
+.step-badge{
+  margin-left:auto;font-size:10px;font-weight:700;
+  padding:2px 8px;border-radius:20px;
+  background:#ede9fe;color:#6d28d9;white-space:nowrap;
 }
 
 /* ── 分割线 ── */
-.divider { border:none;border-top:1px solid #f1f5f9;margin:10px 0; }
+.divider{height:1px;background:#f1f5f9;margin:12px 0;}
 
-/* ── 状态文字 ── */
-.status-ok  { color:#15803d!important;font-size:12px!important;font-weight:600!important; }
-.status-err { color:#dc2626!important;font-size:12px!important;font-weight:600!important; }
-
-/* ── 控件美化 ── */
-input[type=range] { accent-color:#6366f1!important; }
-button.primary    { box-shadow:0 2px 8px rgba(99,102,241,.3)!important; }
-
-/* ── 滚动条 ── */
-::-webkit-scrollbar { width:4px;height:4px; }
-::-webkit-scrollbar-track { background:transparent; }
-::-webkit-scrollbar-thumb { background:#cbd5e1;border-radius:4px; }
-::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
-
-/* ── Gradio flex 高度修复 ── */
-.stretch > div > .column > *,
-.stretch > div > .column > .form > * { flex-grow:0!important; }
-.stretch.svelte-1xp0cw7>.column>*,
-.stretch.svelte-1xp0cw7>.column>.form>* { flex-grow:0!important;flex-shrink:0; }
-
-/* ── 生成结果列：让视频自然撑满，不被裁剪 ── */
-#output-video-col {
-  overflow:visible!important;
+/* ── 子区块标签 ── */
+.section-label{
+  font-size:11px;font-weight:700;color:#6366f1;
+  text-transform:uppercase;letter-spacing:.8px;
+  margin:10px 0 5px;
+  display:flex;align-items:center;gap:5px;
 }
-/* 视频组件本体，限制最大高度避免溢出到日志栏 */
-#output-video video {
-  max-height:calc(100vh - 240px)!important;
-  width:100%!important;
-  object-fit:contain!important;
-  border-radius:8px!important;
-  background:#0f172a!important;
-  display:block!important;
-}
-/* 进度详情卡片 */
-#ls-detail-box {
-  margin-bottom:8px;
+.section-label::before{
+  content:'';width:3px;height:12px;border-radius:2px;
+  background:linear-gradient(#6366f1,#8b5cf6);display:inline-block;
 }
 
-/* ── 历史视频 ── */
-.hist-tab video { max-height:360px; }
-
-/* ── 进度描述支持换行（步骤信息独占一行）── */
-.progress-description, [class*="progress"] p,
-.progress-text, tqdm { white-space:pre-wrap!important; }
-
-/* ── 清空历史弹窗：position:fixed 全屏居中遮罩 ── */
-#clear-confirm-overlay {
-  position:fixed!important;
-  top:0!important; left:0!important;
-  width:100vw!important; height:100vh!important;
-  z-index:9990!important;
-  display:flex!important;
-  align-items:center!important;
-  justify-content:center!important;
-  background:rgba(15,23,42,0.70)!important;
-  backdrop-filter:blur(8px)!important;
-  padding:0!important; margin:0!important;
-  border:none!important; border-radius:0!important;
-  box-shadow:none!important;
+/* ── 按钮 ── */
+.gr-button-primary, button.primary{
+  background:linear-gradient(135deg,#6366f1,#8b5cf6)!important;
+  border:none!important;color:#fff!important;
+  border-radius:10px!important;font-weight:700!important;
+  box-shadow:0 2px 8px rgba(99,102,241,.3)!important;
+  transition:all .2s!important;
 }
-#clear-confirm-overlay > div.form {
+.gr-button-primary:hover, button.primary:hover{
+  box-shadow:0 4px 14px rgba(99,102,241,.45)!important;
+  transform:translateY(-1px)!important;
+}
+.gr-button-secondary, button.secondary{
+  background:#f8fafc!important;border:1.5px solid #e2e8f0!important;
+  color:#475569!important;border-radius:10px!important;font-weight:600!important;
+  transition:all .2s!important;
+}
+.gr-button-secondary:hover, button.secondary:hover{
+  background:#f1f5f9!important;border-color:#cbd5e1!important;
+}
+
+/* ── 输入控件 ── */
+input[type=text],textarea,.gr-textbox input,.gr-textbox textarea{
+  border:1.5px solid #e5e7eb!important;
+  border-radius:10px!important;
+  font-size:13px!important;
+  transition:border-color .2s,box-shadow .2s!important;
+  background:#fafafa!important;
+}
+input[type=text]:focus,textarea:focus{
+  border-color:#6366f1!important;
+  box-shadow:0 0 0 3px rgba(99,102,241,.12)!important;
   background:#fff!important;
-  border-radius:20px!important;
-  padding:36px 32px 28px!important;
-  max-width:460px!important;
-  width:90%!important;
-  box-shadow:0 24px 64px rgba(0,0,0,.3)!important;
-  border:none!important;
+}
+input[type=range]{accent-color:#6366f1!important;}
+
+/* ── Dropdown ── */
+.gr-dropdown select,.gr-dropdown .wrap-inner{
+  border:1.5px solid #e5e7eb!important;border-radius:10px!important;
+  background:#fafafa!important;
 }
 
-/* ── 日志数据源（视觉隐藏，DOM中存在）── */
-#zdai-log-src {
-  position:fixed;left:-9999px;top:-9999px;
-  width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;
+/* ── 音频 / 视频组件 ── */
+.gr-audio{border-radius:12px!important;border:1.5px solid #f1f5f9!important;}
+.gr-video{border-radius:12px!important;overflow:hidden!important;}
+audio{border-radius:8px!important;}
+
+/* ── ColorPicker 美化（弹窗选色）── */
+/* 让 Gradio ColorPicker 的整体容器有最小宽度，避免被裁剪 */
+.gr-color-picker, [class*="color-picker"], .colorpicker{
+  min-width:90px!important;
+}
+/* 颜色色块本体 */
+input[type=color]{
+  width:100%!important;min-width:80px!important;
+  height:42px!important;cursor:pointer!important;
+  border-radius:10px!important;border:2px solid #e5e7eb!important;
+  padding:3px!important;background:#fff!important;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.08)!important;
+  transition:border-color .2s,box-shadow .2s!important;
+}
+input[type=color]:hover{
+  border-color:#6366f1!important;
+  box-shadow:0 0 0 3px rgba(99,102,241,.15)!important;
+}
+/* 字幕面板内颜色行：固定高度，防止拉伸变形 */
+.subtitle-panel .gr-row > *{ min-width:90px!important; }
+
+/* ── Accordion ── */
+.gr-accordion{border:1.5px solid #f1f5f9!important;border-radius:12px!important;}
+.gr-accordion summary{
+  font-size:13px!important;font-weight:700!important;color:#475569!important;
+  background:#f8fafc!important;border-radius:10px!important;padding:10px 14px!important;
 }
 
-/* ── 日志条目（底部面板里渲染）── */
-.log-entry {
-  font-size:12px;color:#cbd5e1;line-height:1.7;
-  padding:4px 0;border-bottom:1px solid rgba(100,116,139,.12);
-  display:flex;align-items:baseline;gap:5px;
-  font-family:'Microsoft YaHei',system-ui,sans-serif;
+/* ── 字幕面板 ── */
+.subtitle-panel{
+  background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);
+  border:2px solid #fde68a;
+  border-radius:14px;padding:14px;margin-top:12px;
 }
-.log-entry:last-child { border-bottom:none; }
-.log-ok   { color:#4ade80;font-weight:700;flex-shrink:0; }
-.log-err  { color:#f87171;font-weight:700;flex-shrink:0; }
-.log-time { color:#64748b;font-size:11px;margin-right:3px;flex-shrink:0; }
-
-/* ── Tab 标签美化 ── */
-.tabs > .tabitem { border:none!important; }
-/* ══ 批量任务 ══ */
-.bt-form, .bt-queue {
-  background:#fff!important;border:1px solid #e2e8f0!important;
-  border-radius:14px!important;padding:16px 14px!important;
-  box-shadow:0 2px 8px rgba(0,0,0,.05)!important;
-}
-.bt-step-row {
+.subtitle-panel-head{
   display:flex;align-items:center;gap:8px;
-  margin:12px 0 6px;padding-top:10px;border-top:1px solid #f1f5f9;
+  margin-bottom:12px;
 }
-.bt-step-label { font-size:13px;font-weight:700;color:#0f172a; }
-.bt-section-title { font-size:12px;font-weight:700;color:#6366f1;margin-bottom:6px; }
-.bt-radio .wrap { flex-direction:row!important;flex-wrap:wrap!important;gap:6px!important; }
-.bt-radio label {
+.subtitle-panel-icon{
+  width:28px;height:28px;border-radius:8px;
+  background:linear-gradient(135deg,#f59e0b,#d97706);
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;flex-shrink:0;
+  box-shadow:0 2px 6px rgba(245,158,11,.3);
+}
+.subtitle-panel-title{font-size:14px;font-weight:800;color:#92400e;}
+.subtitle-panel-tip{margin-left:auto;font-size:10px;color:#b45309;
+  background:#fef3c7;border:1px solid #fde68a;
+  padding:2px 8px;border-radius:20px;}
+
+/* ── 字幕位置选择器 ── */
+.sub-pos-radio .wrap{
+  display:flex!important;gap:6px!important;flex-direction:row!important;flex-wrap:nowrap!important;
+}
+.sub-pos-radio label{
+  flex:1!important;text-align:center!important;font-size:13px!important;font-weight:700!important;
+  padding:8px 4px!important;border-radius:10px!important;
+  border:2px solid #e5e7eb!important;
+  cursor:pointer!important;transition:all .15s!important;
+  background:#fff!important;min-width:0!important;
+}
+.sub-pos-radio label:has(input:checked){
+  border-color:#f59e0b!important;background:#fffbeb!important;color:#92400e!important;
+}
+
+/* ── 关键词高亮 checkbox ── */
+.kw-checkbox label{font-weight:700!important;font-size:13px!important;}
+.kw-checkbox input[type=checkbox]{
+  accent-color:#f59e0b!important;width:16px!important;height:16px!important;
+}
+
+/* ── 数字人/音色 库卡片 ── */
+.lib-card{
+  background:#fff;border:1.5px solid #e5e7eb;border-radius:12px;
+  padding:12px 14px;margin-bottom:8px;
+  display:flex;align-items:center;gap:12px;
+  box-shadow:0 1px 4px rgba(0,0,0,.04);
+  transition:border-color .15s,box-shadow .15s;
+}
+.lib-card:hover{border-color:#a5b4fc;box-shadow:0 2px 8px rgba(99,102,241,.1);}
+.avatar-title-badge{
+  background:rgba(0,0,0,.6);backdrop-filter:blur(6px);
+  color:#fff;font-size:13px;font-weight:700;
+  padding:4px 12px;border-radius:8px;display:inline-block;margin-top:6px;
+}
+
+/* ── 输出视频区 ── */
+#output-video-col{overflow:visible!important;}
+#output-video video{
+  max-height:calc(100vh - 220px)!important;width:100%!important;
+  object-fit:contain!important;border-radius:12px!important;
+  background:#0f172a!important;display:block!important;
+}
+#ls-detail-box{margin-bottom:10px;}
+.hist-tab video{max-height:360px;}
+
+/* ── 提示横幅 ── */
+.hint-ok{background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:8px 12px;font-size:12px;color:#15803d;font-weight:600;}
+.hint-warn{background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:8px 12px;font-size:12px;color:#c2410c;font-weight:600;}
+.hint-err{background:#fff1f2;border:1.5px solid #fecdd3;border-radius:10px;padding:8px 12px;font-size:12px;color:#be123c;font-weight:600;}
+
+/* ── 日志 ── */
+#zdai-log-src{position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;}
+.log-entry{font-size:12px;color:#cbd5e1;line-height:1.7;padding:3px 0;border-bottom:1px solid rgba(100,116,139,.1);display:flex;align-items:baseline;gap:5px;}
+.log-entry:last-child{border-bottom:none;}
+.log-ok{color:#4ade80;font-weight:700;flex-shrink:0;}
+.log-err{color:#f87171;font-weight:700;flex-shrink:0;}
+.log-time{color:#64748b;font-size:11px;margin-right:3px;flex-shrink:0;}
+
+/* ── 进度 ── */
+.progress-description,[class*="progress"] p,.progress-text,tqdm{white-space:pre-wrap!important;}
+
+/* ── 清空弹窗 ── */
+#clear-confirm-overlay{
+  position:fixed!important;top:0!important;left:0!important;
+  width:100vw!important;height:100vh!important;z-index:9990!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  background:rgba(15,23,42,.75)!important;backdrop-filter:blur(8px)!important;
+  padding:0!important;margin:0!important;border:none!important;border-radius:0!important;box-shadow:none!important;
+}
+#clear-confirm-overlay>div.form{
+  background:#fff!important;border-radius:20px!important;
+  padding:36px 32px 28px!important;max-width:460px!important;
+  width:90%!important;box-shadow:0 24px 64px rgba(0,0,0,.3)!important;border:none!important;
+}
+
+/* ── 批量任务 ── */
+.bt-form,.bt-queue{
+  background:#fff!important;border:1.5px solid #e5e7eb!important;
+  border-radius:14px!important;padding:16px 14px!important;
+  box-shadow:0 2px 8px rgba(0,0,0,.04)!important;
+}
+.bt-step-row{display:flex;align-items:center;gap:8px;margin:12px 0 6px;padding-top:10px;border-top:1px solid #f1f5f9;}
+.bt-step-label{font-size:13px;font-weight:700;color:#0f172a;}
+.bt-section-title{font-size:12px;font-weight:700;color:#6366f1;margin-bottom:6px;}
+.bt-radio .wrap{flex-direction:row!important;flex-wrap:wrap!important;gap:6px!important;}
+.bt-radio label{
   flex:1!important;text-align:center!important;font-size:12px!important;font-weight:600!important;
-  padding:6px 10px!important;border-radius:8px!important;border:1.5px solid #e2e8f0!important;
+  padding:6px 10px!important;border-radius:8px!important;border:1.5px solid #e5e7eb!important;
   cursor:pointer!important;transition:all .15s!important;background:#fafafa!important;min-width:80px!important;
 }
-.bt-radio label:has(input:checked) {
-  border-color:#6366f1!important;background:#ede9fe!important;color:#4c1d95!important;
-}
-.bt-badge { border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;display:inline-block;white-space:nowrap; }
-.bt-badge-tts    { background:#ede9fe;color:#6d28d9; }
-.bt-badge-audio  { background:#e0f2fe;color:#0369a1; }
-.bt-badge-shared { background:#fce7f3;color:#9d174d; }
-.bt-badge-own    { background:#f0fdf4;color:#166534; }
-#bt-progress-box { margin-top:10px; }
-#bt-task-list    { min-height:60px;margin-top:4px; }
+.bt-radio label:has(input:checked){border-color:#6366f1!important;background:#ede9fe!important;color:#4c1d95!important;}
+.bt-badge{border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;display:inline-block;white-space:nowrap;}
+.bt-badge-tts{background:#ede9fe;color:#6d28d9;}
+.bt-badge-audio{background:#e0f2fe;color:#0369a1;}
+.bt-badge-shared{background:#fce7f3;color:#9d174d;}
+.bt-badge-own{background:#f0fdf4;color:#166534;}
+#bt-progress-box{margin-top:10px;}
+#bt-task-list{min-height:60px;margin-top:4px;}
+
+/* ── 滚动条 ── */
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:#94a3b8;}
+
+/* ── Gradio flex 修复 ── */
+.stretch>div>.column>*,.stretch>div>.column>.form>*{flex-grow:0!important;}
 """
 
 
 
-# ══════════════════════════════════════════════════════════════
-#  模型加载
 # ══════════════════════════════════════════════════════════════
 def auto_load_model():
     global tts
@@ -970,17 +1084,36 @@ def build_ui():
             with gr.Tab("🎬  工作台"):
                 with gr.Row(elem_classes="workspace"):
 
-                    # 列 1：语音合成
+                    # ═══ 列 1：语音合成 ═══════════════════════════
                     with gr.Column(scale=1, elem_classes="panel"):
-                        gr.HTML('<div class="panel-head"><span class="step-chip">1</span>语音合成</div>')
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num">1</div>'
+                            '<span class="step-title">语音合成</span>'
+                            '</div>'
+                        )
                         input_text = gr.TextArea(
-                            label="输入文本",
-                            placeholder="在此粘贴或输入需要合成的文字内容...",
-                            lines=4)
-                        prompt_audio = gr.Audio(
-                            label="参考音频（3-10 秒，用于克隆音色）",
-                            sources=["upload"], type="filepath")
-                        with gr.Accordion("⚙️ 高级设置", open=False):
+                            label="合成文本",
+                            placeholder="在此输入或粘贴需要克隆语音的文字内容...",
+                            lines=5)
+
+                        # ── 音色选择 ──
+                        gr.HTML('<div class="section-label">🎙 音色选择</div>')
+                        with gr.Row():
+                            voice_select = gr.Dropdown(
+                                label="从音色库选择",
+                                choices=_vc.get_choices() if _LIBS_OK else [],
+                                value=None, interactive=True, scale=4)
+                            voice_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
+                                                          variant="secondary")
+                        voice_preview = gr.Audio(label="🔊 试听所选音色", interactive=False,
+                                                 visible=False)
+                        with gr.Accordion("📎 或上传自定义参考音频", open=False):
+                            prompt_audio = gr.Audio(
+                                label="参考音频（3-10 秒 WAV/MP3）",
+                                sources=["upload"], type="filepath")
+
+                        with gr.Accordion("⚙️ 高级合成参数", open=False):
                             with gr.Row():
                                 top_p = gr.Slider(label="词语多样性", info="越高输出越随机，建议 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
                                 top_k = gr.Slider(label="候选词数量", info="限制每步候选词，越小越保守，建议 20~50", minimum=1, maximum=100, value=30, step=1)
@@ -1029,35 +1162,103 @@ def build_ui():
                         gen_btn      = gr.Button("🎵  开始语音合成", variant="primary", size="lg")
                         output_audio = gr.Audio(label="合成结果", interactive=False)
 
-                    # 列 2：口型同步
+                    # ═══ 列 2：口型同步 ═══════════════════════════
                     with gr.Column(scale=1, elem_classes="panel"):
-                        gr.HTML('<div class="panel-head"><span class="step-chip">2</span>口型同步</div>')
-                        video_input = gr.File(
-                            label="上传人物视频（支持 MP4/AVI/MOV 等格式）",
-                            file_types=["video"],
-                            type="filepath")
-                        video_preview = gr.Video(
-                            label="视频预览",
-                            height=220,
-                            interactive=False,
-                            visible=False)
-                        gr.HTML('<div class="divider"></div>')
-                        with gr.Tabs():
-                            with gr.Tab("使用已合成的语音"):
-                                audio_for_ls = gr.Audio(
-                                    label="自动引用第一步合成结果",
-                                    type="filepath", interactive=False)
-                            with gr.Tab("上传自定义音频"):
-                                custom_audio = gr.Audio(
-                                    label="上传音频文件",
-                                    sources=["upload"], type="filepath")
-                        ls_btn = gr.Button("🚀  生成口型同步视频", variant="primary", size="lg")
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num">2</div>'
+                            '<span class="step-title">口型同步</span>'
+                            '</div>'
+                        )
+                        # ── 数字人选择 ──
+                        gr.HTML('<div class="section-label">🎭 数字人选择</div>')
+                        with gr.Row():
+                            avatar_select = gr.Dropdown(
+                                label="从数字人库选择",
+                                choices=_av.get_choices() if _LIBS_OK else [],
+                                value=None, interactive=True, scale=4)
+                            avatar_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
+                                                           variant="secondary")
+                        avatar_preview = gr.Video(
+                            label="预览", height=190, interactive=False, visible=False)
+                        avatar_preview_title = gr.HTML(value="", visible=False)
 
-                    # 列 3：生成结果
+                        # ── 合成音频 ──
+                        gr.HTML('<div class="section-label">🔊 合成音频</div>')
+                        audio_for_ls = gr.Audio(
+                            label="来自步骤1的合成结果（自动引用）",
+                            type="filepath", interactive=False)
+
+                        ls_btn = gr.Button("🚀  开始生成口型同步视频", variant="primary", size="lg")
+
+                    # ═══ 列 3：生成结果 ═══════════════════════════
                     with gr.Column(scale=2, elem_classes="panel", elem_id="output-video-col"):
-                        gr.HTML('<div class="panel-head"><span class="step-chip">3</span>生成结果</div>')
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num">3</div>'
+                            '<span class="step-title">生成结果</span>'
+                            '</div>'
+                        )
                         ls_detail_html = gr.HTML(value="", visible=False, elem_id="ls-detail-box")
-                        output_video = gr.Video(label="最终合成视频", height=520, elem_id="output-video")
+                        output_video = gr.Video(
+                            label="✨ 最终合成视频",
+                            height=400, elem_id="output-video", interactive=False)
+
+                        # ══ 字幕面板 ══════════════════════════════
+                        with gr.Group(elem_classes="subtitle-panel"):
+                            gr.HTML(
+                                '<div class="subtitle-panel-head">'
+                                '<div class="subtitle-panel-icon">📝</div>'
+                                '<span class="subtitle-panel-title">智能字幕</span>'
+                                '<span class="subtitle-panel-tip">支持关键词高亮</span>'
+                                '</div>'
+                            )
+                            # 行1：字体 字号 位置
+                            with gr.Row():
+                                sub_font = gr.Dropdown(
+                                    label="字体",
+                                    choices=_sub.get_font_choices() if _LIBS_OK else ["默认字体"],
+                                    value=(_sub.get_font_choices()[0] if (_LIBS_OK and _sub.get_font_choices()) else "默认字体"),
+                                    interactive=True, scale=3)
+                                sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
+                                                     value=32, step=2, scale=3)
+                                sub_pos = gr.Radio(label="位置", choices=["上","中","下"],
+                                                   value="下", scale=2,
+                                                   elem_classes="sub-pos-radio")
+                            # 行2：颜色 — 每行2个确保显示完整
+                            with gr.Row():
+                                sub_color_txt = gr.ColorPicker(
+                                    label="字幕颜色", value="#FFFFFF", scale=1)
+                                sub_hi_txt = gr.ColorPicker(
+                                    label="高亮颜色", value="#FFD700", scale=1)
+                            with gr.Row():
+                                sub_outline_txt = gr.ColorPicker(
+                                    label="描边颜色", value="#000000", scale=1)
+                                sub_outline_size = gr.Slider(
+                                    label="描边宽度 px", minimum=0, maximum=6,
+                                    value=2, step=1, scale=1)
+                            # 行3：关键词高亮
+                            with gr.Row():
+                                sub_kw_enable = gr.Checkbox(
+                                    label="🌟 启用关键词放大高亮", value=False,
+                                    scale=2, elem_classes="kw-checkbox")
+                                sub_hi_scale = gr.Slider(
+                                    label="放大倍数", minimum=1.1, maximum=2.5,
+                                    value=1.5, step=0.1, scale=2, visible=False)
+                            with gr.Row(visible=False) as sub_kw_row:
+                                sub_kw_text = gr.Textbox(
+                                    label="关键词（逗号分隔）",
+                                    placeholder="如：便宜,优质,推荐,限时  — 多个词用逗号隔开",
+                                    max_lines=1, scale=1)
+                            # 行4：字幕文本
+                            sub_text = gr.Textbox(
+                                label="字幕内容（语音合成后自动填入）",
+                                placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
+                                lines=2)
+                            sub_btn = gr.Button("✨  生成带字幕视频", variant="primary", size="lg")
+                            sub_hint = gr.HTML(value="")
+                            sub_video = gr.Video(label="🎬 字幕版视频", height=280,
+                                                 interactive=False, visible=False)
 
             # ── Tab 2：合成历史 ──────────────────────────────
             with gr.Tab("📁  合成历史", elem_classes="hist-tab"):
@@ -1107,7 +1308,127 @@ def build_ui():
                         hist_video = gr.Video(label="", height=420, interactive=False)
 
 
-            # ── Tab 3：批量任务 ──────────────────────────────
+            # ── Tab 3：数字人管理 ────────────────────────────
+            with gr.Tab("🎭  数字人"):
+                with gr.Row(elem_classes="workspace"):
+
+                    # 左列：上传
+                    with gr.Column(scale=1, elem_classes="panel"):
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">＋</div>'
+                            '<span class="step-title">添加数字人</span>'
+                            '</div>'
+                        )
+                        av_upload = gr.File(
+                            label="上传视频（MP4 / AVI / MOV / WMV）",
+                            file_types=["video"], type="filepath")
+                        av_upload_preview = gr.Video(
+                            label="预览", height=150, interactive=False, visible=False)
+                        av_name = gr.Textbox(
+                            label="数字人名称",
+                            placeholder="为此数字人起一个名字...", max_lines=1)
+                        av_save_btn  = gr.Button("💾  保存", variant="primary", size="lg")
+                        av_save_hint = gr.HTML(value="")
+                        gr.HTML(
+                            '<div style="font-size:11px;color:#94a3b8;line-height:2;margin-top:10px;">'
+                            '💡 保存后可在工作台直接选用<br>'
+                            '📁 存储于 <b>avatars/</b> 目录</div>'
+                        )
+                        # 隐藏的删除控件（由列表按钮触发）
+                        av_del_dd   = gr.Textbox(visible=False, value="")
+                        av_del_btn  = gr.Button("删除", visible=False)
+                        av_del_hint = gr.HTML(value="")
+
+                    # 右列：画廊（行内🗑）+ JS桥接隐藏输入 + 预览
+                    with gr.Column(scale=2, elem_classes="panel"):
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num">📋</div>'
+                            '<span class="step-title">数字人库</span>'
+                            '</div>'
+                        )
+                        av_gallery = gr.HTML(
+                            value=_av.render_gallery("av-del-input") if _LIBS_OK else "")
+                        # JS桥接：卡片上的🗑按钮写入此隐藏textbox触发删除
+                        av_del_js_input = gr.Textbox(
+                            elem_id="av-del-input", visible=False, value="")
+                        av_del_real_hint = gr.HTML(value="")
+                        # 底部下拉删除（备用，与卡片共享同一 handler）
+                        with gr.Row():
+                            av_del_sel = gr.Dropdown(
+                                label="或从列表选择删除", show_label=True,
+                                choices=_av.get_choices() if _LIBS_OK else [],
+                                value=None, scale=4)
+                            av_del_real_btn = gr.Button("🗑 删除", variant="stop",
+                                                        scale=1, min_width=80)
+                        gr.HTML('<div class="divider"></div>')
+                        gr.HTML('<div class="section-label">🔍 预览</div>')
+                        av_prev_dd = gr.Dropdown(
+                            label="选择预览", show_label=False,
+                            choices=_av.get_choices() if _LIBS_OK else [],
+                            value=None, container=False)
+                        av_prev_video = gr.Video(label="", height=240, interactive=False)
+                        av_prev_title = gr.HTML(value="")
+
+            # ── Tab 4：音色模型 ───────────────────────────────
+            with gr.Tab("🎙  音色模型"):
+                with gr.Row(elem_classes="workspace"):
+
+                    # 左列：上传
+                    with gr.Column(scale=1, elem_classes="panel"):
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);">＋</div>'
+                            '<span class="step-title">添加音色</span>'
+                            '</div>'
+                        )
+                        vc_upload = gr.Audio(
+                            label="上传参考音频（3-10秒 WAV/MP3）",
+                            sources=["upload"], type="filepath")
+                        vc_name = gr.Textbox(
+                            label="音色名称",
+                            placeholder="为此音色起一个名字...", max_lines=1)
+                        vc_save_btn  = gr.Button("💾  保存", variant="primary", size="lg")
+                        vc_save_hint = gr.HTML(value="")
+                        gr.HTML(
+                            '<div style="font-size:11px;color:#94a3b8;line-height:2;margin-top:10px;">'
+                            '💡 保存后可在工作台直接选用<br>'
+                            '📁 存储于 <b>voices/</b> 目录</div>'
+                        )
+                        vc_del_dd   = gr.Textbox(visible=False, value="")
+                        vc_del_btn  = gr.Button("删除", visible=False)
+                        vc_del_hint = gr.HTML(value="")
+
+                    # 右列：画廊（行内🗑）+ JS桥接 + 试听
+                    with gr.Column(scale=2, elem_classes="panel"):
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);">📋</div>'
+                            '<span class="step-title">音色库</span>'
+                            '</div>'
+                        )
+                        vc_gallery = gr.HTML(
+                            value=_vc.render_gallery("vc-del-input") if _LIBS_OK else "")
+                        vc_del_js_input = gr.Textbox(
+                            elem_id="vc-del-input", visible=False, value="")
+                        vc_del_real_hint = gr.HTML(value="")
+                        with gr.Row():
+                            vc_del_sel = gr.Dropdown(
+                                label="或从列表选择删除", show_label=True,
+                                choices=_vc.get_choices() if _LIBS_OK else [],
+                                value=None, scale=4)
+                            vc_del_real_btn = gr.Button("🗑 删除", variant="stop",
+                                                        scale=1, min_width=80)
+                        gr.HTML('<div class="divider"></div>')
+                        gr.HTML('<div class="section-label">🔊 试听</div>')
+                        vc_prev_dd = gr.Dropdown(
+                            label="选择音色", show_label=False,
+                            choices=_vc.get_choices() if _LIBS_OK else [],
+                            value=None, container=False)
+                        vc_prev_audio = gr.Audio(label="", interactive=False)
+
+            # ── Tab 5：批量任务 ──────────────────────────────
             with gr.Tab("⚡  批量任务"):
                 with gr.Row(elem_classes="workspace"):
 
@@ -1349,6 +1670,18 @@ def build_ui():
                             f'{item["msg"]}</div>')
             return f'<div id="zdai-log-inner">{entries}</div>'
 
+        def _hint_html(kind, msg):
+            cfg = {
+                "ok":      ("#f0fdf4","✅","#15803d"),
+                "warning": ("#fff7ed","⚠️","#92400e"),
+                "error":   ("#fff1f2","❌","#be123c"),
+            }
+            bg, ic, tc = cfg.get(kind, cfg["error"])
+            return (f'<div style="background:{bg};border-radius:8px;padding:8px 12px;'
+                    f'font-size:12px;color:{tc};font-weight:600;'
+                    f'font-family:Microsoft YaHei,sans-serif;margin-top:4px;">'
+                    f'{ic} {msg}</div>')
+
         def _make_progress_banner(stage: str, pct: int, cur: int, total: int) -> str:
             """生成帧画面进度横幅 HTML"""
             bar_w = max(2, pct)
@@ -1397,13 +1730,49 @@ def build_ui():
             return (f'<div style="font-size:12px;color:#475569;padding:8px 0">'
                     f'共 <b>{total}</b> 条，<span style="color:#16a34a">✅ {ok} 个有效</span></div>')
 
-        # TTS
+        # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, tp, tk, temp, nb, rp, mmt,
                      emo_m, emo_a, emo_w, emo_t,
-                     v1, v2, v3, v4, v5, v6, v7, v8):
-            r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt,
-                                emo_m, emo_a, emo_w, emo_t,
-                                v1, v2, v3, v4, v5, v6, v7, v8)
+                     v1, v2, v3, v4, v5, v6, v7, v8,
+                     progress=gr.Progress()):
+            # 参数验证
+            if not text or not text.strip():
+                yield None, _make_log(False,"请输入文本"), None; return
+            if pa is None:
+                yield None, _make_log(False,"请先选择音色或上传参考音频"), None; return
+
+            result = {"out": None, "err": None}
+
+            def _run():
+                try:
+                    # 子线程里不能用 Gradio progress，传 noop lambda
+                    def _noop_progress(*a, **kw): pass
+                    r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt,
+                                        emo_m, emo_a, emo_w, emo_t,
+                                        v1, v2, v3, v4, v5, v6, v7, v8,
+                                        progress=_noop_progress)
+                    result["out"] = r
+                except Exception as e:
+                    result["err"] = e
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+
+            # 等待完成，期间每 0.4s yield 一次保持UI响应
+            steps = ["正在加载音色...", "正在合成语音...", "生成音频中...", "优化输出..."]
+            si = 0
+            while t.is_alive():
+                progress(0.1 + min(0.7, si * 0.12), desc=steps[min(si, len(steps)-1)])
+                si += 1
+                t.join(timeout=0.4)
+                yield gr.update(), gr.update(), gr.update()
+
+            if result["err"]:
+                yield None, _make_log(False, f"合成失败: {result['err']}"), None; return
+
+            r = result["out"]
+            out_path = r[0]
+            # Windows Toast
             try:
                 ps = (
                     "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
@@ -1419,7 +1788,8 @@ def build_ui():
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
-            return r[0], _make_log(True, "语音合成完成 — " + os.path.basename(r[0])), r[2]
+            progress(1.0, desc="合成完成 ✓")
+            yield out_path, _make_log(True, "语音合成完成 — " + os.path.basename(out_path)), out_path
 
         gen_btn.click(tts_wrap,
             inputs=[input_text, prompt_audio, top_p, top_k, temperature,
@@ -1428,27 +1798,230 @@ def build_ui():
                     vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8],
             outputs=[output_audio, op_log_html, audio_for_ls])
 
-        # 视频上传
-        def auto_convert(video, progress=gr.Progress()):
+        # TTS 完成后把合成文本同步到字幕文本框（Whisper fallback）
+        def _sync_tts_text(txt): return txt
+        gen_btn.click(_sync_tts_text, inputs=[input_text], outputs=[sub_text])
+
+        # ── 数字人文件上传预览 ──
+        def _av_file_preview(file_path, progress=gr.Progress()):
+            if not file_path:
+                return gr.update(visible=False, value=None)
+            # 转码保证浏览器可播放
+            try:
+                converted = convert_video_for_browser(file_path, progress)
+                return gr.update(visible=True, value=converted if converted else file_path)
+            except Exception:
+                return gr.update(visible=True, value=file_path)
+
+        av_upload.change(_av_file_preview,
+            inputs=[av_upload], outputs=[av_upload_preview])
+
+        # ── 音色库事件 ──
+        def _on_voice_select(name):
+            if not name or name.startswith("（") or not _LIBS_OK:
+                return None, gr.update(visible=False)
+            path = _vc.get_path(name)
+            if path and os.path.exists(path):
+                return path, gr.update(value=path, visible=True)
+            return None, gr.update(visible=False)
+
+        voice_select.change(_on_voice_select,
+            inputs=[voice_select], outputs=[prompt_audio, voice_preview])
+
+        voice_refresh_btn.click(
+            lambda: gr.update(choices=_vc.get_choices() if _LIBS_OK else []),
+            outputs=[voice_select])
+
+        # ── 数字人库事件 ──
+        def _on_avatar_select(name):
+            if not name or name.startswith("（") or not _LIBS_OK:
+                return gr.update(visible=False), gr.update(value="", visible=False)
+            path = _av.get_path(name)
+            if not path or not os.path.exists(path):
+                return gr.update(visible=False), gr.update(value="", visible=False)
+            title = (f'<div class="avatar-title-badge">🎭 {name}</div>')
+            return gr.update(value=path, visible=True), gr.update(value=title, visible=True)
+
+        avatar_select.change(_on_avatar_select,
+            inputs=[avatar_select], outputs=[avatar_preview, avatar_preview_title])
+
+        avatar_refresh_btn.click(
+            lambda: gr.update(choices=_av.get_choices() if _LIBS_OK else []),
+            outputs=[avatar_select])
+
+        # ── 数字人 Tab 事件 ──
+        def _save_avatar(video, name, progress=gr.Progress()):
+            if not _LIBS_OK: return _hint_html("error","扩展模块未加载"), "", gr.update(), gr.update(), gr.update()
             if not video:
-                return None, None, gr.update(visible=False), _make_log(False, "未选择视频")
+                return _hint_html("warning","请先上传视频"), _av.render_gallery(), gr.update(), gr.update(), gr.update()
+            # 先转码保证存储的是可播放格式
             try:
                 converted = convert_video_for_browser(video, progress)
-                if converted and converted != video and os.path.exists(converted):
-                    return converted, converted, gr.update(visible=True), _make_log(True, "视频就绪 — " + os.path.basename(converted))
-                return video, video, gr.update(visible=True), _make_log(True, "视频上传完成")
-            except Exception as e:
-                safe_print(f"[ERR] 视频转换失败: {e}")
-                traceback.print_exc()
-                # 即使转换失败，也返回原视频，让用户可以继续使用
-                return video, video, gr.update(visible=True), _make_log(True, "视频上传完成（未转换）")
+                save_path = converted if (converted and os.path.exists(converted)) else video
+            except Exception:
+                save_path = video
+            ok, msg = _av.add_avatar(save_path, name)
+            ch = _av.get_choices()
+            return (_hint_html("ok" if ok else "warning", msg),
+                    _av.render_gallery(),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None))
 
-        video_input.upload(auto_convert,
-            inputs=[video_input], outputs=[video_input, video_preview, video_preview, op_log_html])
+        # ── 数字人 Tab 事件 ──────────────────────────────────
+        def _av_all_outputs(hint_html):
+            """统一返回格式：hint + gallery + 三个下拉刷新"""
+            ch = _av.get_choices()
+            return (hint_html,
+                    _av.render_gallery("av-del-input"),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None))
+
+        def _save_avatar_handler(video, name, progress=gr.Progress()):
+            if not _LIBS_OK:
+                return _av_all_outputs(_hint_html("error","扩展模块未加载"))
+            if not video:
+                return _av_all_outputs(_hint_html("warning","请先上传视频"))
+            try:
+                converted = convert_video_for_browser(video, progress)
+                save_path = converted if (converted and os.path.exists(converted)) else video
+            except Exception:
+                save_path = video
+            ok, msg = _av.add_avatar(save_path, name)
+            return _av_all_outputs(_hint_html("ok" if ok else "warning", msg))
+
+        av_save_btn.click(_save_avatar_handler,
+            inputs=[av_upload, av_name],
+            outputs=[av_save_hint, av_gallery, avatar_select, av_del_sel, av_prev_dd])
+
+        def _del_avatar_handler(name):
+            if not _LIBS_OK:
+                return _av_all_outputs(_hint_html("error","扩展模块未加载"))
+            if not name or not name.strip() or name.startswith("（"):
+                return _av_all_outputs(_hint_html("warning","请先选择要删除的数字人"))
+            ok, msg = _av.del_avatar(name.strip())
+            return _av_all_outputs(_hint_html("ok" if ok else "warning", msg))
+
+        # 卡片内 🗑 按钮 → JS 写入隐藏 textbox → change 事件触发
+        av_del_js_input.change(_del_avatar_handler,
+            inputs=[av_del_js_input],
+            outputs=[av_del_real_hint, av_gallery, avatar_select, av_del_sel, av_prev_dd])
+        # 底部下拉+按钮备用删除
+        av_del_real_btn.click(_del_avatar_handler,
+            inputs=[av_del_sel],
+            outputs=[av_del_real_hint, av_gallery, avatar_select, av_del_sel, av_prev_dd])
+
+        def _preview_avatar(name):
+            if not _LIBS_OK or not name or name.startswith("（"):
+                return None, ""
+            path = _av.get_path(name)
+            title = f'<div class="avatar-title-badge">🎭 {name}</div>' if (path and os.path.exists(path)) else ""
+            return (path if path and os.path.exists(path) else None), title
+
+        av_prev_dd.change(_preview_avatar,
+            inputs=[av_prev_dd], outputs=[av_prev_video, av_prev_title])
+
+        # ── 音色 Tab 事件 ──────────────────────────────────
+        def _vc_all_outputs(hint_html):
+            ch = _vc.get_choices()
+            return (hint_html,
+                    _vc.render_gallery("vc-del-input"),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None),
+                    gr.update(choices=ch, value=None))
+
+        def _save_voice(audio, name):
+            if not _LIBS_OK:
+                return _vc_all_outputs(_hint_html("error","扩展模块未加载"))
+            ok, msg = _vc.add_voice(audio, name)
+            return _vc_all_outputs(_hint_html("ok" if ok else "warning", msg))
+
+        vc_save_btn.click(_save_voice,
+            inputs=[vc_upload, vc_name],
+            outputs=[vc_save_hint, vc_gallery, voice_select, vc_del_sel, vc_prev_dd])
+
+        def _del_voice_handler(name):
+            if not _LIBS_OK:
+                return _vc_all_outputs(_hint_html("error","扩展模块未加载"))
+            if not name or not name.strip() or name.startswith("（"):
+                return _vc_all_outputs(_hint_html("warning","请先选择要删除的音色"))
+            ok, msg = _vc.del_voice(name.strip())
+            return _vc_all_outputs(_hint_html("ok" if ok else "warning", msg))
+
+        # 卡片内 🗑 按钮 → JS bridge
+        vc_del_js_input.change(_del_voice_handler,
+            inputs=[vc_del_js_input],
+            outputs=[vc_del_real_hint, vc_gallery, voice_select, vc_del_sel, vc_prev_dd])
+        # 底部下拉备用
+        vc_del_real_btn.click(_del_voice_handler,
+            inputs=[vc_del_sel],
+            outputs=[vc_del_real_hint, vc_gallery, voice_select, vc_del_sel, vc_prev_dd])
+
+        vc_prev_dd.change(
+            lambda n: (_vc.get_path(n) if (_LIBS_OK and n and not n.startswith("（")) else None),
+            inputs=[vc_prev_dd], outputs=[vc_prev_audio])
+
+        # ── 关键词高亮开关 ──
+        def _toggle_kw(enabled):
+            return gr.update(visible=enabled), gr.update(visible=enabled)
+        sub_kw_enable.change(_toggle_kw, inputs=[sub_kw_enable],
+                             outputs=[sub_kw_row, sub_hi_scale])
+
+        # ── 字幕生成 ──
+        def _do_subtitle(vid, aud, text,
+                         font, size, pos,
+                         color_txt, hi_txt, outline_txt, outline_size,
+                         kw_enable, kw_str, hi_scale,
+                         progress=gr.Progress()):
+            if not _LIBS_OK:
+                return gr.update(visible=False), _hint_html("error","扩展模块未加载"), _make_log(False,"字幕模块未加载")
+
+            # 解析视频路径（gr.Video 在不同 Gradio 版本返回格式不同）
+            if isinstance(vid, dict):
+                vid_path = (vid.get("video") or {}).get("path") or vid.get("path") or ""
+            else:
+                vid_path = str(vid) if vid else ""
+            if not vid_path or not os.path.exists(vid_path):
+                return gr.update(visible=False), _hint_html("warning","请先生成口型同步视频再添加字幕"), _make_log(False,"无视频")
+
+            aud_path = str(aud) if (aud and isinstance(aud, str)) else None
+
+            def _cb(pct, msg): progress(pct, desc=msg)
+            try:
+                out = _sub.burn_subtitles(
+                    vid_path, aud_path, text or "",
+                    font, size,
+                    color_txt, hi_txt, outline_txt, int(outline_size or 0),
+                    pos,
+                    kw_enable=bool(kw_enable),
+                    kw_str=kw_str or "",
+                    hi_scale=float(hi_scale or 1.5),
+                    progress_cb=_cb
+                )
+                return (gr.update(value=out, visible=True),
+                        _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)),
+                        _make_log(True, "字幕完成 — " + os.path.basename(out)))
+            except Exception as e:
+                traceback.print_exc()
+                return (gr.update(visible=False),
+                        _hint_html("error", f"字幕生成失败: {str(e)[:300]}"),
+                        _make_log(False, f"字幕失败: {e}"))
+
+        sub_btn.click(_do_subtitle,
+            inputs=[output_video, audio_for_ls,
+                    sub_text, sub_font, sub_size, sub_pos,
+                    sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                    sub_kw_enable, sub_kw_text, sub_hi_scale],
+            outputs=[sub_video, sub_hint, op_log_html])
 
         # 口型同步
-        def ls_wrap(video, auto_a, custom_a, progress=gr.Progress()):
-            audio  = custom_a if custom_a else auto_a
+        def ls_wrap(avatar_name, auto_a, progress=gr.Progress()):
+            # 把数字人名转换成文件路径
+            video = None
+            if _LIBS_OK and avatar_name and not avatar_name.startswith("（"):
+                video = _av.get_path(avatar_name)
+            audio  = auto_a
             q      = _queue.Queue()
             result = {"out": None, "err": None}
 
@@ -1509,7 +2082,7 @@ def build_ui():
             yield gr.update(value=out), log_html, gr.update(visible=False)
 
         ls_btn.click(ls_wrap,
-            inputs=[video_input, audio_for_ls, custom_audio],
+            inputs=[avatar_select, audio_for_ls],
             outputs=[output_video, op_log_html, ls_detail_html])
 
         # 历史操作
@@ -1643,7 +2216,10 @@ if __name__ == "__main__":
                 share=False,
                 show_api=False,
                 # ★ 关键：允许 Gradio 静态服务访问 BASE_DIR（logo.jpg / 转换视频等）
-                allowed_paths=[BASE_DIR, OUTPUT_DIR],
+                allowed_paths=[BASE_DIR, OUTPUT_DIR,
+                              os.path.join(BASE_DIR,"avatars"),
+                              os.path.join(BASE_DIR,"voices"),
+                              os.path.join(BASE_DIR,"fonts")],
             )
             break
         except OSError:

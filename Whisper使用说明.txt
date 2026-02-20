@@ -1,0 +1,292 @@
+═══════════════════════════════════════════════════════════
+  Whisper 语音识别 - 使用说明
+═══════════════════════════════════════════════════════════
+
+【简介】
+
+Whisper 是 OpenAI 开发的自动语音识别（ASR）系统
+已集成到织梦AI中，可用于：
+- 音频转文字（字幕生成）
+- 语音内容分析
+- 多语言识别（支持99种语言）
+
+【重要提示】
+
+Whisper 需要 FFmpeg 来处理音频文件。
+织梦AI 已包含 FFmpeg，位于：LatentSync/ffmpeg-7.1/bin/ffmpeg.exe
+
+使用前请确保：
+1. FFmpeg 在系统 PATH 中，或
+2. 在代码中指定 FFmpeg 路径
+
+
+【可用模型】
+
+模型大小从小到大：
+
+1. tiny（39M）
+   - 最快，准确度较低
+   - 适合：快速测试、实时场景
+
+2. base（74M）
+   - 速度快，准确度一般
+   - 适合：日常使用
+
+3. small（244M）
+   - 平衡速度和准确度
+   - 推荐：大多数场景
+
+4. medium（769M）
+   - 准确度高，速度较慢
+   - 适合：专业字幕制作
+
+5. large（1550M）
+   - 最高准确度，最慢
+   - 适合：高质量要求的项目
+
+6. turbo（809M）
+   - 新版本，速度快准确度高
+   - 推荐：生产环境使用
+
+
+【Python 使用示例】
+
+基础用法：
+```python
+import whisper
+
+# 加载模型（首次使用会自动下载）
+model = whisper.load_model("base")
+
+# 转录音频
+result = model.transcribe("audio.mp3")
+
+# 获取文本
+print(result["text"])
+```
+
+高级用法：
+```python
+import whisper
+
+# 加载模型
+model = whisper.load_model("small")
+
+# 转录音频（带参数）
+result = model.transcribe(
+    "audio.mp3",
+    language="zh",           # 指定语言（中文）
+    task="transcribe",       # 任务类型
+    fp16=False,              # 使用 FP32（CPU 必须）
+    verbose=True             # 显示进度
+)
+
+# 获取详细结果
+print("完整文本:", result["text"])
+print("\n分段结果:")
+for segment in result["segments"]:
+    print(f"[{segment['start']:.2f}s - {segment['end']:.2f}s] {segment['text']}")
+```
+
+生成字幕文件：
+```python
+import whisper
+
+model = whisper.load_model("base")
+result = model.transcribe("audio.mp3")
+
+# 生成 SRT 字幕
+from whisper.utils import WriteSRT
+with open("subtitle.srt", "w", encoding="utf-8") as f:
+    writer = WriteSRT(f)
+    writer.write_result(result)
+```
+
+
+【命令行使用】
+
+基础转录：
+```bash
+IndexTTS2-SonicVale\installer_files\env\Scripts\whisper.exe audio.mp3
+```
+
+指定模型：
+```bash
+whisper audio.mp3 --model small
+```
+
+指定语言：
+```bash
+whisper audio.mp3 --language Chinese
+```
+
+输出字幕文件：
+```bash
+whisper audio.mp3 --output_format srt
+```
+
+完整参数：
+```bash
+whisper audio.mp3 ^
+  --model small ^
+  --language Chinese ^
+  --output_format all ^
+  --output_dir ./output ^
+  --verbose True
+```
+
+
+【支持的语言】
+
+主要语言：
+- 中文（Chinese）
+- 英语（English）
+- 日语（Japanese）
+- 韩语（Korean）
+- 法语（French）
+- 德语（German）
+- 西班牙语（Spanish）
+- 俄语（Russian）
+- 阿拉伯语（Arabic）
+- 葡萄牙语（Portuguese）
+
+共支持 99 种语言，详见官方文档
+
+
+【输出格式】
+
+支持的字幕格式：
+- txt：纯文本
+- srt：SubRip 字幕
+- vtt：WebVTT 字幕
+- json：JSON 格式（包含时间戳）
+- tsv：制表符分隔
+- all：生成所有格式
+
+
+【性能优化】
+
+1. 使用 GPU 加速
+```python
+model = whisper.load_model("base", device="cuda")
+result = model.transcribe("audio.mp3", fp16=True)
+```
+
+2. 批量处理
+```python
+import whisper
+import os
+
+model = whisper.load_model("base")
+audio_files = ["audio1.mp3", "audio2.mp3", "audio3.mp3"]
+
+for audio in audio_files:
+    result = model.transcribe(audio)
+    output = audio.replace(".mp3", ".txt")
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(result["text"])
+```
+
+3. 降低内存占用
+- 使用较小的模型（tiny、base）
+- 分段处理长音频
+- 使用 fp16=False（CPU 模式）
+
+
+【常见问题】
+
+Q: 首次使用很慢？
+A: 首次使用会自动下载模型文件，需要等待
+   模型保存在：~/.cache/whisper/
+
+Q: 识别准确度不高？
+A: 尝试：
+   1. 使用更大的模型（small → medium → large）
+   2. 确保音频质量清晰
+   3. 指定正确的语言参数
+
+Q: 内存不足？
+A: 使用较小的模型（tiny 或 base）
+
+Q: CPU 运行很慢？
+A: 
+   1. 使用 tiny 或 base 模型
+   2. 设置 fp16=False
+   3. 考虑使用 GPU
+
+Q: 如何处理长音频？
+A: 
+   1. Whisper 会自动分段处理
+   2. 或手动切分音频后批量处理
+
+
+【集成到织梦AI】
+
+示例：添加字幕生成功能
+```python
+import whisper
+
+def generate_subtitle(audio_path, output_path):
+    """生成字幕文件"""
+    model = whisper.load_model("base")
+    result = model.transcribe(
+        audio_path,
+        language="zh",
+        task="transcribe"
+    )
+    
+    # 保存为 SRT 格式
+    with open(output_path, "w", encoding="utf-8") as f:
+        for i, segment in enumerate(result["segments"], 1):
+            start = segment["start"]
+            end = segment["end"]
+            text = segment["text"]
+            
+            # SRT 格式
+            f.write(f"{i}\n")
+            f.write(f"{format_time(start)} --> {format_time(end)}\n")
+            f.write(f"{text}\n\n")
+    
+    return output_path
+
+def format_time(seconds):
+    """转换时间格式为 SRT 标准"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+```
+
+
+【模型文件位置】
+
+默认缓存目录：
+Windows: C:\Users\用户名\.cache\whisper\
+Linux: ~/.cache/whisper/
+
+模型文件大小：
+- tiny.pt: 39 MB
+- base.pt: 74 MB
+- small.pt: 244 MB
+- medium.pt: 769 MB
+- large-v3.pt: 1550 MB
+- turbo.pt: 809 MB
+
+
+【更多资源】
+
+官方文档：
+https://github.com/openai/whisper
+
+论文：
+https://arxiv.org/abs/2212.04356
+
+模型下载（国内镜像）：
+https://huggingface.co/openai/whisper-base
+
+
+═══════════════════════════════════════════════════════════
+  版本：Whisper 20250625
+  更新日期：2026-02-20
+═══════════════════════════════════════════════════════════

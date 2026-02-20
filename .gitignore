@@ -6,7 +6,8 @@ decrypted/
 LatentSync/
 IndexTTS2-SonicVale/
 unified_outputs/
-
+voices/
+avatars/
 
 # 忽略.idea目录
 .idea/
@@ -32,3 +33,4 @@ dist-ssr
 *.local
 *.zip
 *.cfg
+

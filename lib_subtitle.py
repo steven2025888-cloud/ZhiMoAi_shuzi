@@ -1,0 +1,350 @@
+# -*- coding: utf-8 -*-
+# lib_subtitle.py — 字幕生成与烧录引擎（关键词高亮版）
+
+import os, sys, re, json, time, subprocess, shutil
+
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+FONTS_DIR = os.path.join(BASE_DIR, "fonts")
+os.makedirs(FONTS_DIR, exist_ok=True)
+
+LATENTSYNC_DIR = os.path.join(BASE_DIR, "LatentSync")
+_FFMPEG_DIR = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
+_FFMPEG  = os.path.join(_FFMPEG_DIR, "ffmpeg.exe")
+_FFPROBE = os.path.join(_FFMPEG_DIR, "ffprobe.exe")
+if not os.path.exists(_FFMPEG):
+    _FFMPEG  = shutil.which("ffmpeg")  or "ffmpeg"
+    _FFPROBE = shutil.which("ffprobe") or "ffprobe"
+
+OUTPUT_DIR = os.path.join(BASE_DIR, "unified_outputs")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+_WIN  = sys.platform == "win32"
+_NWIN = subprocess.CREATE_NO_WINDOW if _WIN else 0
+
+
+# ═══════════════════════════════════════════════
+# 字体工具
+# ═══════════════════════════════════════════════
+def get_font_choices():
+    exts = {".ttf", ".otf", ".TTF", ".OTF"}
+    try:
+        names = [os.path.splitext(f)[0]
+                 for f in sorted(os.listdir(FONTS_DIR))
+                 if os.path.splitext(f)[1] in exts]
+    except Exception:
+        names = []
+    return names if names else ["默认字体"]
+
+
+# ═══════════════════════════════════════════════
+# 颜色工具
+# ═══════════════════════════════════════════════
+def normalize_color(raw: str, fallback: str = "#ffffff") -> str:
+    """确保颜色是 #RRGGBB 格式，兼容各种输入"""
+    if not raw or not isinstance(raw, str):
+        return fallback
+    raw = raw.strip().lstrip("#")
+    # 去掉 Gradio 可能追加的 alpha 信息 (8位)
+    if len(raw) == 8:
+        raw = raw[:6]
+    if len(raw) == 3:
+        raw = "".join(c * 2 for c in raw)
+    if len(raw) == 6:
+        try:
+            int(raw, 16)   # 验证是合法16进制
+            return "#" + raw.upper()
+        except ValueError:
+            pass
+    return fallback
+
+
+def _hex2ass(hex_color: str) -> str:
+    """#RRGGBB  →  &H00BBGGRR&（ASS BGR 字节序）"""
+    c = normalize_color(hex_color, "#ffffff").lstrip("#")
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    return f"&H00{b:02X}{g:02X}{r:02X}&"
+
+
+# ═══════════════════════════════════════════════
+# ASS 时间格式
+# ═══════════════════════════════════════════════
+def _ass_time(s: float) -> str:
+    s  = max(0.0, float(s))
+    h  = int(s // 3600)
+    m  = int((s % 3600) // 60)
+    sc = s % 60
+    cs = int(round((sc - int(sc)) * 100))
+    if cs >= 100:
+        cs = 99
+    return f"{h}:{m:02d}:{int(sc):02d}.{cs:02d}"
+
+
+# ═══════════════════════════════════════════════
+# 关键词工具
+# ═══════════════════════════════════════════════
+def parse_keywords(kw_str: str) -> list:
+    """把逗号/空格分隔的关键词字符串解析成列表"""
+    if not kw_str or not kw_str.strip():
+        return []
+    # 支持中英文逗号、顿号、空格
+    parts = re.split(r"[,，、\s]+", kw_str.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _is_keyword(word: str, keywords: list) -> bool:
+    """判断一个 token 是否属于关键词（支持子串匹配）"""
+    w = word.strip()
+    for kw in keywords:
+        if kw and kw in w:
+            return True
+    return False
+
+
+# ═══════════════════════════════════════════════
+# 生成 ASS 字幕
+# ═══════════════════════════════════════════════
+def build_ass(words, font_name, font_size,
+              text_color, hi_color, outline_color, outline_size,
+              position,
+              kw_enable=False, keywords=None, hi_scale=1.5):
+    """
+    words      : [{"word":str, "start":float, "end":float}, ...]
+    position   : "上"|"中"|"下"  →  水平居中（Alignment 8/5/2）
+    kw_enable  : 是否启用关键词高亮
+    keywords   : 关键词列表 ["便宜","优质",...]
+    hi_scale   : 关键词字号倍数（相对于 font_size）
+    """
+    align_map   = {"上": 8, "中": 5, "下": 2}
+    marginv_map = {"上": 50, "中": 0,  "下": 30}
+    align   = align_map.get(position, 2)
+    marginv = marginv_map.get(position, 30)
+
+    tc  = _hex2ass(text_color)
+    hc  = _hex2ass(hi_color)
+    oc  = _hex2ass(outline_color)
+    osz = max(0, min(8, int(outline_size or 0)))
+    fs  = int(font_size or 32)
+    hi_fs = max(fs + 4, int(fs * max(1.0, float(hi_scale))))
+
+    kws = (keywords or []) if kw_enable else []
+
+    fn = font_name if font_name and font_name != "默认字体" else "Microsoft YaHei"
+
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "PlayResX: 1280\nPlayResY: 720\nTimer: 100.0000\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Default,{fn},{fs},"
+        f"{tc},&H000000FF&,{oc},&H00000000&,"
+        f"0,0,0,0,100,100,0,0,1,{osz},0,"
+        f"{align},20,20,{marginv},1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+
+    # ── 将词按行分组（每 GROUP 个词一行），每行持续整组时间 ──
+    GROUP = 8
+    events = ""
+    groups = [words[i:i+GROUP] for i in range(0, max(len(words), 1), GROUP)]
+
+    for grp in groups:
+        if not grp:
+            continue
+        t_start = grp[0]["start"]
+        t_end   = grp[-1]["end"]
+        if t_end <= t_start:
+            t_end = t_start + 0.5
+
+        # 构建这一行文本，关键词单独标记
+        parts = []
+        for w in grp:
+            wt = w["word"].strip()
+            if not wt:
+                continue
+            if kws and _is_keyword(wt, kws):
+                # 关键词：换高亮色 + 放大 + 加粗
+                parts.append(
+                    f"{{\\c{hc}\\fs{hi_fs}\\b1}}{wt}{{\\r}}"
+                )
+            else:
+                parts.append(wt)
+
+        line_text = "  ".join(parts)
+        ts = _ass_time(t_start)
+        te = _ass_time(max(float(t_end), float(t_start) + 0.05))
+        events += f"Dialogue: 0,{ts},{te},Default,,0,0,0,,{line_text}\n"
+
+    return header + events
+
+
+# ═══════════════════════════════════════════════
+# Whisper 转录
+# ═══════════════════════════════════════════════
+def transcribe(audio_path: str):
+    if not audio_path or not os.path.exists(str(audio_path)):
+        return []
+
+    try:
+        import whisper as _w
+        model = _w.load_model("base")
+        res   = model.transcribe(str(audio_path), word_timestamps=True, language="zh")
+        out   = []
+        for seg in res.get("segments", []):
+            for w in seg.get("words", []):
+                out.append({"word": w["word"],
+                            "start": float(w["start"]),
+                            "end":   float(w["end"])})
+        if out:
+            return out
+    except Exception:
+        pass
+
+    try:
+        from faster_whisper import WhisperModel
+        m = WhisperModel("base", device="cpu", compute_type="int8")
+        segs, _ = m.transcribe(str(audio_path), word_timestamps=True, language="zh")
+        out = []
+        for seg in segs:
+            for w in (getattr(seg, "words", None) or []):
+                out.append({"word": w.word,
+                            "start": float(w.start),
+                            "end":   float(w.end)})
+        if out:
+            return out
+    except Exception:
+        pass
+
+    return []
+
+
+def _text_to_words(text: str, duration: float) -> list:
+    """文本均匀分配到时间轴（中文按字，英文按词）"""
+    tokens = []
+    for part in re.split(r"(\s+)", text.strip()):
+        part = part.strip()
+        if not part:
+            continue
+        if any("\u4e00" <= c <= "\u9fff" for c in part):
+            tokens.extend(list(part))
+        else:
+            tokens.append(part)
+    if not tokens:
+        tokens = ["字幕"]
+    dt = duration / len(tokens)
+    return [{"word": t, "start": i * dt, "end": (i + 1) * dt}
+            for i, t in enumerate(tokens)]
+
+
+def _get_duration(video_path: str) -> float:
+    try:
+        r = subprocess.run(
+            [_FFPROBE, "-v", "quiet", "-print_format", "json",
+             "-show_format", str(video_path)],
+            capture_output=True, text=True,
+            creationflags=_NWIN, timeout=15)
+        return float(json.loads(r.stdout).get("format", {}).get("duration", 10.0))
+    except Exception:
+        return 10.0
+
+
+# ═══════════════════════════════════════════════
+# 主入口：烧录字幕
+# ═══════════════════════════════════════════════
+def burn_subtitles(video_path, audio_path, text_hint,
+                   font_name, font_size,
+                   text_color, hi_color, outline_color, outline_size,
+                   position,
+                   kw_enable=False, kw_str="", hi_scale=1.5,
+                   progress_cb=None):
+    def _prog(pct, msg):
+        if progress_cb:
+            try: progress_cb(pct, msg)
+            except Exception: pass
+
+    if not video_path or not os.path.exists(str(video_path)):
+        raise RuntimeError("请先生成口型同步视频")
+
+    # 规范化颜色（防 Gradio ColorPicker 传奇怪格式）
+    text_color    = normalize_color(text_color,    "#FFFFFF")
+    hi_color      = normalize_color(hi_color,      "#FFD700")
+    outline_color = normalize_color(outline_color, "#000000")
+
+    _prog(0.05, "🎙 识别音频文字...")
+    src_audio = str(audio_path) if (audio_path and os.path.exists(str(audio_path))) else str(video_path)
+    words     = transcribe(src_audio)
+
+    if not words:
+        _prog(0.2, "⚠️ Whisper 不可用，按输入文字生成字幕...")
+        dur   = _get_duration(str(video_path))
+        hint  = (text_hint or "").strip() or "字幕内容"
+        words = _text_to_words(hint, dur)
+
+    _prog(0.4, "📝 生成字幕文件...")
+    keywords = parse_keywords(kw_str) if kw_enable else []
+    ass_content = build_ass(
+        words,
+        font_name, font_size,
+        text_color, hi_color, outline_color, outline_size,
+        position,
+        kw_enable=kw_enable,
+        keywords=keywords,
+        hi_scale=float(hi_scale or 1.5),
+    )
+
+    ts       = int(time.time())
+    ass_path = os.path.join(OUTPUT_DIR, f"sub_{ts}.ass")
+    out_path = os.path.join(OUTPUT_DIR, f"subtitled_{ts}.mp4")
+
+    with open(ass_path, "w", encoding="utf-8-sig") as f:
+        f.write(ass_content)
+
+    _prog(0.65, "🎬 烧录字幕...")
+
+    def _esc(p):
+        return str(p).replace("\\", "/").replace(":", "\\:")
+
+    vf = f"ass='{_esc(ass_path)}'"
+    font_files = [f for f in os.listdir(FONTS_DIR)
+                  if f.endswith((".ttf",".otf",".TTF",".OTF"))]
+    if font_files:
+        vf = f"ass='{_esc(ass_path)}':fontsdir='{_esc(FONTS_DIR)}'"
+
+    cmd = [
+        _FFMPEG, "-y",
+        "-i", str(video_path),
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        out_path
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=_NWIN,
+            text=True, errors="replace")
+        _, stderr = proc.communicate(timeout=300)
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg 失败 (code={proc.returncode}):\n{stderr[-600:]}")
+    except subprocess.TimeoutExpired:
+        try: proc.kill()
+        except Exception: pass
+        raise RuntimeError("字幕烧录超时（>5分钟）")
+
+    if not os.path.exists(out_path):
+        raise RuntimeError("输出文件未生成，请检查 ffmpeg")
+
+    try:
+        os.remove(ass_path)
+    except Exception:
+        pass
+
+    _prog(1.0, "✅ 完成")
+    return out_path
