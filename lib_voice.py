@@ -88,63 +88,87 @@ def del_voice(name):
     return False, "未找到该音色"
 
 
-def render_gallery(del_trigger_id="vc-del-input"):
+def render_gallery(del_trigger_id="vc-del-input", preview_trigger_id="vc-prev-trigger"):
     """
     渲染音色卡片 HTML。
-    每张卡片末尾有一个删除按钮，点击时弹窗确认后再删除。
+    点击卡片主体触发试听，点击🗑按钮触发删除确认。
     """
     meta = load_meta()
     if not meta:
         return (
-            '<div style="text-align:center;padding:48px 20px;color:#94a3b8;">'
-            '<div style="font-size:44px;margin-bottom:14px;">🎙</div>'
-            '<div style="font-size:13px;font-weight:600;">暂无音色</div>'
-            '<div style="font-size:11px;margin-top:4px;">在左侧上传音频并保存</div>'
+            '<div style="text-align:center;padding:56px 20px;color:#94a3b8;'
+            'background:linear-gradient(135deg,#f8fafc,#f1f5f9);border-radius:16px;'
+            'border:2px dashed #e2e8f0;">'
+            '<div style="font-size:52px;margin-bottom:16px;filter:grayscale(.3);">🎙</div>'
+            '<div style="font-size:14px;font-weight:700;color:#64748b;">暂无音色</div>'
+            '<div style="font-size:12px;margin-top:6px;color:#94a3b8;">在左侧上传音频并保存即可添加</div>'
             '</div>'
         )
 
     cards = ""
-    for m in meta:
+    for idx, m in enumerate(meta):
         name  = m.get("name", "未命名")
         path  = m.get("path", "")
         t     = m.get("time", "")
         exist = os.path.exists(path) if path else False
         dot   = "#22c55e" if exist else "#ef4444"
+        status_text = "可用" if exist else "文件丢失"
         sz    = ""
         if exist:
             try:
                 sz = f" · {os.path.getsize(path)/1048576:.1f}MB"
             except Exception:
                 pass
-        # JS：使用自定义删除对话框
         name_escaped = name.replace('\\', '\\\\').replace("'", "\\'").replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
-        js_click = f"window._zdaiTriggerDel('{del_trigger_id}','{name_escaped}','voice');"
+        js_del = f"event.stopPropagation();window._zdaiTriggerDel('{del_trigger_id}','{name_escaped}','voice');"
+        js_preview = f"window._zdaiTriggerPreview('{preview_trigger_id}','{name_escaped}');"
+        
+        bg = "#fff" if idx % 2 == 0 else "#fafbfc"
+        
         cards += f"""
-<div style="display:flex;align-items:center;gap:12px;
-  background:#fff;border:1.5px solid #e5e7eb;border-radius:12px;
-  padding:10px 14px;margin-bottom:8px;
-  box-shadow:0 1px 4px rgba(0,0,0,.04);">
-  <div style="width:44px;height:44px;border-radius:10px;flex-shrink:0;
+<div onclick="{js_preview}" style="display:flex;align-items:center;gap:14px;
+  background:{bg};border:1.5px solid #e5e7eb;border-radius:14px;
+  padding:12px 16px;margin-bottom:8px;cursor:pointer;
+  box-shadow:0 1px 4px rgba(0,0,0,.03);
+  transition:all .2s ease;"
+  onmouseover="this.style.borderColor='#7dd3fc';this.style.boxShadow='0 4px 12px rgba(14,165,233,.1)'"
+  onmouseout="this.style.borderColor='#e5e7eb';this.style.boxShadow='0 1px 4px rgba(0,0,0,.03)'">
+  <div style="width:46px;height:46px;border-radius:12px;flex-shrink:0;
     background:linear-gradient(135deg,#0ea5e9,#0284c7);
-    display:flex;align-items:center;justify-content:center;font-size:20px;">🎙</div>
+    display:flex;align-items:center;justify-content:center;font-size:22px;
+    box-shadow:0 2px 8px rgba(14,165,233,.25);">🎙</div>
   <div style="flex:1;min-width:0;">
     <div style="font-size:14px;font-weight:700;color:#0f172a;
-      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{name}</div>
-    <div style="font-size:11px;color:#94a3b8;margin-top:2px;display:flex;align-items:center;gap:5px;">
-      <span style="width:7px;height:7px;border-radius:50%;background:{dot};display:inline-block;"></span>
-      {os.path.basename(path) if path else "未知"}{sz}
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+      margin-bottom:3px;">{name}</div>
+    <div style="font-size:11px;color:#94a3b8;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span style="display:inline-flex;align-items:center;gap:3px;">
+        <span style="width:6px;height:6px;border-radius:50%;background:{dot};display:inline-block;"></span>
+        <span style="color:{dot};font-weight:600;">{status_text}</span>
+      </span>
+      <span style="color:#cbd5e1;">|</span>
+      <span>{os.path.basename(path) if path else "未知"}{sz}</span>
     </div>
-    <div style="font-size:10px;color:#cbd5e1;margin-top:1px;">{t}</div>
+    <div style="font-size:10px;color:#cbd5e1;margin-top:2px;">📅 {t}</div>
   </div>
-  <button onclick="{js_click}" title="删除此音色"
-    style="flex-shrink:0;width:32px;height:32px;border-radius:8px;
-      border:1.5px solid #fecdd3;background:#fff1f2;color:#dc2626;
-      font-size:16px;cursor:pointer;display:flex;align-items:center;
-      justify-content:center;transition:all .15s;"
-    onmouseover="this.style.background='#dc2626';this.style.color='#fff';"
-    onmouseout="this.style.background='#fff1f2';this.style.color='#dc2626';">
+  <button onclick="{js_del}" title="删除「{name}」"
+    style="flex-shrink:0;width:34px;height:34px;border-radius:10px;
+      border:1.5px solid #fecdd3;background:#fff1f2;color:#e11d48;
+      font-size:15px;cursor:pointer;display:flex;align-items:center;
+      justify-content:center;transition:all .2s;
+      box-shadow:0 1px 3px rgba(225,29,72,.08);"
+    onmouseover="this.style.background='#e11d48';this.style.color='#fff';this.style.borderColor='#e11d48';this.style.boxShadow='0 4px 12px rgba(225,29,72,.25)'"
+    onmouseout="this.style.background='#fff1f2';this.style.color='#e11d48';this.style.borderColor='#fecdd3';this.style.boxShadow='0 1px 3px rgba(225,29,72,.08)'">
     🗑
   </button>
 </div>"""
 
-    return f'<div style="max-height:420px;overflow-y:auto;padding-right:2px;">{cards}</div>'
+    count = len(meta)
+    header = (
+        f'<div style="display:flex;align-items:center;justify-content:space-between;'
+        f'margin-bottom:10px;padding:0 2px;">'
+        f'<span style="font-size:12px;color:#64748b;font-weight:600;">共 {count} 个音色</span>'
+        f'<span style="font-size:11px;color:#94a3b8;">点击卡片试听 · 点击 🗑 删除</span>'
+        f'</div>'
+    )
+    return f'{header}<div style="max-height:420px;overflow-y:auto;padding-right:2px;">{cards}</div>'

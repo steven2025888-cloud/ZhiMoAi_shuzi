@@ -65,6 +65,17 @@ def _hex2ass(hex_color: str) -> str:
     return f"&H00{b:02X}{g:02X}{r:02X}&"
 
 
+def _hex2ass_alpha(hex_color: str, opacity: int = 0) -> str:
+    """#RRGGBB + opacity(0~100) → &HAABBGGRR&
+    opacity: 0=全透明, 100=不透明
+    ASS alpha: 00=不透明, FF=全透明 (与直觉相反)
+    """
+    c = normalize_color(hex_color, "#000000").lstrip("#")
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    alpha = int(255 * (1 - max(0, min(100, opacity)) / 100))
+    return f"&H{alpha:02X}{b:02X}{g:02X}{r:02X}&"
+
+
 # ═══════════════════════════════════════════════
 # ASS 时间格式
 # ═══════════════════════════════════════════════
@@ -106,16 +117,19 @@ def _is_keyword(word: str, keywords: list) -> bool:
 def build_ass(words, font_name, font_size,
               text_color, hi_color, outline_color, outline_size,
               position,
-              kw_enable=False, keywords=None, hi_scale=1.5):
+              kw_enable=False, keywords=None, hi_scale=1.5,
+              bg_color="#000000", bg_opacity=0):
     """
     words      : [{"word":str, "start":float, "end":float}, ...]
     position   : "上"|"中"|"下"  →  水平居中（Alignment 8/5/2）
     kw_enable  : 是否启用关键词高亮
     keywords   : 关键词列表 ["便宜","优质",...]
     hi_scale   : 关键词字号倍数（相对于 font_size）
+    bg_color   : 背景颜色 #RRGGBB
+    bg_opacity : 背景透明度 0=全透明 100=不透明
     """
-    align_map   = {"上": 8, "中": 5, "下": 2}
-    marginv_map = {"上": 50, "中": 0,  "下": 30}
+    align_map   = {"上": 8, "中": 5, "下": 2, "⬆上": 8, "⬛中": 5, "⬇下": 2}
+    marginv_map = {"上": 50, "中": 0,  "下": 30, "⬆上": 50, "⬛中": 0, "⬇下": 30}
     align   = align_map.get(position, 2)
     marginv = marginv_map.get(position, 30)
 
@@ -130,6 +144,20 @@ def build_ass(words, font_name, font_size,
 
     fn = font_name if font_name and font_name != "默认字体" else "Microsoft YaHei"
 
+    # 背景色处理
+    bg_op = max(0, min(100, int(bg_opacity or 0)))
+    bc = _hex2ass_alpha(bg_color or "#000000", bg_op)
+
+    # BorderStyle: 1=outline+shadow, 3=opaque box, 4=outline+opaque box
+    # 有背景时用 BorderStyle=4（带描边的背景框），无背景时用 BorderStyle=1（仅描边）
+    if bg_op > 0:
+        border_style = 4
+        shadow_size = 3  # 背景框padding
+    else:
+        border_style = 1
+        shadow_size = 0
+        bc = "&H00000000&"  # 全透明
+
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
@@ -140,8 +168,8 @@ def build_ass(words, font_name, font_size,
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{fn},{fs},"
-        f"{tc},&H000000FF&,{oc},&H00000000&,"
-        f"0,0,0,0,100,100,0,0,1,{osz},0,"
+        f"{tc},&H000000FF&,{oc},{bc},"
+        f"0,0,0,0,100,100,0,0,{border_style},{osz},{shadow_size},"
         f"{align},20,20,{marginv},1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -305,6 +333,7 @@ def burn_subtitles(video_path, audio_path, text_hint,
                    text_color, hi_color, outline_color, outline_size,
                    position,
                    kw_enable=False, kw_str="", hi_scale=1.5,
+                   bg_color="#000000", bg_opacity=0,
                    progress_cb=None):
     def _prog(pct, msg):
         if progress_cb:
@@ -312,12 +341,13 @@ def burn_subtitles(video_path, audio_path, text_hint,
             except Exception: pass
 
     if not video_path or not os.path.exists(str(video_path)):
-        raise RuntimeError("请先生成口型同步视频")
+        raise RuntimeError("请先完成视频合成")
 
     # 规范化颜色（防 Gradio ColorPicker 传奇怪格式）
     text_color    = normalize_color(text_color,    "#FFFFFF")
     hi_color      = normalize_color(hi_color,      "#FFD700")
     outline_color = normalize_color(outline_color, "#000000")
+    bg_color      = normalize_color(bg_color,      "#000000")
 
     _prog(0.05, "🎙 识别音频文字...")
     src_audio = str(audio_path) if (audio_path and os.path.exists(str(audio_path))) else str(video_path)
@@ -339,6 +369,8 @@ def burn_subtitles(video_path, audio_path, text_hint,
         kw_enable=kw_enable,
         keywords=keywords,
         hi_scale=float(hi_scale or 1.5),
+        bg_color=bg_color,
+        bg_opacity=int(bg_opacity or 0),
     )
 
     ts       = int(time.time())

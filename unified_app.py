@@ -65,7 +65,7 @@ logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
 tts = None
 APP_NAME = "织梦AI大模型"
-APP_SUB  = "AI语音克隆 · 智能口型同步 · 专业级解决方案"
+APP_SUB  = "AI语音克隆 · 智能视频合成 · 专业级解决方案"
 
 
 def safe_print(msg: str):
@@ -324,9 +324,8 @@ INIT_JS = r"""
             '删除' + typeText,
             '确定要删除' + typeText + '「' + name + '」吗？',
             function() {
-                // 尝试多次查找元素，因为Gradio可能延迟渲染
                 var tryCount = 0;
-                var maxTries = 10;
+                var maxTries = 15;
                 
                 function tryTrigger() {
                     tryCount++;
@@ -334,49 +333,113 @@ INIT_JS = r"""
                     
                     if (!wrap) { 
                         if (tryCount < maxTries) {
-                            console.log('[zdai] 第' + tryCount + '次尝试查找元素:', elemId);
                             setTimeout(tryTrigger, 200);
                             return;
                         }
-                        console.error('[zdai] 找不到桥接元素:', elemId, '已尝试', tryCount, '次'); 
-                        alert('删除失败：找不到隐藏输入框元素 ' + elemId);
+                        console.error('[zdai] 找不到桥接元素:', elemId);
                         return;
                     }
+                    
+                    /* 临时恢复可交互性以便Gradio接收事件 */
+                    var origStyle = wrap.style.cssText;
+                    wrap.style.cssText = 'position:fixed;left:-9999px;opacity:0.01;pointer-events:auto;width:auto;height:auto;overflow:visible;z-index:-1;';
                     
                     var el = wrap.querySelector('textarea') || wrap.querySelector('input[type="text"]') || wrap.querySelector('input');
                     if (!el) { 
                         if (tryCount < maxTries) {
-                            console.log('[zdai] 第' + tryCount + '次尝试查找input/textarea');
+                            wrap.style.cssText = origStyle;
                             setTimeout(tryTrigger, 200);
                             return;
                         }
-                        console.error('[zdai] 找不到 textarea/input in', elemId); 
-                        console.log('[zdai] wrap内容:', wrap.innerHTML);
-                        alert('删除失败：找不到输入框元素');
+                        wrap.style.cssText = origStyle;
+                        console.error('[zdai] 找不到 textarea/input in', elemId);
                         return; 
                     }
                     
-                    // 找到元素，触发删除
+                    /* 设置值并触发事件 */
                     try {
-                        var proto = Object.getPrototypeOf(el);
-                        var desc = Object.getOwnPropertyDescriptor(proto, 'value') ||
-                                   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value') ||
-                                   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-                        if (desc && desc.set) { desc.set.call(el, name); }
-                        else { el.value = name; }
+                        /* 先用带时间戳的唯一值确保change事件一定触发 */
+                        var uniqueName = name;
+                        
+                        var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                            window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value'
+                        );
+                        if (!nativeInputValueSetter) {
+                            nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+                        }
+                        
+                        if (nativeInputValueSetter && nativeInputValueSetter.set) {
+                            nativeInputValueSetter.set.call(el, '');
+                            el.dispatchEvent(new Event('input', {bubbles:true}));
+                            
+                            setTimeout(function() {
+                                nativeInputValueSetter.set.call(el, uniqueName);
+                                el.dispatchEvent(new Event('input',  {bubbles:true, cancelable:true}));
+                                el.dispatchEvent(new Event('change', {bubbles:true, cancelable:true}));
+                                console.log('[zdai] 删除触发成功 elemId=' + elemId + ' name=' + uniqueName);
+                                
+                                setTimeout(function() { wrap.style.cssText = origStyle; }, 500);
+                            }, 50);
+                        } else {
+                            el.value = '';
+                            el.dispatchEvent(new Event('input', {bubbles:true}));
+                            setTimeout(function() {
+                                el.value = uniqueName;
+                                el.dispatchEvent(new Event('input',  {bubbles:true}));
+                                el.dispatchEvent(new Event('change', {bubbles:true}));
+                                setTimeout(function() { wrap.style.cssText = origStyle; }, 500);
+                            }, 50);
+                        }
                     } catch(e) { 
-                        console.log('[zdai] 使用简单赋值');
-                        el.value = name; 
+                        console.error('[zdai] 触发失败:', e);
+                        el.value = name;
+                        el.dispatchEvent(new Event('input',  {bubbles:true}));
+                        el.dispatchEvent(new Event('change', {bubbles:true}));
+                        setTimeout(function() { wrap.style.cssText = origStyle; }, 500);
                     }
-                    
-                    el.dispatchEvent(new Event('input',  {bubbles:true, cancelable:true}));
-                    el.dispatchEvent(new Event('change', {bubbles:true, cancelable:true}));
-                    console.log('[zdai] 删除触发成功 elemId=' + elemId + ' name=' + name);
                 }
                 
                 tryTrigger();
             }
         );
+    };
+
+    /* ── 9b. 预览触发辅助函数（数字人/音色库卡片点击用）── */
+    window._zdaiTriggerPreview = function(elemId, name) {
+        var wrap = document.getElementById(elemId);
+        if (!wrap) { console.warn('[zdai] 找不到预览桥接元素:', elemId); return; }
+        
+        var origStyle = wrap.style.cssText;
+        wrap.style.cssText = 'position:fixed;left:-9999px;opacity:0.01;pointer-events:auto;width:auto;height:auto;overflow:visible;z-index:-1;';
+        
+        var el = wrap.querySelector('textarea') || wrap.querySelector('input[type="text"]') || wrap.querySelector('input');
+        if (!el) { wrap.style.cssText = origStyle; return; }
+        
+        try {
+            var setter = Object.getOwnPropertyDescriptor(
+                el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value'
+            );
+            if (setter && setter.set) {
+                setter.set.call(el, '');
+                el.dispatchEvent(new Event('input', {bubbles:true}));
+                setTimeout(function() {
+                    setter.set.call(el, name);
+                    el.dispatchEvent(new Event('input',  {bubbles:true}));
+                    el.dispatchEvent(new Event('change', {bubbles:true}));
+                    setTimeout(function() { wrap.style.cssText = origStyle; }, 300);
+                }, 30);
+            } else {
+                el.value = name;
+                el.dispatchEvent(new Event('input',  {bubbles:true}));
+                el.dispatchEvent(new Event('change', {bubbles:true}));
+                setTimeout(function() { wrap.style.cssText = origStyle; }, 300);
+            }
+        } catch(e) {
+            el.value = name;
+            el.dispatchEvent(new Event('input',  {bubbles:true}));
+            el.dispatchEvent(new Event('change', {bubbles:true}));
+            setTimeout(function() { wrap.style.cssText = origStyle; }, 300);
+        }
     };
 
     /* ── 10. 关闭/最小化逻辑 ── */
@@ -630,18 +693,63 @@ input[type=color]:hover{
   padding:2px 8px;border-radius:20px;}
 
 /* ── 字幕位置选择器 ── */
+.sub-pos-radio{
+  min-width:0!important;
+}
 .sub-pos-radio .wrap{
-  display:flex!important;gap:6px!important;flex-direction:row!important;flex-wrap:nowrap!important;
+  display:flex!important;gap:4px!important;flex-direction:row!important;flex-wrap:nowrap!important;
+  width:100%!important;
 }
 .sub-pos-radio label{
-  flex:1!important;text-align:center!important;font-size:13px!important;font-weight:700!important;
-  padding:8px 4px!important;border-radius:10px!important;
-  border:2px solid #e5e7eb!important;
-  cursor:pointer!important;transition:all .15s!important;
-  background:#fff!important;min-width:0!important;
+  flex:1 1 0%!important;text-align:center!important;font-size:13px!important;font-weight:800!important;
+  padding:8px 0!important;border-radius:8px!important;
+  border:2px solid #e2e8f0!important;
+  cursor:pointer!important;transition:all .18s!important;
+  background:#f8fafc!important;min-width:36px!important;max-width:none!important;
+  overflow:hidden!important;white-space:nowrap!important;
+  line-height:1!important;height:36px!important;
+  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+  box-sizing:border-box!important;
+}
+.sub-pos-radio label *{
+  overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;
+  font-size:13px!important;
 }
 .sub-pos-radio label:has(input:checked){
-  border-color:#0ea5e9!important;background:#e0f2fe!important;color:#0c4a6e!important;
+  border-color:#0ea5e9!important;background:linear-gradient(135deg,#e0f2fe,#bae6fd)!important;
+  color:#0c4a6e!important;box-shadow:0 2px 8px rgba(14,165,233,.25)!important;
+  transform:scale(1.02)!important;
+}
+.sub-pos-radio label:hover:not(:has(input:checked)){
+  border-color:#bae6fd!important;background:#f0f9ff!important;
+}
+.sub-pos-radio input[type="radio"]{
+  display:none!important;width:0!important;height:0!important;
+  position:absolute!important;opacity:0!important;
+}
+
+/* ── 音频模式选择器 ── */
+.audio-mode-radio .wrap{
+  display:flex!important;gap:6px!important;flex-direction:row!important;
+}
+.audio-mode-radio label{
+  flex:1 1 0%!important;text-align:center!important;font-size:13px!important;font-weight:700!important;
+  padding:10px 8px!important;border-radius:10px!important;
+  border:2px solid #e2e8f0!important;
+  cursor:pointer!important;transition:all .18s!important;
+  background:#f8fafc!important;
+  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+}
+.audio-mode-radio label:has(input:checked){
+  border-color:#6366f1!important;background:linear-gradient(135deg,#eef2ff,#e0e7ff)!important;
+  color:#3730a3!important;box-shadow:0 2px 8px rgba(99,102,241,.2)!important;
+}
+.audio-mode-radio label:hover:not(:has(input:checked)){
+  border-color:#c7d2fe!important;background:#f5f3ff!important;
+}
+.audio-mode-radio input[type="radio"]{
+  display:none!important;width:0!important;height:0!important;
+  position:absolute!important;opacity:0!important;
 }
 
 /* ── 关键词高亮 checkbox ── */
@@ -735,8 +843,11 @@ input[type=color]:hover{
 ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px;}
 ::-webkit-scrollbar-thumb:hover{background:#94a3b8;}
 
-/* ── 删除桥接控件（不显示但保持DOM中以便JS触发）── */
-#av-del-input, #vc-del-input {
+/* ── 删除/预览桥接控件（不显示但保持DOM中以便JS触发）── */
+#av-del-input, #vc-del-input,
+#av-del-input-row, #vc-del-input-row,
+#av-prev-trigger, #vc-prev-trigger,
+#av-prev-trigger-row, #vc-prev-trigger-row {
   position:fixed!important;left:-10000px!important;
   width:1px!important;height:1px!important;
   overflow:hidden!important;opacity:0!important;
@@ -780,6 +891,14 @@ input[type=color]:hover{
 #sub-outline-color input{
   border-width:3px!important;
   border-color:#64748b!important;
+}
+
+/* ── Gradio dialog按钮贴边边框 ── */
+.dialog-button, button.dialog-button,
+[class*="dialog-button"][class*="svelte"],
+button[class*="dialog-button"] {
+  border:1.5px solid #e2e8f0!important;
+  border-radius:8px!important;
 }
 """
 
@@ -831,6 +950,57 @@ def auto_load_model():
         safe_print("[MODEL] FAIL: " + str(e)); traceback.print_exc()
     finally:
         os.chdir(original_cwd)
+
+    # ── 后台预热 LatentSync 引擎 ──
+    def _warmup_latentsync():
+        try:
+            if not os.path.exists(LATENTSYNC_PYTHON):
+                safe_print("[WARMUP] LatentSync Python 未找到，跳过预热")
+                return
+            if not os.path.exists(LATENTSYNC_CKPT):
+                safe_print("[WARMUP] LatentSync 模型文件未找到，跳过预热")
+                return
+
+            safe_print("[WARMUP] 正在预热 LatentSync 引擎...")
+            env = os.environ.copy()
+            ls_env = os.path.join(LATENTSYNC_DIR, "latents_env")
+            fb = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
+            env["HF_HOME"] = os.path.join(LATENTSYNC_DIR, "huggingface")
+            env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
+            env["PATH"] = ";".join([ls_env, os.path.join(ls_env, "Library", "bin"), fb, env.get("PATH", "")])
+            for k in ("TRANSFORMERS_CACHE", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_OFFLINE", "HF_HUB_OFFLINE"):
+                env.pop(k, None)
+
+            warmup_code = (
+                "import sys, os; "
+                "sys.path.insert(0, os.getcwd()); "
+                "import torch; "
+                "print('[WARMUP] PyTorch loaded'); "
+                "from omegaconf import OmegaConf; "
+                "print('[WARMUP] OmegaConf loaded'); "
+                "from latentsync.utils.util import load_model; "
+                "print('[WARMUP] LatentSync modules loaded'); "
+                "print('[WARMUP] Engine warmup complete')"
+            )
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            proc = subprocess.run(
+                [LATENTSYNC_PYTHON, "-c", warmup_code],
+                cwd=LATENTSYNC_DIR, env=env,
+                capture_output=True, text=True, timeout=120,
+                creationflags=flags
+            )
+            if proc.returncode == 0:
+                safe_print("[WARMUP] LatentSync 引擎预热完成")
+            else:
+                safe_print(f"[WARMUP] LatentSync 预热返回非零码: {proc.returncode}")
+                if proc.stderr:
+                    safe_print(f"[WARMUP] stderr: {proc.stderr[-300:]}")
+        except subprocess.TimeoutExpired:
+            safe_print("[WARMUP] LatentSync 预热超时，跳过")
+        except Exception as e:
+            safe_print(f"[WARMUP] LatentSync 预热失败: {e}")
+
+    threading.Thread(target=_warmup_latentsync, daemon=True).start()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -978,7 +1148,7 @@ def _make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog):
 # ══════════════════════════════════════════════════════════════
 def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None, output_path_override=None):
     if not video_path:                 raise gr.Error("请上传人物视频")
-    if not audio_path:                 raise gr.Error("请选择或上传音频文件")
+    if not audio_path:                 raise gr.Error("请先在步骤1准备音频（文字转语音 或 直接上传音频文件）")
     if not os.path.exists(video_path): raise gr.Error("视频文件不存在，请重新上传")
     if not os.path.exists(audio_path): raise gr.Error("音频文件不存在，请重新选择")
 
@@ -1017,7 +1187,7 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
         raise gr.Error("启动生成引擎失败: " + str(e))
 
     last = 0.05
-    progress(0.08, desc="🔄 正在启动生成引擎...")
+    progress(0.08, desc="🔄 正在初始化推理管线...")
 
     # 保存两层进度信息
     step_progress = None  # 步骤进度 (3/4)
@@ -1093,7 +1263,7 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
     if last < 0.93:
         progress(0.94, desc="正在写入视频文件...")
     if proc.wait() != 0:
-        raise gr.Error("口型同步生成失败，请检查视频/音频格式是否正确")
+        raise gr.Error("视频合成失败，请检查视频/音频格式是否正确")
     if not os.path.exists(out):
         raise gr.Error("输出视频文件未找到，请重试")
 
@@ -1116,7 +1286,7 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
             json.dump(hist[:50], hf, ensure_ascii=False)
     except Exception:
         pass
-    return out, "✅ 口型同步完成"
+    return out, "✅ 视频合成完成"
 
 
 
@@ -1255,15 +1425,13 @@ def build_ui():
     with gr.Blocks(
         title=APP_NAME,
         css=CUSTOM_CSS,
+        js=INIT_JS,
         theme=gr.themes.Base(
             primary_hue=gr.themes.colors.indigo,
             secondary_hue=gr.themes.colors.purple,
             font=[gr.themes.GoogleFont("Noto Sans SC"), "Microsoft YaHei", "system-ui"],
         ),
     ) as app:
-
-        # ── 注入JS代码 ──
-        gr.HTML(f"<script>({INIT_JS})()</script>")
 
         # ── 顶部导航栏 ────────────────────────────────────────
         logo_img_html = ''
@@ -1314,90 +1482,111 @@ def build_ui():
             with gr.Tab("🎬  工作台"):
                 with gr.Row(elem_classes="workspace"):
 
-                    # ═══ 列 1：语音合成 ═══════════════════════════
+                    # ═══ 列 1：音频准备 ═══════════════════════════
                     with gr.Column(scale=1, elem_classes="panel"):
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">1</div>'
-                            '<span class="step-title">语音合成</span>'
+                            '<span class="step-title">音频准备</span>'
                             '</div>'
                         )
-                        input_text = gr.TextArea(
-                            label="合成文本",
-                            placeholder="在此输入或粘贴需要克隆语音的文字内容...",
-                            lines=5)
+                        audio_mode = gr.Radio(
+                            label="选择音频来源",
+                            choices=["文字转语音", "直接上传音频"],
+                            value="文字转语音",
+                            elem_classes="audio-mode-radio")
 
-                        # ── 音色选择 ──
-                        gr.HTML('<div class="section-label">🎙 音色选择</div>')
-                        with gr.Row():
-                            voice_select = gr.Dropdown(
-                                label="从音色库选择",
-                                choices=_vc.get_choices() if _LIBS_OK else [],
-                                value=None, interactive=True, scale=4)
-                            voice_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
-                                                          variant="secondary")
-                        voice_preview = gr.Audio(label="🔊 试听所选音色", interactive=False,
-                                                 visible=False)
-                        with gr.Accordion("📎 或上传自定义参考音频", open=False):
-                            prompt_audio = gr.Audio(
-                                label="参考音频（3-10 秒 WAV/MP3）",
+                        # ── 模式A: 文字转语音 ──
+                        with gr.Group(visible=True) as tts_mode_group:
+                            input_text = gr.TextArea(
+                                label="合成文本",
+                                placeholder="在此输入或粘贴需要克隆语音的文字内容...",
+                                lines=5)
+
+                            gr.HTML('<div class="section-label">🎙 音色选择</div>')
+                            with gr.Row():
+                                voice_select = gr.Dropdown(
+                                    label="从音色库选择",
+                                    choices=_vc.get_choices() if _LIBS_OK else [],
+                                    value=None, interactive=True, scale=4)
+                                voice_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
+                                                              variant="secondary")
+                            voice_preview = gr.Audio(label="🔊 试听所选音色", interactive=False,
+                                                     visible=False)
+                            with gr.Accordion("📎 或上传自定义参考音频", open=False):
+                                prompt_audio = gr.Audio(
+                                    label="参考音频（3-10 秒 WAV/MP3）",
+                                    sources=["upload"], type="filepath")
+
+                            with gr.Accordion("⚙️ 高级合成参数", open=False):
+                                with gr.Row():
+                                    top_p = gr.Slider(label="词语多样性", info="越高输出越随机，建议 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
+                                    top_k = gr.Slider(label="候选词数量", info="限制每步候选词，越小越保守，建议 20~50", minimum=1, maximum=100, value=30, step=1)
+                                with gr.Row():
+                                    temperature = gr.Slider(label="语气活跃度", info="越高语气越有变化，越低越平稳", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
+                                    num_beams   = gr.Slider(label="精确搜索强度", info="越高越精确但更慢，建议 1~3", minimum=1, maximum=10, value=1, step=1)
+                                with gr.Row():
+                                    repetition_penalty = gr.Slider(label="避免重复程度", info="越高越不会重复相同词语", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
+                                    max_mel_tokens     = gr.Slider(label="最大音频长度", info="更长文本需要更大数值，建议 1000~2000", minimum=500, maximum=3000, value=1500, step=100)
+                                gr.HTML('<div class="divider"></div>')
+                                gr.Markdown("### 🎭 情感控制")
+                                emo_mode = gr.Radio(
+                                    label="情感控制模式",
+                                    choices=["与音色参考音频相同","使用情感参考音频","使用情感向量控制","使用情感描述文本控制"],
+                                    value="与音色参考音频相同")
+                                with gr.Group(visible=False) as emo_audio_group:
+                                    emo_audio  = gr.Audio(label="情感参考音频", sources=["upload"], type="filepath")
+                                    emo_weight = gr.Slider(label="情感强度", info="0=不混合情感，1=完全使用情感参考", minimum=0.0, maximum=1.0, value=0.6, step=0.1)
+                                with gr.Group(visible=False) as emo_vec_group:
+                                    gr.Markdown("调整8个情感向量维度（-1.0 到 1.0）")
+                                    with gr.Row():
+                                        vec1 = gr.Slider(label="向量1", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                        vec2 = gr.Slider(label="向量2", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                    with gr.Row():
+                                        vec3 = gr.Slider(label="向量3", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                        vec4 = gr.Slider(label="向量4", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                    with gr.Row():
+                                        vec5 = gr.Slider(label="向量5", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                        vec6 = gr.Slider(label="向量6", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                    with gr.Row():
+                                        vec7 = gr.Slider(label="向量7", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                        vec8 = gr.Slider(label="向量8", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                with gr.Group(visible=False) as emo_text_group:
+                                    emo_text = gr.Textbox(
+                                        label="情感描述文本",
+                                        placeholder="例如：开心、悲伤、愤怒...",
+                                        lines=2)
+                                def update_emo_visibility(mode):
+                                    return (
+                                        gr.update(visible=(mode=="使用情感参考音频")),
+                                        gr.update(visible=(mode=="使用情感向量控制")),
+                                        gr.update(visible=(mode=="使用情感描述文本控制")))
+                                emo_mode.change(update_emo_visibility,
+                                                inputs=[emo_mode],
+                                                outputs=[emo_audio_group, emo_vec_group, emo_text_group])
+                            gen_btn      = gr.Button("🎵  开始语音合成", variant="primary", size="lg")
+                            output_audio = gr.Audio(label="合成结果", interactive=False)
+
+                        # ── 模式B: 直接上传音频 ──
+                        with gr.Group(visible=False) as upload_mode_group:
+                            gr.HTML(
+                                '<div style="background:#f0f9ff;border:1.5px solid #bae6fd;'
+                                'border-radius:12px;padding:12px 14px;margin-bottom:12px;">'
+                                '<div style="font-size:13px;font-weight:700;color:#0c4a6e;margin-bottom:4px;">📁 直接上传音频文件</div>'
+                                '<div style="font-size:11px;color:#0369a1;line-height:1.6;">'
+                                '上传已有的音频文件，跳过语音合成步骤，直接用于视频合成。<br>'
+                                '支持 WAV、MP3 等常见格式。</div></div>'
+                            )
+                            direct_audio_upload = gr.Audio(
+                                label="上传音频文件（WAV / MP3）",
                                 sources=["upload"], type="filepath")
 
-                        with gr.Accordion("⚙️ 高级合成参数", open=False):
-                            with gr.Row():
-                                top_p = gr.Slider(label="词语多样性", info="越高输出越随机，建议 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
-                                top_k = gr.Slider(label="候选词数量", info="限制每步候选词，越小越保守，建议 20~50", minimum=1, maximum=100, value=30, step=1)
-                            with gr.Row():
-                                temperature = gr.Slider(label="语气活跃度", info="越高语气越有变化，越低越平稳", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
-                                num_beams   = gr.Slider(label="精确搜索强度", info="越高越精确但更慢，建议 1~3", minimum=1, maximum=10, value=1, step=1)
-                            with gr.Row():
-                                repetition_penalty = gr.Slider(label="避免重复程度", info="越高越不会重复相同词语", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
-                                max_mel_tokens     = gr.Slider(label="最大音频长度", info="更长文本需要更大数值，建议 1000~2000", minimum=500, maximum=3000, value=1500, step=100)
-                            gr.HTML('<div class="divider"></div>')
-                            gr.Markdown("### 🎭 情感控制")
-                            emo_mode = gr.Radio(
-                                label="情感控制模式",
-                                choices=["与音色参考音频相同","使用情感参考音频","使用情感向量控制","使用情感描述文本控制"],
-                                value="与音色参考音频相同")
-                            with gr.Group(visible=False) as emo_audio_group:
-                                emo_audio  = gr.Audio(label="情感参考音频", sources=["upload"], type="filepath")
-                                emo_weight = gr.Slider(label="情感强度", info="0=不混合情感，1=完全使用情感参考", minimum=0.0, maximum=1.0, value=0.6, step=0.1)
-                            with gr.Group(visible=False) as emo_vec_group:
-                                gr.Markdown("调整8个情感向量维度（-1.0 到 1.0）")
-                                with gr.Row():
-                                    vec1 = gr.Slider(label="向量1", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    vec2 = gr.Slider(label="向量2", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                with gr.Row():
-                                    vec3 = gr.Slider(label="向量3", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    vec4 = gr.Slider(label="向量4", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                with gr.Row():
-                                    vec5 = gr.Slider(label="向量5", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    vec6 = gr.Slider(label="向量6", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                with gr.Row():
-                                    vec7 = gr.Slider(label="向量7", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    vec8 = gr.Slider(label="向量8", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                            with gr.Group(visible=False) as emo_text_group:
-                                emo_text = gr.Textbox(
-                                    label="情感描述文本",
-                                    placeholder="例如：开心、悲伤、愤怒...",
-                                    lines=2)
-                            def update_emo_visibility(mode):
-                                return (
-                                    gr.update(visible=(mode=="使用情感参考音频")),
-                                    gr.update(visible=(mode=="使用情感向量控制")),
-                                    gr.update(visible=(mode=="使用情感描述文本控制")))
-                            emo_mode.change(update_emo_visibility,
-                                            inputs=[emo_mode],
-                                            outputs=[emo_audio_group, emo_vec_group, emo_text_group])
-                        gen_btn      = gr.Button("🎵  开始语音合成", variant="primary", size="lg")
-                        output_audio = gr.Audio(label="合成结果", interactive=False)
-
-                    # ═══ 列 2：口型同步 ═══════════════════════════
+                    # ═══ 列 2：视频合成 ═══════════════════════════
                     with gr.Column(scale=1, elem_classes="panel"):
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">2</div>'
-                            '<span class="step-title">口型同步</span>'
+                            '<span class="step-title">视频合成</span>'
                             '</div>'
                         )
                         # ── 数字人选择 ──
@@ -1414,12 +1603,13 @@ def build_ui():
                         avatar_preview_title = gr.HTML(value="", visible=False)
 
                         # ── 合成音频 ──
-                        gr.HTML('<div class="section-label">🔊 合成音频</div>')
+                        gr.HTML('<div class="section-label">🔊 音频（自动引用步骤1的结果，也可手动上传）</div>')
                         audio_for_ls = gr.Audio(
-                            label="来自步骤1的合成结果（自动引用）",
-                            type="filepath", interactive=False)
+                            label="用于视频合成的音频",
+                            type="filepath", interactive=True,
+                            sources=["upload"])
 
-                        ls_btn = gr.Button("🚀  开始生成口型同步视频", variant="primary", size="lg")
+                        ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
 
                     # ═══ 列 3：生成结果 ═══════════════════════════
                     with gr.Column(scale=2, elem_classes="panel", elem_id="output-video-col"):
@@ -1468,6 +1658,13 @@ def build_ui():
                                 sub_outline_size = gr.Slider(
                                     label="描边宽度 px", minimum=0, maximum=8,
                                     value=4, step=1, scale=1)
+                            with gr.Row():
+                                sub_bg_color = gr.ColorPicker(
+                                    label="背景颜色", value="#000000", scale=1)
+                                sub_bg_opacity = gr.Slider(
+                                    label="背景透明度", minimum=0, maximum=100,
+                                    value=0, step=5, scale=1,
+                                    info="0=全透明 100=不透明")
                             # 行3：关键词高亮
                             with gr.Row():
                                 sub_kw_enable = gr.Checkbox(
@@ -1505,7 +1702,7 @@ def build_ui():
                             choices=[], value=None, interactive=True)
                         gr.HTML('<div class="divider"></div>')
                         hist_info = gr.HTML(
-                            value='<div style="font-size:12px;color:#94a3b8;padding:8px 0">尚无记录，完成一次口型同步后自动保存。</div>'
+                            value='<div style="font-size:12px;color:#94a3b8;padding:8px 0">尚无记录，完成一次视频合成后自动保存。</div>'
                         )
 
                         # ── 清空确认弹窗（默认隐藏）──
@@ -1580,18 +1777,18 @@ def build_ui():
                             '</div>'
                         )
                         av_gallery = gr.HTML(
-                            value=_av.render_gallery("av-del-input") if _LIBS_OK else "")
+                            value=_av.render_gallery("av-del-input", "av-prev-trigger") if _LIBS_OK else "")
                         # JS桥接：卡片上的🗑按钮写入此隐藏textbox触发删除
-                        with gr.Row(visible=False):
+                        with gr.Row(elem_id="av-del-input-row"):
                             av_del_js_input = gr.Textbox(
                                 elem_id="av-del-input", value="", interactive=True)
+                        # JS桥接：卡片点击写入此隐藏textbox触发预览
+                        with gr.Row(elem_id="av-prev-trigger-row"):
+                            av_prev_js_input = gr.Textbox(
+                                elem_id="av-prev-trigger", value="", interactive=True)
                         av_del_real_hint = gr.HTML(value="")
                         gr.HTML('<div class="divider"></div>')
-                        gr.HTML('<div class="section-label">🔍 预览</div>')
-                        av_prev_dd = gr.Dropdown(
-                            label="选择预览", show_label=False,
-                            choices=_av.get_choices() if _LIBS_OK else [],
-                            value=None, container=False)
+                        gr.HTML('<div class="section-label">🔍 预览（点击上方卡片）</div>')
                         av_prev_video = gr.Video(label="", height=240, interactive=False)
                         av_prev_title = gr.HTML(value="")
 
@@ -1633,17 +1830,17 @@ def build_ui():
                             '</div>'
                         )
                         vc_gallery = gr.HTML(
-                            value=_vc.render_gallery("vc-del-input") if _LIBS_OK else "")
-                        with gr.Row(visible=False):
+                            value=_vc.render_gallery("vc-del-input", "vc-prev-trigger") if _LIBS_OK else "")
+                        with gr.Row(elem_id="vc-del-input-row"):
                             vc_del_js_input = gr.Textbox(
                                 elem_id="vc-del-input", value="", interactive=True)
+                        # JS桥接：卡片点击写入此隐藏textbox触发试听
+                        with gr.Row(elem_id="vc-prev-trigger-row"):
+                            vc_prev_js_input = gr.Textbox(
+                                elem_id="vc-prev-trigger", value="", interactive=True)
                         vc_del_real_hint = gr.HTML(value="")
                         gr.HTML('<div class="divider"></div>')
-                        gr.HTML('<div class="section-label">🔊 试听</div>')
-                        vc_prev_dd = gr.Dropdown(
-                            label="选择音色", show_label=False,
-                            choices=_vc.get_choices() if _LIBS_OK else [],
-                            value=None, container=False)
+                        gr.HTML('<div class="section-label">🔊 试听（点击上方卡片）</div>')
                         vc_prev_audio = gr.Audio(label="", interactive=False)
 
             # ── Tab 5：批量任务 ──────────────────────────────
@@ -1844,7 +2041,7 @@ def build_ui():
                                 if not vp or not os.path.exists(vp):
                                     raise RuntimeError("专属视频不存在")
                             op = os.path.join(batch_dir, f"任务{idx}.mp4")
-                            progress(0.3, desc=f"[{idx}/{total}] {tn} — 口型同步...")
+                            progress(0.3, desc=f"[{idx}/{total}] {tn} — 视频合成...")
                             run_latentsync(vp, ap, output_path_override=op)
                             rt[i]["status"] = "✅ 完成"
                             yield _y(idx,"运行中",f"✅ {tn} 完成 → 任务{idx}.mp4")
@@ -1981,7 +2178,7 @@ def build_ui():
                         "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom,ContentType=WindowsRuntime]|Out-Null;"
                         "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(2);"
                         "$x.GetElementsByTagName('text')[0].AppendChild($x.CreateTextNode('织梦AI — 语音合成完成'))|Out-Null;"
-                        "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('音频已生成，可以进行口型同步。'))|Out-Null;"
+                        "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('音频已生成，可以进行视频合成。'))|Out-Null;"
                         "$n=[Windows.UI.Notifications.ToastNotification]::new($x);"
                         "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('织梦AI').Show($n);"
                     )
@@ -2006,6 +2203,23 @@ def build_ui():
         # TTS 完成后把合成文本同步到字幕文本框（Whisper fallback）
         def _sync_tts_text(txt): return txt
         gen_btn.click(_sync_tts_text, inputs=[input_text], outputs=[sub_text])
+
+        # ── 音频模式切换 ──
+        def _toggle_audio_mode(mode):
+            return (
+                gr.update(visible=(mode == "文字转语音")),
+                gr.update(visible=(mode == "直接上传音频")),
+            )
+        audio_mode.change(_toggle_audio_mode,
+            inputs=[audio_mode],
+            outputs=[tts_mode_group, upload_mode_group])
+
+        # 直接上传音频时自动填入 audio_for_ls
+        def _on_direct_audio(audio_path):
+            return audio_path
+        direct_audio_upload.change(_on_direct_audio,
+            inputs=[direct_audio_upload],
+            outputs=[audio_for_ls])
 
         # ── 数字人文件上传预览 ──
         def _av_file_preview(file_path, progress=gr.Progress()):
@@ -2054,32 +2268,12 @@ def build_ui():
             lambda: gr.update(choices=_av.get_choices() if _LIBS_OK else []),
             outputs=[avatar_select])
 
-        # ── 数字人 Tab 事件 ──
-        def _save_avatar(video, name, progress=gr.Progress()):
-            if not _LIBS_OK: return _hint_html("error","扩展模块未加载"), "", gr.update(), gr.update(), gr.update()
-            if not video:
-                return _hint_html("warning","请先上传视频"), (_av.render_gallery() if _LIBS_OK else ""), gr.update(), gr.update(), gr.update()
-            # 先转码保证存储的是可播放格式
-            try:
-                converted = convert_video_for_browser(video, progress)
-                save_path = converted if (converted and os.path.exists(converted)) else video
-            except Exception:
-                save_path = video
-            ok, msg = _av.add_avatar(save_path, name)
-            ch = _av.get_choices()
-            return (_hint_html("ok" if ok else "warning", msg),
-                    _av.render_gallery(),
-                    gr.update(choices=ch, value=None),
-                    gr.update(choices=ch, value=None),
-                    gr.update(choices=ch, value=None))
-
         # ── 数字人 Tab 事件 ──────────────────────────────────
         def _av_all_outputs(hint_html):
-            """统一返回格式：hint + gallery + 两个下拉刷新 + 清空隐藏输入框"""
+            """统一返回格式：hint + gallery + 下拉刷新 + 清空隐藏输入框"""
             ch = _av.get_choices() if _LIBS_OK else []
             return (hint_html,
-                    _av.render_gallery("av-del-input") if _LIBS_OK else "",
-                    gr.update(choices=ch, value=None),
+                    _av.render_gallery("av-del-input", "av-prev-trigger") if _LIBS_OK else "",
                     gr.update(choices=ch, value=None),
                     gr.update(value=""))  # 清空隐藏输入框
 
@@ -2098,33 +2292,24 @@ def build_ui():
 
         av_save_btn.click(_save_avatar_handler,
             inputs=[av_upload, av_name],
-            outputs=[av_save_hint, av_gallery, avatar_select, av_prev_dd, av_del_js_input])
+            outputs=[av_save_hint, av_gallery, avatar_select, av_del_js_input])
 
         def _del_avatar_handler(name):
             print(f"[DEBUG] _del_avatar_handler 被调用，name='{name}'")
             if not _LIBS_OK:
-                print("[DEBUG] 扩展模块未加载")
                 return _av_all_outputs(_hint_html("error","扩展模块未加载"))
             if not name or not name.strip() or name.startswith("（"):
-                print(f"[DEBUG] 名称无效: '{name}'")
                 return _av_all_outputs(_hint_html("warning","请先选择要删除的数字人"))
-            print(f"[DEBUG] 调用 del_avatar('{name.strip()}')")
             ok, msg = _av.del_avatar(name.strip())
             print(f"[DEBUG] del_avatar 返回: ok={ok}, msg={msg}")
-            # 返回时需要清空隐藏输入框，避免重复触发
-            ch = _av.get_choices()
-            print(f"[DEBUG] 更新后的选项: {ch}")
-            return (_hint_html("ok" if ok else "warning", msg),
-                    _av.render_gallery("av-del-input"),
-                    gr.update(choices=ch, value=None),
-                    gr.update(choices=ch, value=None),
-                    gr.update(value=""))  # 清空隐藏输入框
+            return _av_all_outputs(_hint_html("ok" if ok else "warning", msg))
 
         # 卡片内 🗑 按钮 → JS 写入隐藏 textbox → change 事件触发
         av_del_js_input.change(_del_avatar_handler,
             inputs=[av_del_js_input],
-            outputs=[av_del_real_hint, av_gallery, avatar_select, av_prev_dd, av_del_js_input])
+            outputs=[av_del_real_hint, av_gallery, avatar_select, av_del_js_input])
 
+        # 点击卡片 → JS 写入隐藏 textbox → change 事件触发预览
         def _preview_avatar(name):
             if not _LIBS_OK or not name or name.startswith("（"):
                 return None, ""
@@ -2132,15 +2317,14 @@ def build_ui():
             title = f'<div class="avatar-title-badge">🎭 {name}</div>' if (path and os.path.exists(path)) else ""
             return (path if path and os.path.exists(path) else None), title
 
-        av_prev_dd.change(_preview_avatar,
-            inputs=[av_prev_dd], outputs=[av_prev_video, av_prev_title])
+        av_prev_js_input.change(_preview_avatar,
+            inputs=[av_prev_js_input], outputs=[av_prev_video, av_prev_title])
 
         # ── 音色 Tab 事件 ──────────────────────────────────
         def _vc_all_outputs(hint_html):
             ch = _vc.get_choices() if _LIBS_OK else []
             return (hint_html,
-                    _vc.render_gallery("vc-del-input") if _LIBS_OK else "",
-                    gr.update(choices=ch, value=None),
+                    _vc.render_gallery("vc-del-input", "vc-prev-trigger") if _LIBS_OK else "",
                     gr.update(choices=ch, value=None),
                     gr.update(value=""))  # 清空隐藏输入框
 
@@ -2152,36 +2336,27 @@ def build_ui():
 
         vc_save_btn.click(_save_voice,
             inputs=[vc_upload, vc_name],
-            outputs=[vc_save_hint, vc_gallery, voice_select, vc_prev_dd, vc_del_js_input])
+            outputs=[vc_save_hint, vc_gallery, voice_select, vc_del_js_input])
 
         def _del_voice_handler(name):
             print(f"[DEBUG] _del_voice_handler 被调用，name='{name}'")
             if not _LIBS_OK:
-                print("[DEBUG] 扩展模块未加载")
                 return _vc_all_outputs(_hint_html("error","扩展模块未加载"))
             if not name or not name.strip() or name.startswith("（"):
-                print(f"[DEBUG] 名称无效: '{name}'")
                 return _vc_all_outputs(_hint_html("warning","请先选择要删除的音色"))
-            print(f"[DEBUG] 调用 del_voice('{name.strip()}')")
             ok, msg = _vc.del_voice(name.strip())
             print(f"[DEBUG] del_voice 返回: ok={ok}, msg={msg}")
-            # 返回时需要清空隐藏输入框，避免重复触发
-            ch = _vc.get_choices()
-            print(f"[DEBUG] 更新后的选项: {ch}")
-            return (_hint_html("ok" if ok else "warning", msg),
-                    _vc.render_gallery("vc-del-input"),
-                    gr.update(choices=ch, value=None),
-                    gr.update(choices=ch, value=None),
-                    gr.update(value=""))  # 清空隐藏输入框
+            return _vc_all_outputs(_hint_html("ok" if ok else "warning", msg))
 
         # 卡片内 🗑 按钮 → JS bridge
         vc_del_js_input.change(_del_voice_handler,
             inputs=[vc_del_js_input],
-            outputs=[vc_del_real_hint, vc_gallery, voice_select, vc_prev_dd, vc_del_js_input])
+            outputs=[vc_del_real_hint, vc_gallery, voice_select, vc_del_js_input])
 
-        vc_prev_dd.change(
+        # 点击卡片 → JS 写入隐藏 textbox → change 事件触发试听
+        vc_prev_js_input.change(
             lambda n: (_vc.get_path(n) if (_LIBS_OK and n and not n.startswith("（")) else None),
-            inputs=[vc_prev_dd], outputs=[vc_prev_audio])
+            inputs=[vc_prev_js_input], outputs=[vc_prev_audio])
 
         # ── 关键词高亮开关 ──
         def _toggle_kw(enabled):
@@ -2193,6 +2368,7 @@ def build_ui():
         def _do_subtitle(vid, aud, text,
                          font, size, pos,
                          color_txt, hi_txt, outline_txt, outline_size,
+                         bg_color, bg_opacity,
                          kw_enable, kw_str, hi_scale,
                          progress=gr.Progress()):
             if not _LIBS_OK:
@@ -2204,7 +2380,7 @@ def build_ui():
             else:
                 vid_path = str(vid) if vid else ""
             if not vid_path or not os.path.exists(vid_path):
-                return gr.update(visible=False), _hint_html("warning","请先生成口型同步视频再添加字幕"), _make_log(False,"无视频")
+                return gr.update(visible=False), _hint_html("warning","请先完成视频合成再添加字幕"), _make_log(False,"无视频")
 
             aud_path = str(aud) if (aud and isinstance(aud, str)) else None
 
@@ -2218,6 +2394,8 @@ def build_ui():
                     kw_enable=bool(kw_enable),
                     kw_str=kw_str or "",
                     hi_scale=float(hi_scale or 1.5),
+                    bg_color=bg_color or "#000000",
+                    bg_opacity=int(bg_opacity or 0),
                     progress_cb=_cb
                 )
                 return (gr.update(value=out, visible=True),
@@ -2233,6 +2411,7 @@ def build_ui():
             inputs=[output_video, audio_for_ls,
                     sub_text, sub_font, sub_size, sub_pos,
                     sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                    sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_kw_text, sub_hi_scale],
             outputs=[sub_video, sub_hint, op_log_html])
 
@@ -2267,11 +2446,11 @@ def build_ui():
                 'font-family:Microsoft YaHei,sans-serif;">' +
                 '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">' +
                 '<div style="width:10px;height:10px;border-radius:50%;background:#6366f1;animation:pulse 1.5s infinite;"></div>' +
-                '<span style="color:#e2e8f0;font-weight:700;font-size:14px;">正在启动生成引擎</span></div>' +
+                '<span style="color:#e2e8f0;font-weight:700;font-size:14px;">正在准备生成环境</span></div>' +
                 '<div style="font-size:12px;color:#94a3b8;line-height:1.8;">' +
-                '⏳ 正在加载深度学习模型（首次启动需要 10-30 秒）<br>' +
+                '⏳ 正在初始化推理管线...<br>' +
                 '📦 加载 UNet、VAE、音频编码器等组件<br>' +
-                '💡 请耐心等待，模型加载完成后会立即开始生成</div>' +
+                '💡 引擎已在启动时预热，加载速度更快</div>' +
                 '<style>@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}</style>' +
                 '</div>'
             )
@@ -2288,18 +2467,18 @@ def build_ui():
                     yield gr.update(), gr.update(), gr.update()
 
             if result["err"]:
-                yield gr.update(), _make_log(False, f"口型同步失败: {result['err']}"), gr.update(visible=False)
+                yield gr.update(), _make_log(False, f"视频合成失败: {result['err']}"), gr.update(visible=False)
                 raise gr.Error(str(result["err"]))
 
             out      = result["out"]
-            log_html = _make_log(True, "口型同步完成 — " + os.path.basename(out))
+            log_html = _make_log(True, "视频合成完成 — " + os.path.basename(out))
             try:
                 ps = (
                     "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
                     "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom,ContentType=WindowsRuntime]|Out-Null;"
                     "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(2);"
                     "$x.GetElementsByTagName('text')[0].AppendChild($x.CreateTextNode('织梦AI — 合成完成'))|Out-Null;"
-                    "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('视频口型同步已完成！'))|Out-Null;"
+                    "$x.GetElementsByTagName('text')[1].AppendChild($x.CreateTextNode('视频合成已完成！'))|Out-Null;"
                     "$n=[Windows.UI.Notifications.ToastNotification]::new($x);"
                     "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('织梦AI').Show($n);"
                 )
