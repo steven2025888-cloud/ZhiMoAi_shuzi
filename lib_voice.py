@@ -20,51 +20,20 @@ def load_meta():
 
 
 def save_meta(data):
-    """保存元数据到 meta.json — 三重保障写入"""
+    """保存 meta.json"""
     content = json.dumps(data, ensure_ascii=False, indent=2)
-    written = False
-    
     for attempt in range(3):
         try:
-            if os.path.exists(VOICES_META):
-                try:
-                    os.remove(VOICES_META)
-                except Exception:
-                    pass
             with open(VOICES_META, 'w', encoding='utf-8') as f:
                 f.write(content)
                 f.flush()
                 os.fsync(f.fileno())
-            time.sleep(0.05)
             with open(VOICES_META, 'r', encoding='utf-8') as f:
-                check = json.load(f)
-            if len(check) == len(data):
-                written = True
-                print(f"[save_meta] [OK] 成功（尝试{attempt+1}）: {len(data)} 条 -> {VOICES_META}")
-                break
+                if len(json.load(f)) == len(data):
+                    return
         except Exception as e:
-            print(f"[save_meta] 尝试{attempt+1} 失败: {e}")
+            print(f"[save_meta] attempt {attempt+1} fail: {e}")
             time.sleep(0.1)
-    
-    if not written:
-        try:
-            tmp = VOICES_META + f".tmp.{int(time.time())}"
-            with open(tmp, 'w', encoding='utf-8') as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            for _ in range(3):
-                try:
-                    if os.path.exists(VOICES_META):
-                        os.remove(VOICES_META)
-                    break
-                except Exception:
-                    time.sleep(0.1)
-            os.rename(tmp, VOICES_META)
-            written = True
-            print(f"[save_meta] [OK] 成功（回退策略）")
-        except Exception as e:
-            print(f"[save_meta] [FAIL] 所有策略均失败: {e}")
 
 
 def get_choices():

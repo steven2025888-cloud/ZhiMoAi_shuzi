@@ -112,21 +112,17 @@ INIT_JS = r"""
     new MutationObserver(_rm).observe(document.documentElement, {childList:true, subtree:true});
 
     /* ── 3. 关闭确认对话框 ── */
-    const PREF = 'zdai_pref';
     document.body.insertAdjacentHTML('beforeend', `
       <div id="zdai-cm" style="display:none;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;">
         <div style="position:absolute;inset:0;background:rgba(15,23,42,.6);backdrop-filter:blur(6px)" onclick="window._zm.hide()"></div>
         <div style="position:relative;background:#fff;border-radius:20px;padding:36px 32px 28px;width:380px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.22)">
           <div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:26px;">🖥</div>
-          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:8px">关闭 织梦AI</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:8px">关闭程序</div>
           <div style="font-size:13px;color:#64748b;margin-bottom:24px;line-height:1.7">最小化到通知区域后程序继续运行，<br>不会中断正在进行的任务。</div>
-          <div style="display:flex;gap:10px;margin-bottom:18px">
+          <div style="display:flex;gap:10px">
             <button onclick="window._zm.minimize()" style="flex:1;padding:12px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;color:#374151;transition:all .15s">⊟ 最小化到通知区域</button>
             <button onclick="window._zm.exit()" style="flex:1;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s">✕ 退出程序</button>
           </div>
-          <label style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:#94a3b8;cursor:pointer">
-            <input type="checkbox" id="zdai-na" style="accent-color:#6366f1"> <span>记住选择，不再提示</span>
-          </label>
         </div>
       </div>
 
@@ -445,18 +441,11 @@ INIT_JS = r"""
     /* ── 10. 关闭/最小化逻辑 ── */
     window._zm = {
         show() {
-            const p = localStorage.getItem(PREF);
-            if (p === 'min')  { this.minimize(); return; }
-            if (p === 'exit') { this.exit();     return; }
             document.getElementById('zdai-cm').style.display = 'flex';
         },
         hide() { document.getElementById('zdai-cm').style.display = 'none'; },
-        _save(v) {
-            if (document.getElementById('zdai-na')?.checked)
-                localStorage.setItem(PREF, v);
-        },
         minimize() {
-            this._save('min'); this.hide();
+            this.hide();
             setTimeout(() => {
                 const api = window.pywebview?.api;
                 if (api && typeof api.minimize_to_tray === 'function') {
@@ -473,7 +462,7 @@ INIT_JS = r"""
             }, 200);
         },
         exit() {
-            this._save('exit'); this.hide();
+            this.hide();
             document.body.insertAdjacentHTML('beforeend',
                 '<div style="position:fixed;inset:0;background:rgba(15,23,42,.95);z-index:999999;' +
                 'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;' +
@@ -549,27 +538,6 @@ button[aria-label="Settings"],.hamburger-menu,span.version
 *{box-sizing:border-box;}
 body,.gradio-container{background:#f0f2f7!important;font-family:'Microsoft YaHei',system-ui,sans-serif!important;}
 .gradio-container{padding-bottom:60px!important;min-height:0!important;overflow-x:hidden!important;}
-
-/* ── 顶栏 ── */
-.topbar{
-  background:#0f172a;
-  border-bottom:1px solid rgba(255,255,255,.06);
-  padding:0 24px;height:48px;
-  display:flex;align-items:center;justify-content:space-between;
-  position:sticky;top:0;z-index:100;
-}
-.topbar-brand{display:flex;align-items:center;gap:10px;}
-.topbar-logo{
-  width:30px;height:30px;border-radius:8px;
-  background:linear-gradient(135deg,#6366f1,#8b5cf6);
-  display:flex;align-items:center;justify-content:center;
-  font-size:14px;
-  box-shadow:0 0 12px rgba(99,102,241,.3);
-}
-.topbar-name{
-  font-size:15px;font-weight:700;color:#f1f5f9;letter-spacing:.3px;
-}
-.topbar-sub{font-size:10px;color:rgba(148,163,184,.45);letter-spacing:.2px;margin-top:0px;}
 
 /* ── Tab 导航 ── */
 .tabs button[role=tab]{
@@ -799,6 +767,31 @@ input[type=color]:hover{
   position:absolute!important;opacity:0!important;
 }
 
+/* ── 语音风格选择器 ── */
+.voice-style-radio .wrap{
+  display:flex!important;gap:6px!important;flex-direction:row!important;flex-wrap:wrap!important;
+}
+.voice-style-radio label{
+  flex:1 1 auto!important;text-align:center!important;font-size:12px!important;font-weight:600!important;
+  padding:7px 12px!important;border-radius:8px!important;
+  border:1.5px solid #e2e8f0!important;
+  cursor:pointer!important;transition:all .18s!important;
+  background:#f8fafc!important;min-width:60px!important;
+  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+}
+.voice-style-radio label:has(input:checked){
+  border-color:#6366f1!important;background:linear-gradient(135deg,#eef2ff,#e0e7ff)!important;
+  color:#3730a3!important;box-shadow:0 2px 8px rgba(99,102,241,.2)!important;
+  font-weight:700!important;
+}
+.voice-style-radio label:hover:not(:has(input:checked)){
+  border-color:#c7d2fe!important;background:#f5f3ff!important;
+}
+.voice-style-radio input[type="radio"]{
+  display:none!important;width:0!important;height:0!important;
+  position:absolute!important;opacity:0!important;
+}
+
 /* ── 关键词高亮 checkbox ── */
 .kw-checkbox label{font-weight:700!important;font-size:13px!important;}
 .kw-checkbox input[type=checkbox]{
@@ -911,20 +904,6 @@ input[type=color]:hover{
 .panel {
   box-shadow: 0 4px 20px rgba(0,0,0,.06)!important;
   border-radius: 16px!important;
-}
-
-/* ── 模型状态徽章 ── */
-.badge-ok {
-  color: #4ade80;
-  border-radius: 20px; padding: 2px 8px;
-  font-size: 10px; font-weight: 600;
-  display: inline-flex; align-items: center; gap: 3px;
-}
-.badge-err {
-  color: #f87171;
-  border-radius: 20px; padding: 2px 8px;
-  font-size: 10px; font-weight: 600;
-  display: inline-flex; align-items: center; gap: 3px;
 }
 
 /* ── Gradio flex 修复 ── */
@@ -1447,17 +1426,6 @@ def _render_batch_prog(done, total, cur_name, status, msg, out_folder=""):
 #  构建 UI
 # ══════════════════════════════════════════════════════════════
 def build_ui():
-    badge = ('<span class="badge-ok">● 就绪</span>' if tts
-             else '<span class="badge-err">● 未就绪</span>')
-
-    # logo 路径：使用相对路径或base64编码
-    logo_path = os.path.join(BASE_DIR, 'logo.jpg')
-    logo_url = None
-    if os.path.exists(logo_path):
-        # 尝试使用Gradio的文件路径格式
-        logo_url = logo_path.replace('\\', '/')
-    else:
-        logo_url = None
 
     with gr.Blocks(
         title=APP_NAME,
@@ -1469,33 +1437,6 @@ def build_ui():
             font=[gr.themes.GoogleFont("Noto Sans SC"), "Microsoft YaHei", "system-ui"],
         ),
     ) as app:
-
-        # ── 顶部导航栏 ────────────────────────────────────────
-        logo_img_html = ''
-        if logo_url:
-            logo_img_html = f'''<img src="file/{logo_url}"
-                 style="width:30px;height:30px;border-radius:8px;object-fit:cover;"
-                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">'''
-
-        gr.HTML(f"""
-        <div class="topbar">
-          <div class="topbar-brand">
-            {logo_img_html}
-            <div class="topbar-logo" style="display:{'none' if logo_url else 'flex'};">✦</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            {badge}
-            <button onclick="try{{window._zm.show()}}catch(e){{if(window.pywebview?.api?.close_window)window.pywebview.api.close_window();else window.close()}}"
-                style="background:transparent;border:none;
-                color:rgba(148,163,184,.35);width:24px;height:24px;border-radius:6px;cursor:pointer;
-                font-size:14px;display:flex;align-items:center;justify-content:center;
-                transition:all .15s;font-family:inherit;padding:0;"
-                onmouseover="this.style.background='rgba(239,68,68,.15)';this.style.color='#fca5a5'"
-                onmouseout="this.style.background='transparent';this.style.color='rgba(148,163,184,.35)'"
-                title="关闭程序">✕</button>
-          </div>
-        </div>
-        """)
 
         # ── 进度提示横幅（视频合成时显示）────────────────────
         progress_banner = gr.HTML(
@@ -1547,16 +1488,27 @@ def build_ui():
                                     label="参考音频（3-10 秒 WAV/MP3）",
                                     sources=["upload"], type="filepath")
 
-                            with gr.Accordion("⚙️ 高级合成参数", open=False):
+                            # ── 语音风格预设 ──
+                            voice_style = gr.Radio(
+                                label="语音风格",
+                                choices=["标准", "稳定播报", "活泼生动", "慢速朗读", "专业模式"],
+                                value="标准",
+                                elem_classes="voice-style-radio")
+                            voice_speed = gr.Slider(
+                                label="语速调节",
+                                info="← 慢  |  快 →",
+                                minimum=0.5, maximum=1.5, value=1.0, step=0.05)
+
+                            with gr.Group(visible=False) as pro_mode_group:
                                 with gr.Row():
-                                    top_p = gr.Slider(label="词语多样性", info="越高输出越随机，建议 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
-                                    top_k = gr.Slider(label="候选词数量", info="限制每步候选词，越小越保守，建议 20~50", minimum=1, maximum=100, value=30, step=1)
+                                    top_p = gr.Slider(label="词语多样性", info="越高越随机 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
+                                    top_k = gr.Slider(label="候选词数量", info="越小越保守 20~50", minimum=1, maximum=100, value=30, step=1)
                                 with gr.Row():
-                                    temperature = gr.Slider(label="语气活跃度", info="越高语气越有变化，越低越平稳", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
-                                    num_beams   = gr.Slider(label="精确搜索强度", info="越高越精确但更慢，建议 1~3", minimum=1, maximum=10, value=1, step=1)
+                                    temperature = gr.Slider(label="语气活跃度", info="越高越有变化", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
+                                    num_beams   = gr.Slider(label="搜索精度", info="越高越慢但更准", minimum=1, maximum=10, value=1, step=1)
                                 with gr.Row():
-                                    repetition_penalty = gr.Slider(label="避免重复程度", info="越高越不会重复相同词语", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
-                                    max_mel_tokens     = gr.Slider(label="最大音频长度", info="更长文本需要更大数值，建议 1000~2000", minimum=500, maximum=3000, value=1500, step=100)
+                                    repetition_penalty = gr.Slider(label="避免重复", info="越高越不重复", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
+                                    max_mel_tokens     = gr.Slider(label="最大长度", info="长文本需加大", minimum=500, maximum=3000, value=1500, step=100)
                                 gr.HTML('<div class="divider"></div>')
                                 gr.Markdown("### 🎭 情感控制")
                                 emo_mode = gr.Radio(
@@ -1685,8 +1637,8 @@ def build_ui():
                                     label="描边颜色", value="#000000", scale=1,
                                     elem_id="sub-outline-color")
                                 sub_outline_size = gr.Slider(
-                                    label="描边宽度 px", minimum=0, maximum=8,
-                                    value=4, step=1, scale=1)
+                                    label="描边宽度 px", minimum=0, maximum=10,
+                                    value=6, step=1, scale=1)
                             with gr.Row():
                                 sub_bg_color = gr.ColorPicker(
                                     label="背景颜色", value="#000000", scale=1)
@@ -2175,7 +2127,7 @@ def build_ui():
                     f'共 <b>{total}</b> 条，<span style="color:#16a34a">✅ {ok} 个有效</span></div>')
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
-        def tts_wrap(text, pa, tp, tk, temp, nb, rp, mmt,
+        def tts_wrap(text, pa, spd, tp, tk, temp, nb, rp, mmt,
                      emo_m, emo_a, emo_w, emo_t,
                      v1, v2, v3, v4, v5, v6, v7, v8,
                      progress=gr.Progress()):
@@ -2193,7 +2145,28 @@ def build_ui():
                                     progress=progress)
                 out_path = r[0]
                 
-                progress(1.0, desc="✅ 完成")
+                # 语速调整（ffmpeg atempo）
+                speed = float(spd or 1.0)
+                if abs(speed - 1.0) > 0.02 and out_path and os.path.exists(out_path):
+                    progress(0.92, desc="调整语速...")
+                    try:
+                        tmp_path = out_path + ".speed.wav"
+                        # atempo 范围 0.5~2.0, 链式处理超出范围
+                        atempo_val = max(0.5, min(2.0, speed))
+                        ffmpeg_bin = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin", "ffmpeg.exe")
+                        if not os.path.exists(ffmpeg_bin):
+                            ffmpeg_bin = "ffmpeg"
+                        cmd = [ffmpeg_bin, "-y", "-i", out_path,
+                               "-filter:a", f"atempo={atempo_val}",
+                               "-vn", tmp_path]
+                        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                        subprocess.run(cmd, capture_output=True, timeout=60, creationflags=flags)
+                        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 100:
+                            os.replace(tmp_path, out_path)
+                    except Exception as e:
+                        print(f"[TTS] speed adjust fail: {e}")
+                
+                progress(1.0, desc="完成")
                 
                 # Windows Toast
                 try:
@@ -2218,7 +2191,7 @@ def build_ui():
                 raise gr.Error("合成失败: " + str(e))
 
         gen_btn.click(tts_wrap,
-            inputs=[input_text, prompt_audio, top_p, top_k, temperature,
+            inputs=[input_text, prompt_audio, voice_speed, top_p, top_k, temperature,
                     num_beams, repetition_penalty, max_mel_tokens,
                     emo_mode, emo_audio, emo_weight, emo_text,
                     vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8],
@@ -2238,6 +2211,32 @@ def build_ui():
             inputs=[audio_mode],
             outputs=[tts_mode_group, upload_mode_group])
 
+        # ── 语音风格预设 ──
+        _VOICE_PRESETS = {
+            "标准":     dict(tp=0.8,  tk=30, temp=0.7, nb=1, rp=8.0,  mmt=1500, spd=1.0),
+            "稳定播报": dict(tp=0.6,  tk=10, temp=0.2, nb=3, rp=14.0, mmt=1500, spd=0.95),
+            "活泼生动": dict(tp=0.95, tk=60, temp=1.4, nb=1, rp=4.0,  mmt=1500, spd=1.1),
+            "慢速朗读": dict(tp=0.6,  tk=10, temp=0.15,nb=3, rp=14.0, mmt=2500, spd=0.6),
+        }
+        def _on_voice_style(style):
+            is_pro = (style == "专业模式")
+            if is_pro:
+                return [gr.update(visible=True), gr.update()] + [gr.update()] * 6
+            p = _VOICE_PRESETS.get(style, _VOICE_PRESETS["标准"])
+            return [
+                gr.update(visible=False),
+                gr.update(value=p["spd"]),
+                gr.update(value=p["tp"]),
+                gr.update(value=p["tk"]),
+                gr.update(value=p["temp"]),
+                gr.update(value=p["nb"]),
+                gr.update(value=p["rp"]),
+                gr.update(value=p["mmt"]),
+            ]
+        voice_style.change(_on_voice_style,
+            inputs=[voice_style],
+            outputs=[pro_mode_group, voice_speed, top_p, top_k, temperature, num_beams, repetition_penalty, max_mel_tokens])
+
         # 直接上传音频时自动填入 audio_for_ls
         def _on_direct_audio(audio_path):
             return audio_path
@@ -2252,9 +2251,9 @@ def build_ui():
             # 转码保证浏览器可播放
             try:
                 converted = convert_video_for_browser(file_path, progress)
-                return gr.update(visible=True, value=converted if converted else file_path)
+                return gr.update(visible=True, value=converted if converted else file_path, show_download_button=True)
             except Exception:
-                return gr.update(visible=True, value=file_path)
+                return gr.update(visible=True, value=file_path, show_download_button=True)
 
         av_upload.change(_av_file_preview,
             inputs=[av_upload], outputs=[av_upload_preview])
@@ -2283,7 +2282,7 @@ def build_ui():
             if not path or not os.path.exists(path):
                 return gr.update(visible=False), gr.update(value="", visible=False)
             title = (f'<div class="avatar-title-badge">🎭 {name}</div>')
-            return gr.update(value=path, visible=True), gr.update(value=title, visible=True)
+            return gr.update(value=path, visible=True, show_download_button=True), gr.update(value=title, visible=True)
 
         avatar_select.change(_on_avatar_select,
             inputs=[avatar_select], outputs=[avatar_preview, avatar_preview_title])
@@ -2336,10 +2335,10 @@ def build_ui():
         # 点击卡片 → JS 写入隐藏 textbox → change 事件触发预览
         def _preview_avatar(name):
             if not _LIBS_OK or not name or name.startswith("（"):
-                return None, ""
+                return gr.update(value=None), ""
             path = _av.get_path(name)
             title = f'<div class="avatar-title-badge">🎭 {name}</div>' if (path and os.path.exists(path)) else ""
-            return (path if path and os.path.exists(path) else None), title
+            return (gr.update(value=path, show_download_button=True) if path and os.path.exists(path) else gr.update(value=None)), title
 
         av_prev_js_input.change(_preview_avatar,
             inputs=[av_prev_js_input], outputs=[av_prev_video, av_prev_title])
@@ -2422,7 +2421,7 @@ def build_ui():
                     bg_opacity=int(bg_opacity or 0),
                     progress_cb=_cb
                 )
-                return (gr.update(value=out, visible=True),
+                return (gr.update(value=out, visible=True, show_download_button=True),
                         _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)),
                         _make_log(True, "字幕完成 — " + os.path.basename(out)))
             except Exception as e:
@@ -2497,7 +2496,7 @@ def build_ui():
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
-            yield gr.update(value=out), log_html, gr.update(visible=False)
+            yield gr.update(value=out, show_download_button=True), log_html, gr.update(visible=False)
 
         ls_btn.click(ls_wrap,
             inputs=[avatar_select, audio_for_ls],
@@ -2605,21 +2604,134 @@ def build_ui():
             outputs=[clear_confirm_group, hist_dropdown, hist_info, hist_video, op_log_html])
 
         def _load_hist(p):
-            if not p: return None, ""
+            if not p: return gr.update(value=None), ""
             if not os.path.exists(p):
-                return None, '<div style="font-size:12px;color:#dc2626">❌ 文件不存在</div>'
+                return gr.update(value=None), '<div style="font-size:12px;color:#dc2626">❌ 文件不存在</div>'
             sz   = round(os.path.getsize(p)/1048576, 1)
             info = f'<div style="font-size:12px;color:#16a34a;padding:4px 0">✅ {os.path.basename(p)} ({sz} MB)</div>'
-            return p, info
+            return gr.update(value=p, show_download_button=True), info
         hist_dropdown.change(_load_hist, inputs=[hist_dropdown], outputs=[hist_video, hist_info])
 
         return app
 
 
 # ══════════════════════════════════════════════════════════════
+#  卡密验证 (Gradio 启动前，用 tkinter 弹窗)
+# ══════════════════════════════════════════════════════════════
+def _license_gate():
+    """卡密验证门控。返回 True=通过, False=退出"""
+    try:
+        import lib_license as lic
+    except ImportError:
+        return True  # 没有 lib_license 模块 → 跳过验证
+
+    # 1) 检查本地已保存的卡密
+    status, info = lic.check_saved_license()
+    if status == "valid":
+        ok, msg = lic.validate_online(info.get("license_key", ""))
+        if ok:
+            safe_print("[LICENSE] OK")
+            return True
+        safe_print(f"[LICENSE] online verify fail: {msg}")
+        # 在线验证失败 → 可能过期或被封，需重新登录
+
+    # 2) 需要登录 — 弹出 tkinter 对话框
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+    except ImportError:
+        safe_print("[LICENSE] tkinter not available, skip")
+        return True
+
+    machine_code = lic.get_machine_code()
+    result = {"passed": False}
+
+    root = tk.Tk()
+    root.title("软件激活")
+    root.resizable(False, False)
+    root.configure(bg="#f8fafc")
+
+    # 居中
+    w, h = 420, 260  # 减小高度，因为去掉了机器码显示
+    sx = (root.winfo_screenwidth() - w) // 2
+    sy = (root.winfo_screenheight() - h) // 2
+    root.geometry(f"{w}x{h}+{sx}+{sy}")
+
+    # 标题
+    tk.Label(root, text="软件激活", font=("Microsoft YaHei", 16, "bold"),
+             bg="#f8fafc", fg="#0f172a").pack(pady=(24, 4))
+    tk.Label(root, text="请输入卡密以激活使用", font=("Microsoft YaHei", 10),
+             bg="#f8fafc", fg="#94a3b8").pack(pady=(0, 16))
+
+    # 卡密输入
+    frm = tk.Frame(root, bg="#f8fafc")
+    frm.pack(padx=32, fill="x")
+
+    tk.Label(frm, text="卡密", font=("Microsoft YaHei", 9, "bold"),
+             bg="#f8fafc", fg="#374151", anchor="w").pack(fill="x")
+    key_entry = tk.Entry(frm, font=("Consolas", 11), relief="solid", bd=1)
+    key_entry.pack(fill="x", ipady=4, pady=(2, 10))
+    # 如果有过期的旧卡密，预填
+    if info.get("license_key"):
+        key_entry.insert(0, info["license_key"])
+
+    # 机器码不再显示，但仍在后台使用
+    # tk.Label(frm, text="机器码（自动生成）", font=("Microsoft YaHei", 9, "bold"),
+    #          bg="#f8fafc", fg="#374151", anchor="w").pack(fill="x")
+    # mc_entry = tk.Entry(frm, font=("Consolas", 9), relief="solid", bd=1,
+    #                      fg="#64748b", state="readonly",
+    #                      readonlybackground="#f1f5f9")
+    # mc_entry.configure(state="normal")
+    # mc_entry.insert(0, machine_code)
+    # mc_entry.configure(state="readonly")
+    # mc_entry.pack(fill="x", ipady=3, pady=(2, 16))
+
+    msg_label = tk.Label(frm, text="", font=("Microsoft YaHei", 9),
+                          bg="#f8fafc", fg="#ef4444")
+    msg_label.pack(fill="x")
+
+    def _do_login():
+        key = key_entry.get().strip()
+        if not key:
+            msg_label.config(text="请输入卡密", fg="#ef4444")
+            return
+        msg_label.config(text="正在验证...", fg="#6366f1")
+        root.update()
+        ok, msg = lic.validate_online(key)
+        if ok:
+            msg_label.config(text="激活成功!", fg="#16a34a")
+            result["passed"] = True
+            root.after(600, root.destroy)
+        else:
+            msg_label.config(text=msg, fg="#ef4444")
+
+    btn = tk.Button(frm, text="激活登录", font=("Microsoft YaHei", 11, "bold"),
+                     bg="#6366f1", fg="white", relief="flat", cursor="hand2",
+                     activebackground="#4f46e5", activeforeground="white",
+                     command=_do_login)
+    btn.pack(fill="x", ipady=6, pady=(4, 0))
+
+    key_entry.bind("<Return>", lambda e: _do_login())
+
+    def _on_close():
+        result["passed"] = False
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", _on_close)
+    root.mainloop()
+
+    return result["passed"]
+
+
+# ══════════════════════════════════════════════════════════════
 #  入口
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    # 卡密验证已在 app_backend.py 中完成，这里不再重复验证
+    # if not _license_gate():
+    #     safe_print("[LICENSE] denied, exit")
+    #     sys.exit(0)
+
     auto_load_model()
     app = build_ui()
     app.queue()

@@ -20,63 +20,21 @@ def load_meta():
 
 
 def save_meta(data):
-    """保存元数据到 meta.json — 三重保障写入"""
+    """保存 meta.json"""
     content = json.dumps(data, ensure_ascii=False, indent=2)
-    written = False
-    
-    # 策略1: 直接覆盖写入
     for attempt in range(3):
         try:
-            # 先删后写，避免 Windows 文件锁
-            if os.path.exists(AVATARS_META):
-                try:
-                    os.remove(AVATARS_META)
-                except Exception:
-                    pass
-            
             with open(AVATARS_META, 'w', encoding='utf-8') as f:
                 f.write(content)
                 f.flush()
                 os.fsync(f.fileno())
-            
-            # 验证写入内容
-            time.sleep(0.05)  # Windows 文件系统延迟
+            # 验证
             with open(AVATARS_META, 'r', encoding='utf-8') as f:
-                check = json.load(f)
-            if len(check) == len(data):
-                written = True
-                print(f"[save_meta] [OK] 成功（策略1，尝试{attempt+1}）: {len(data)} 条 -> {AVATARS_META}")
-                break
-            else:
-                print(f"[save_meta] [WARN] 验证不匹配（尝试{attempt+1}）: 期望{len(data)}，实际{len(check)}")
+                if len(json.load(f)) == len(data):
+                    return
         except Exception as e:
-            print(f"[save_meta] 策略1 尝试{attempt+1} 失败: {e}")
+            print(f"[save_meta] attempt {attempt+1} fail: {e}")
             time.sleep(0.1)
-    
-    # 策略2: 写临时文件再替换
-    if not written:
-        try:
-            tmp = AVATARS_META + f".tmp.{int(time.time())}"
-            with open(tmp, 'w', encoding='utf-8') as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            # 强制删除旧文件
-            for _ in range(3):
-                try:
-                    if os.path.exists(AVATARS_META):
-                        os.remove(AVATARS_META)
-                    break
-                except Exception:
-                    time.sleep(0.1)
-            os.rename(tmp, AVATARS_META)
-            written = True
-            print(f"[save_meta] [OK] 成功（策略2）")
-        except Exception as e:
-            print(f"[save_meta] [ERR] 策略2 失败: {e}")
-    
-    if not written:
-        print(f"[save_meta] [FAIL] 所有策略均失败！数据可能未保存！")
 
 
 def get_choices():

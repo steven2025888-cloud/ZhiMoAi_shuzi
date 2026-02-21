@@ -136,7 +136,7 @@ def build_ass(words, font_name, font_size,
     tc  = _hex2ass(text_color)
     hc  = _hex2ass(hi_color)
     oc  = _hex2ass(outline_color)
-    osz = max(0, min(8, int(outline_size or 0)))
+    osz = max(0, min(10, int(outline_size or 0)))
     fs  = int(font_size or 32)
     hi_fs = max(fs + 4, int(fs * max(1.0, float(hi_scale))))
 
@@ -148,20 +148,20 @@ def build_ass(words, font_name, font_size,
     bg_op = max(0, min(100, int(bg_opacity or 0)))
     has_bg = bg_op > 0
 
-    # 文字样式始终用 BorderStyle=1 (仅描边)
+    # 文字样式: 始终 BorderStyle=1（仅描边）
     border_style = 1
     shadow_size = 0
 
-    # 背景样式: 用大 bord 值创建胶囊/药丸形背景
-    # 原理: 文字颜色设为背景色，描边颜色也设为背景色，大描边值自动形成圆角
+    # 背景样式: SubBG = 所有颜色设为背景色 + bord 制造圆角填充
+    # bord=字号40% 确保相邻字符的描边充分重叠形成连续圆角矩形
     bg_style_line = ""
     if has_bg:
         bg_c = _hex2ass_alpha(bg_color or "#000000", bg_op)
-        bg_bord = max(8, int(fs * 0.35))  # 背景 padding 大小
+        bg_pad = max(6, int(fs * 0.4))  # 6~N px, 字号越大 padding 越大
         bg_style_line = (
             f"Style: SubBG,{fn},{fs},"
-            f"{bg_c},&H00000000&,{bg_c},&H00000000&,"
-            f"0,0,0,0,100,100,0,0,1,{bg_bord},0,"
+            f"{bg_c},{bg_c},{bg_c},{bg_c},"
+            f"1,0,0,0,100,100,2,0,1,{bg_pad},0,"
             f"{align},20,20,{marginv},1\n"
         )
 
@@ -259,15 +259,15 @@ def build_ass(words, font_name, font_size,
         ts = _ass_time(t_start)
         te = _ass_time(max(float(t_end), float(t_start) + 0.05))
 
-        # 有背景时在 Layer 0 输出背景层（SubBG 样式的大 bord 自动形成圆角胶囊形）
+        # 背景层: SubBG渲染同样文字（文字色=描边色=背景色 + 大bord → 圆角背景）
         if has_bg:
-            # 纯文本（去掉高亮标签），SubBG 样式会自动渲染为圆角背景
-            raw_text = "".join(
+            # 去除标点，去除空格让字符紧密排列（bord会自动扩展成连续圆角矩形）
+            plain = "".join(
                 w["word"].strip().translate({ord(p): '' for p in sentence_ends})
                 for w in sentence
-            ).strip()
-            if raw_text:
-                events += f"Dialogue: 0,{ts},{te},SubBG,,0,0,0,,{raw_text}\n"
+            ).replace(" ", "").strip()
+            if plain:
+                events += f"Dialogue: 0,{ts},{te},SubBG,,0,0,0,,{plain}\n"
 
         events += f"Dialogue: 1,{ts},{te},Default,,0,0,0,,{line_text}\n"
 

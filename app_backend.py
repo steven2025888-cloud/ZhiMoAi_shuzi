@@ -578,6 +578,132 @@ if __name__ == "__main__":
             pass
         sys.exit(0)
 
+    # ── 先进行激活验证（在启动任何服务之前）─────────────────
+    print("[LICENSE] 开始激活验证...")
+    try:
+        sys.path.insert(0, BASE_DIR)
+        import lib_license as lic
+        
+        # 检查本地保存的卡密状态
+        status, info = lic.check_saved_license()
+        
+        if status == "none":
+            # 没有卡密，弹出激活窗口
+            print("[LICENSE] 未找到激活信息，弹出激活窗口...")
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+                
+                machine_code = lic.get_machine_code()
+                result = {"passed": False}
+
+                root = tk.Tk()
+                root.title("软件激活")
+                root.resizable(False, False)
+                root.configure(bg="#f8fafc")
+
+                # 居中
+                w, h = 420, 260
+                sx = (root.winfo_screenwidth() - w) // 2
+                sy = (root.winfo_screenheight() - h) // 2
+                root.geometry(f"{w}x{h}+{sx}+{sy}")
+
+                # 标题
+                tk.Label(root, text="软件激活", font=("Microsoft YaHei", 16, "bold"),
+                         bg="#f8fafc", fg="#0f172a").pack(pady=(24, 4))
+                tk.Label(root, text="请输入卡密以激活使用", font=("Microsoft YaHei", 10),
+                         bg="#f8fafc", fg="#94a3b8").pack(pady=(0, 16))
+
+                # 卡密输入
+                frm = tk.Frame(root, bg="#f8fafc")
+                frm.pack(padx=32, fill="x")
+
+                tk.Label(frm, text="卡密", font=("Microsoft YaHei", 9, "bold"),
+                         bg="#f8fafc", fg="#374151", anchor="w").pack(fill="x")
+                key_entry = tk.Entry(frm, font=("Consolas", 11), relief="solid", bd=1)
+                key_entry.pack(fill="x", ipady=4, pady=(2, 16))
+
+                msg_label = tk.Label(frm, text="", font=("Microsoft YaHei", 9),
+                                      bg="#f8fafc", fg="#ef4444")
+                msg_label.pack(fill="x")
+
+                def _do_login():
+                    key = key_entry.get().strip()
+                    if not key:
+                        msg_label.config(text="请输入卡密", fg="#ef4444")
+                        return
+                    msg_label.config(text="正在验证...", fg="#6366f1")
+                    root.update()
+                    ok, msg = lic.validate_online(key)
+                    if ok:
+                        msg_label.config(text="激活成功!", fg="#16a34a")
+                        result["passed"] = True
+                        root.after(600, root.destroy)
+                    else:
+                        msg_label.config(text=msg, fg="#ef4444")
+
+                btn = tk.Button(frm, text="激活登录", font=("Microsoft YaHei", 11, "bold"),
+                                 bg="#6366f1", fg="white", relief="flat", cursor="hand2",
+                                 activebackground="#4f46e5", activeforeground="white",
+                                 command=_do_login)
+                btn.pack(fill="x", ipady=6, pady=(4, 0))
+
+                key_entry.bind("<Return>", lambda e: _do_login())
+
+                def _on_close():
+                    result["passed"] = False
+                    root.destroy()
+
+                root.protocol("WM_DELETE_WINDOW", _on_close)
+                root.mainloop()
+
+                if not result["passed"]:
+                    print("[LICENSE] 激活失败或取消，退出程序")
+                    sys.exit(0)
+                    
+            except Exception as e:
+                print(f"[LICENSE] 激活窗口异常: {e}")
+                import traceback
+                traceback.print_exc()
+                sys.exit(0)
+                
+        elif status == "expired":
+            # 卡密已过期
+            print(f"[LICENSE] 卡密已过期，需要重新激活")
+            # 递归调用自己（重新启动以弹出激活窗口）
+            import subprocess
+            subprocess.Popen([sys.executable] + sys.argv)
+            sys.exit(0)
+            
+        else:  # status == "valid"
+            # 有效的卡密，再次在线验证
+            print(f"[LICENSE] 找到已保存的卡密，验证中...")
+            license_key = info.get("license_key", "")
+            if license_key:
+                ok, msg = lic.validate_online(license_key)
+                if not ok:
+                    print(f"[LICENSE] 激活验证失败: {msg}")
+                    # 清除旧卡密，重新启动
+                    lic._clear_local()
+                    import subprocess
+                    subprocess.Popen([sys.executable] + sys.argv)
+                    sys.exit(0)
+                print("[LICENSE] 激活验证通过 ✓")
+            else:
+                print("[LICENSE] 卡密信息异常，重新激活")
+                lic._clear_local()
+                import subprocess
+                subprocess.Popen([sys.executable] + sys.argv)
+                sys.exit(0)
+            
+    except Exception as e:
+        print(f"[LICENSE] 激活检查异常: {e}")
+        import traceback
+        traceback.print_exc()
+        # 激活检查异常时退出，避免未授权使用
+        sys.exit(1)
+
+    # ── 激活通过后，启动服务和初始化窗口 ─────────────────
     signal.signal(signal.SIGINT, lambda s, f: cleanup())
     if hasattr(signal, 'SIGTERM'):
         signal.signal(signal.SIGTERM, lambda s, f: cleanup())
@@ -661,14 +787,53 @@ if __name__ == "__main__":
 
         threading.Thread(target=_set_icon_later, daemon=True).start()
 
-        # 拦截 X 按钮
+        # 拦截 X 按钮 - 改进：无论页面是否加载成功都能弹出确认对话框
         def on_closing():
-            def _inject():
+            def _show_confirm():
                 try:
+                    # 先尝试通过 JS 显示自定义对话框
                     window.evaluate_js("window._zm && window._zm.show()")
                 except Exception:
-                    cleanup()
-            threading.Thread(target=_inject, daemon=True).start()
+                    # JS 注入失败（页面未加载或出错），使用系统对话框
+                    try:
+                        import tkinter as tk
+                        from tkinter import messagebox
+                        
+                        # 创建隐藏的根窗口
+                        root = tk.Tk()
+                        root.withdraw()
+                        root.attributes('-topmost', True)
+                        
+                        # 显示确认对话框
+                        result = messagebox.askyesnocancel(
+                            "关闭程序",
+                            "选择操作：\n\n"
+                            "「是」- 最小化到通知区域（后台运行）\n"
+                            "「否」- 退出程序\n"
+                            "「取消」- 返回",
+                            icon='question'
+                        )
+                        
+                        root.destroy()
+                        
+                        if result is True:  # 是 - 最小化
+                            try:
+                                hwnd = _get_main_hwnd()
+                                if hwnd:
+                                    import ctypes
+                                    ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+                            except Exception:
+                                pass
+                        elif result is False:  # 否 - 退出
+                            cleanup()
+                        # None - 取消，什么都不做
+                        
+                    except Exception as e:
+                        print(f"[CLOSE] 对话框异常: {e}")
+                        # 最后的保底：直接退出
+                        cleanup()
+            
+            threading.Thread(target=_show_confirm, daemon=True).start()
             return False
 
         window.events.closing += on_closing
