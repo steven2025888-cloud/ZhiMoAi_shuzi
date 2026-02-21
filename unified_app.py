@@ -438,6 +438,31 @@ INIT_JS = r"""
             setTimeout(function() { wrap.style.cssText = origStyle; }, 300);
         }
     };
+    
+    /* ── 9c. 工作台记录恢复/删除函数 ── */
+    window._restoreWorkspaceRecord = function(index) {
+        var input = document.querySelector('#workspace-record-to-restore textarea, #workspace-record-to-restore input');
+        if (input) {
+            input.value = String(index);
+            input.dispatchEvent(new Event('input', {bubbles:true}));
+            input.dispatchEvent(new Event('change', {bubbles:true}));
+        }
+    };
+    
+    window._deleteWorkspaceRecord = function(index, name) {
+        window._zdaiDelModal.show(
+            '删除工作台记录',
+            '确定要删除记录「' + name + '」吗？',
+            function() {
+                var input = document.querySelector('#workspace-record-to-delete textarea, #workspace-record-to-delete input');
+                if (input) {
+                    input.value = String(index);
+                    input.dispatchEvent(new Event('input', {bubbles:true}));
+                    input.dispatchEvent(new Event('change', {bubbles:true}));
+                }
+            }
+        );
+    };
 
     /* ── 10. 关闭/最小化逻辑 ── */
     window._zm = {
@@ -918,16 +943,21 @@ input[type=color]:hover{
 /* ── 工作台记录面板 ── */
 #workspace-record-panel {
   background: #fff!important;
-  border: 1px solid #e5e7eb!important;
+  border: none!important;
   margin-bottom: 16px!important;
-  box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04)!important;
-  padding: 18px!important;
-  border-radius: 16px!important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06)!important;
+  padding: 16px!important;
+  border-radius: 12px!important;
   transition: box-shadow .2s!important;
 }
 
 #workspace-record-panel:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,.07), 0 8px 24px rgba(0,0,0,.06)!important;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08)!important;
+}
+
+/* Gradio 下拉框容器背景色 */
+#workspace-record-panel div.svelte-1nguped {
+  background: #fff!important;
 }
 
 /* 工作台记录下拉框样式 */
@@ -935,8 +965,8 @@ input[type=color]:hover{
 #workspace-record-panel select,
 #workspace-record-panel .wrap {
   border: 1.5px solid #e5e7eb!important;
-  border-radius: 10px!important;
-  background: #fafafa!important;
+  border-radius: 6px!important;
+  background: #fff!important;
   transition: all .2s!important;
   font-size: 13px!important;
 }
@@ -948,18 +978,37 @@ input[type=color]:hover{
   background: #fff!important;
 }
 
+/* 工作台记录按钮容器 */
+#workspace-record-buttons {
+  gap: 8px!important;
+  min-width: 0!important;
+}
+
+#workspace-record-buttons > .gr-row {
+  gap: 8px!important;
+  margin-bottom: 0!important;
+}
+
+#workspace-record-buttons > .gr-row:first-child {
+  margin-bottom: 8px!important;
+}
+
 /* 工作台记录按钮样式 */
 #workspace-record-panel button {
   font-weight: 600!important;
   transition: all .2s!important;
-  border-radius: 10px!important;
+  border-radius: 6px!important;
   font-size: 13px!important;
+  background: #fff!important;
+  min-width: 80px!important;
+  padding: 8px 12px!important;
 }
 
 #workspace-record-panel button.primary {
   background: linear-gradient(135deg, #6366f1, #8b5cf6)!important;
   box-shadow: 0 2px 8px rgba(99,102,241,.3)!important;
   border: none!important;
+  color: #fff!important;
 }
 
 #workspace-record-panel button.primary:hover {
@@ -968,20 +1017,134 @@ input[type=color]:hover{
 }
 
 #workspace-record-panel button.secondary {
-  background: #f8fafc!important;
+  background: #fff!important;
   border: 1.5px solid #e2e8f0!important;
-  color: #475569!important;
-  min-width: 44px!important;
+  color: #64748b!important;
 }
 
 #workspace-record-panel button.secondary:hover {
-  background: #f1f5f9!important;
+  background: #f8fafc!important;
   border-color: #cbd5e1!important;
+  color: #475569!important;
 }
 
-/* 工作台记录行间距 */
-#workspace-record-panel .gr-row {
-  gap: 10px!important;
+/* 删除按钮特殊样式 */
+#workspace-record-panel button.danger-btn {
+  color: #ef4444!important;
+  border-color: #fecaca!important;
+}
+
+#workspace-record-panel button.danger-btn:hover {
+  background: #fef2f2!important;
+  border-color: #ef4444!important;
+}
+
+.workspace-delete-btn:hover {
+  background: #fef2f2!important;
+  border-color: #ef4444!important;
+  color: #dc2626!important;
+}
+
+/* 危险按钮样式 */
+.danger-btn {
+  color: #ef4444!important;
+  border-color: #fecaca!important;
+}
+
+.danger-btn:hover {
+  background: #fef2f2!important;
+  border-color: #ef4444!important;
+  color: #dc2626!important;
+}
+
+/* 工作台记录列表样式 */
+.workspace-record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.workspace-record-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #fafafa;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  transition: all .2s;
+}
+
+.workspace-record-item:hover {
+  background: #fff;
+  border-color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99,102,241,.1);
+}
+
+.record-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.record-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-time {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.record-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.record-restore-btn,
+.record-delete-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid;
+  cursor: pointer;
+  transition: all .2s;
+  background: #fff;
+  font-family: inherit;
+}
+
+.record-restore-btn {
+  color: #6366f1;
+  border-color: #c7d2fe;
+}
+
+.record-restore-btn:hover {
+  background: #eef2ff;
+  border-color: #6366f1;
+  transform: translateY(-1px);
+}
+
+.record-delete-btn {
+  color: #ef4444;
+  border-color: #fecaca;
+  min-width: 36px;
+}
+
+.record-delete-btn:hover {
+  background: #fef2f2;
+  border-color: #ef4444;
+  transform: translateY(-1px);
 }
 
 /* 工作台记录提示信息样式 */
@@ -1549,15 +1712,28 @@ def build_ui():
             with gr.Tab("🎬  工作台"):
                 # ══ 顶部工作台记录管理区 ══
                 with gr.Group(elem_classes="panel", elem_id="workspace-record-panel"):
+                    gr.HTML('<div style="font-size:14px;font-weight:700;color:#334155;margin-bottom:12px;">💾 工作台记录</div>')
+                    
                     with gr.Row():
+                        # 左侧：下拉框
                         workspace_record_dropdown = gr.Dropdown(
-                            label="💾 工作台记录",
+                            label="选择记录",
                             choices=[],
                             value=None,
                             interactive=True,
-                            scale=5)
-                        workspace_restore_btn = gr.Button("🔄 恢复", variant="primary", scale=1, size="sm")
-                        workspace_refresh_btn = gr.Button("⟳", variant="secondary", scale=0, size="sm", min_width=44)
+                            scale=2,
+                            elem_id="workspace-record-dropdown"
+                        )
+                        
+                        # 右侧：4个按钮，两排两列
+                        with gr.Column(scale=1, elem_id="workspace-record-buttons"):
+                            with gr.Row():
+                                workspace_restore_btn = gr.Button("🔄 恢复", variant="primary", scale=1, size="sm")
+                                workspace_delete_btn = gr.Button("🗑 删除", variant="secondary", scale=1, size="sm", elem_classes="danger-btn")
+                            with gr.Row():
+                                workspace_refresh_btn = gr.Button("🔄 刷新列表", variant="secondary", scale=1, size="sm")
+                                workspace_clear_btn = gr.Button("🗑 清空所有记录", variant="secondary", scale=1, size="sm", elem_classes="danger-btn")
+                    
                     workspace_record_hint = gr.HTML(value="")
                 
                 with gr.Row(elem_classes="workspace"):
@@ -2280,16 +2456,15 @@ def build_ui():
                 return False
 
         def _get_workspace_record_choices():
-            """获取工作台记录下拉选项"""
+            """获取工作台记录的下拉框选项"""
             records = _load_workspace_records()
             if not records:
                 return []
+            
             choices = []
             for i, rec in enumerate(records):
-                # 使用记录名称（前10个字或时间）
                 record_name = rec.get("record_name", "")
                 if not record_name:
-                    # 兼容旧记录：如果没有record_name，则生成一个
                     text = rec.get("input_text", "")
                     if text and text.strip():
                         record_name = text[:10]
@@ -2297,9 +2472,43 @@ def build_ui():
                         record_name = rec.get("time", "未知时间")
                 
                 time_str = rec.get("time", "")
-                label = f"{record_name} ({time_str})"
-                choices.append((label, i))
+                # 格式：名称 (时间)，值为索引
+                choice_label = f"{record_name} ({time_str})"
+                choices.append((choice_label, str(i)))
+            
             return choices
+
+
+        def _delete_workspace_record_by_dropdown(selected_value):
+            """通过下拉框选择删除工作台记录"""
+            try:
+                if not selected_value:
+                    return gr.update(), _hint_html("warning", "请先选择要删除的记录")
+                
+                record_idx = int(selected_value)
+                records = _load_workspace_records()
+                
+                if record_idx < 0 or record_idx >= len(records):
+                    return gr.update(), _hint_html("error", "记录不存在或已被删除")
+                
+                rec = records.pop(record_idx)
+                with open(WORKSPACE_RECORDS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(records, f, ensure_ascii=False, indent=2)
+                
+                rec_name = rec.get("record_name") or rec.get("time", "该记录")
+                new_choices = _get_workspace_record_choices()
+                return gr.update(choices=new_choices, value=None), _hint_html("ok", f"✅ 已删除记录：{rec_name}")
+            except Exception as e:
+                return gr.update(), _hint_html("error", f"删除失败: {e}")
+        
+        def _clear_workspace_records():
+            """清空所有工作台记录"""
+            try:
+                if os.path.exists(WORKSPACE_RECORDS_FILE):
+                    os.remove(WORKSPACE_RECORDS_FILE)
+                return gr.update(choices=[], value=None), _hint_html("ok", "✅ 已清空所有工作台记录")
+            except Exception as e:
+                return gr.update(), _hint_html("error", f"清空失败: {e}")
 
         def _auto_save_workspace(input_text, prompt_audio, voice_select_val, audio_mode_val,
                                 direct_audio, avatar_select_val, audio_for_ls_val,
@@ -2331,9 +2540,9 @@ def build_ui():
                     if val is None:
                         return ""
                     if isinstance(val, str):
-                        return val
+                        return val.strip()
                     if isinstance(val, dict) and 'name' in val:
-                        return val['name']
+                        return val['name'].strip() if isinstance(val['name'], str) else str(val['name']).strip()
                     # 如果是元组 (sample_rate, array)，说明音频被加载到内存了
                     # 这种情况我们无法获取原始文件路径，只能返回空
                     if isinstance(val, tuple):
@@ -2350,11 +2559,14 @@ def build_ui():
                     # 处理 numpy 数组
                     if hasattr(val, 'tolist'):
                         return val.tolist()
-                    # 处理其他类型
-                    if isinstance(val, (str, int, float, bool)):
+                    # 处理字符串（去除两端空格）
+                    if isinstance(val, str):
+                        return val.strip()
+                    # 处理其他基本类型
+                    if isinstance(val, (int, float, bool)):
                         return val
                     # 尝试转换为字符串
-                    return str(val)
+                    return str(val).strip()
                 
                 # 生成记录名称：使用文本前10个字，如果没有则使用时间
                 text = (input_text or "").strip()
@@ -2381,8 +2593,8 @@ def build_ui():
                     "audio_mode": to_json_safe(audio_mode_val) or "文字转语音",
                     "direct_audio": to_json_safe(direct_audio),
                     "avatar_select": to_json_safe(avatar_select_val),
-                    "audio_for_ls": output_audio_path,  # 使用提取的路径
-                    "output_audio": output_audio_path,  # 使用提取的路径
+                    "audio_for_ls": audio_for_ls_path,  # 使用 audio_for_ls 的路径
+                    "output_audio": output_audio_path,  # 使用 output_audio 的路径
                     "output_video": to_json_safe(output_video_val),
                     "sub_text": to_json_safe(sub_text_val),
                     "sub_video": to_json_safe(sub_video_val),
@@ -2414,12 +2626,12 @@ def build_ui():
                 if existing_idx >= 0:
                     # 更新现有记录
                     records[existing_idx] = record
-                    msg = f"✅ 已更新：{record_name}"
+                    msg = f"已更新：{record_name}"
                 else:
                     # 新建记录
                     records.insert(0, record)
                     records = records[:100]  # 最多保留100条
-                    msg = f"✅ 已保存：{record_name}"
+                    msg = f"已保存：{record_name}"
                 
                 # 保存到文件
                 with open(WORKSPACE_RECORDS_FILE, 'w', encoding='utf-8') as f:
@@ -2431,116 +2643,120 @@ def build_ui():
                 traceback.print_exc()
                 return _hint_html("error", f"保存失败: {str(e)}"), gr.update()
 
-        def _restore_workspace(record_idx):
+        def _restore_workspace(record_idx_str):
             """恢复选中的工作台记录"""
-            if record_idx is None:
-                return [gr.update()] * 24 + [_hint_html("warning", "请先选择要恢复的记录")]
-            
-            records = _load_workspace_records()
-            if record_idx < 0 or record_idx >= len(records):
-                return [gr.update()] * 24 + [_hint_html("error", "记录不存在")]
-            
-            rec = records[record_idx]
-            
-            # 强制输出到文件以便调试
-            debug_file = os.path.join(OUTPUT_DIR, "debug_restore.txt")
-            with open(debug_file, "a", encoding="utf-8") as f:
-                f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] _restore_workspace 被调用\n")
-                f.write(f"  output_audio: {rec.get('output_audio', '')}\n")
-                f.write(f"  audio_for_ls: {rec.get('audio_for_ls', '')}\n")
-                f.write(f"  sub_text: {rec.get('sub_text', '')}\n")
-            
-            # 辅助函数：安全获取文件路径值
-            def safe_file_value(path):
-                """只有当路径存在且是文件时才返回，否则返回 None"""
-                if not path or not isinstance(path, str):
-                    return None
-                path = path.strip()
-                if not path:
-                    return None
-                # 检查文件是否存在
-                exists = os.path.exists(path) and os.path.isfile(path)
+            try:
+                if not record_idx_str:
+                    return [gr.update()] * 23 + [_hint_html("warning", "无效的记录索引")]
+                
+                record_idx = int(record_idx_str)
+                records = _load_workspace_records()
+                
+                if record_idx < 0 or record_idx >= len(records):
+                    return [gr.update()] * 23 + [_hint_html("error", "记录不存在")]
+                
+                rec = records[record_idx]
+                
+                # 强制输出到文件以便调试
+                debug_file = os.path.join(OUTPUT_DIR, "debug_restore.txt")
                 with open(debug_file, "a", encoding="utf-8") as f:
-                    f.write(f"  safe_file_value: {path} -> exists={exists}\n")
-                if exists:
-                    return path
-                return None
-            
-            # 辅助函数：安全获取下拉框选择值
-            def safe_dropdown_value(value, choices_func):
-                """检查值是否在选项列表中，如果不在则返回 None"""
-                if not value:
+                    f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] _restore_workspace 被调用\n")
+                    f.write(f"  output_audio: {rec.get('output_audio', '')}\n")
+                    f.write(f"  audio_for_ls: {rec.get('audio_for_ls', '')}\n")
+                    f.write(f"  sub_text: {rec.get('sub_text', '')}\n")
+                
+                # 辅助函数：安全获取文件路径值
+                def safe_file_value(path):
+                    """只有当路径存在且是文件时才返回，否则返回 None"""
+                    if not path or not isinstance(path, str):
+                        return None
+                    path = path.strip()
+                    if not path:
+                        return None
+                    # 检查文件是否存在
+                    exists = os.path.exists(path) and os.path.isfile(path)
+                    with open(debug_file, "a", encoding="utf-8") as f:
+                        f.write(f"  safe_file_value: {path} -> exists={exists}\n")
+                    if exists:
+                        return path
                     return None
-                try:
-                    choices = choices_func() if callable(choices_func) else []
-                    if value in choices:
-                        return value
-                except Exception:
-                    pass
-                return None
-            
-            # 获取音频文件路径（即使文件不存在也恢复路径，让用户知道之前的文件）
-            output_audio_path = rec.get("output_audio", "")
-            audio_for_ls_path = rec.get("audio_for_ls", "")
-            
-            with open(debug_file, "a", encoding="utf-8") as f:
-                f.write(f"  从记录读取的路径:\n")
-                f.write(f"    output_audio_path: {output_audio_path}\n")
-                f.write(f"    audio_for_ls_path: {audio_for_ls_path}\n")
-            
-            # 如果 output_audio 存在，优先使用它
-            # 如果不存在但有路径记录，也显示路径（虽然文件可能已被删除）
-            output_audio_value = safe_file_value(output_audio_path)
-            if not output_audio_value and output_audio_path:
-                # 文件不存在但有路径记录，仍然尝试恢复（Gradio会显示错误但保留路径）
-                output_audio_value = output_audio_path
-            
-            audio_for_ls_value = safe_file_value(audio_for_ls_path)
-            if not audio_for_ls_value and audio_for_ls_path:
-                audio_for_ls_value = audio_for_ls_path
-            
-            with open(debug_file, "a", encoding="utf-8") as f:
-                f.write(f"  最终恢复的值:\n")
-                f.write(f"    output_audio_value: {output_audio_value}\n")
-                f.write(f"    audio_for_ls_value: {audio_for_ls_value}\n")
-                f.write(f"    sub_text: {rec.get('sub_text', '')}\n")
-            
-            # 返回所有需要更新的组件值
-            # 注意：对于 Audio 组件，如果直接返回路径字符串不起作用，
-            # 可以尝试返回字典格式 {"name": path, "data": None}
-            result = [
-                gr.update(value=rec.get("input_text", "")),           # input_text
-                gr.update(value=safe_file_value(rec.get("prompt_audio"))),  # prompt_audio
-                gr.update(value=safe_dropdown_value(rec.get("voice_select"), lambda: _vc.get_choices() if _LIBS_OK else [])),  # voice_select
-                gr.update(value=rec.get("audio_mode", "文字转语音")), # audio_mode
-                gr.update(value=safe_file_value(rec.get("direct_audio"))),  # direct_audio
-                gr.update(value=safe_dropdown_value(rec.get("avatar_select"), lambda: _av.get_choices() if _LIBS_OK else [])),  # avatar_select
-                gr.update(value=audio_for_ls_value) if audio_for_ls_value else gr.update(),  # audio_for_ls
-                gr.update(value=output_audio_value) if output_audio_value else gr.update(),  # output_audio
-                gr.update(value=safe_file_value(rec.get("output_video"))),  # output_video
-                gr.update(value=rec.get("sub_text", "")),             # sub_text - 直接恢复文本
-                gr.update(value=safe_file_value(rec.get("sub_video"))),     # sub_video
-                # 字幕参数
-                gr.update(value=rec.get("sub_font", "")),             # sub_font
-                gr.update(value=rec.get("sub_size", 32)),             # sub_size
-                gr.update(value=rec.get("sub_pos", "下")),            # sub_pos
-                gr.update(value=rec.get("sub_color", "#FFFFFF")),     # sub_color_txt
-                gr.update(value=rec.get("sub_hi_color", "#FFD700")),  # sub_hi_txt
-                gr.update(value=rec.get("sub_outline_color", "#000000")), # sub_outline_txt
-                gr.update(value=rec.get("sub_outline_size", 6)),      # sub_outline_size
-                gr.update(value=rec.get("sub_bg_color", "#000000")),  # sub_bg_color
-                gr.update(value=rec.get("sub_bg_opacity", 0)),        # sub_bg_opacity
-                gr.update(value=rec.get("sub_kw_enable", False)),     # sub_kw_enable
-                gr.update(value=rec.get("sub_hi_scale", 1.5)),        # sub_hi_scale
-                gr.update(value=rec.get("sub_kw_text", "")),          # sub_kw_text
-                gr.update(value=None),                                 # 清空下拉选择
-                _hint_html("ok", f"✅ 已恢复记录：{rec.get('record_name', rec.get('time', '未知'))}")
-            ]
-            
-            with open(debug_file, "a", encoding="utf-8") as f:
-                f.write(f"  返回的 audio_for_ls 更新: {result[6]}\n")
-            
-            return result
+                
+                # 辅助函数：安全获取下拉框选择值
+                def safe_dropdown_value(value, choices_func):
+                    """检查值是否在选项列表中，如果不在则返回 None"""
+                    if not value:
+                        return None
+                    try:
+                        choices = choices_func() if callable(choices_func) else []
+                        if value in choices:
+                            return value
+                    except Exception:
+                        pass
+                    return None
+                
+                # 获取音频文件路径（即使文件不存在也恢复路径，让用户知道之前的文件）
+                output_audio_path = rec.get("output_audio", "")
+                audio_for_ls_path = rec.get("audio_for_ls", "")
+                
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"  从记录读取的路径:\n")
+                    f.write(f"    output_audio_path: {output_audio_path}\n")
+                    f.write(f"    audio_for_ls_path: {audio_for_ls_path}\n")
+                
+                # 如果 output_audio 存在，优先使用它
+                # 如果不存在但有路径记录，也显示路径（虽然文件可能已被删除）
+                output_audio_value = safe_file_value(output_audio_path)
+                if not output_audio_value and output_audio_path:
+                    # 文件不存在但有路径记录，仍然尝试恢复（Gradio会显示错误但保留路径）
+                    output_audio_value = output_audio_path
+                
+                audio_for_ls_value = safe_file_value(audio_for_ls_path)
+                if not audio_for_ls_value and audio_for_ls_path:
+                    audio_for_ls_value = audio_for_ls_path
+                
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"  最终恢复的值:\n")
+                    f.write(f"    output_audio_value: {output_audio_value}\n")
+                    f.write(f"    audio_for_ls_value: {audio_for_ls_value}\n")
+                    f.write(f"    sub_text: {rec.get('sub_text', '')}\n")
+                
+                # 返回所有需要更新的组件值
+                # 注意：对于 Audio 组件，如果直接返回路径字符串不起作用，
+                # 可以尝试返回字典格式 {"name": path, "data": None}
+                result = [
+                    gr.update(value=rec.get("input_text", "")),           # input_text
+                    gr.update(value=safe_file_value(rec.get("prompt_audio"))),  # prompt_audio
+                    gr.update(value=safe_dropdown_value(rec.get("voice_select"), lambda: _vc.get_choices() if _LIBS_OK else [])),  # voice_select
+                    gr.update(value=rec.get("audio_mode", "文字转语音")), # audio_mode
+                    gr.update(value=safe_file_value(rec.get("direct_audio"))),  # direct_audio
+                    gr.update(value=safe_dropdown_value(rec.get("avatar_select"), lambda: _av.get_choices() if _LIBS_OK else [])),  # avatar_select
+                    gr.update(value=audio_for_ls_value) if audio_for_ls_value else gr.update(),  # audio_for_ls
+                    gr.update(value=output_audio_value) if output_audio_value else gr.update(),  # output_audio
+                    gr.update(value=safe_file_value(rec.get("output_video"))),  # output_video
+                    gr.update(value=rec.get("sub_text", "")),             # sub_text - 直接恢复文本
+                    gr.update(value=safe_file_value(rec.get("sub_video"))),     # sub_video
+                    # 字幕参数
+                    gr.update(value=rec.get("sub_font", "")),             # sub_font
+                    gr.update(value=rec.get("sub_size", 32)),             # sub_size
+                    gr.update(value=rec.get("sub_pos", "下")),            # sub_pos
+                    gr.update(value=rec.get("sub_color", "#FFFFFF")),     # sub_color_txt
+                    gr.update(value=rec.get("sub_hi_color", "#FFD700")),  # sub_hi_txt
+                    gr.update(value=rec.get("sub_outline_color", "#000000")), # sub_outline_txt
+                    gr.update(value=rec.get("sub_outline_size", 6)),      # sub_outline_size
+                    gr.update(value=rec.get("sub_bg_color", "#000000")),  # sub_bg_color
+                    gr.update(value=rec.get("sub_bg_opacity", 0)),        # sub_bg_opacity
+                    gr.update(value=rec.get("sub_kw_enable", False)),     # sub_kw_enable
+                    gr.update(value=rec.get("sub_hi_scale", 1.5)),        # sub_hi_scale
+                    gr.update(value=rec.get("sub_kw_text", "")),          # sub_kw_text
+                    _hint_html("ok", f"已恢复记录：{rec.get('record_name', rec.get('time', '未知'))}")
+                ]
+                
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"  返回的 audio_for_ls 更新: {result[6]}\n")
+                
+                return result
+            except Exception as e:
+                return [gr.update()] * 23 + [_hint_html("error", f"恢复失败: {str(e)}")]
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, spd, tp, tk, temp, nb, rp, mmt,
@@ -3108,23 +3324,39 @@ def build_ui():
                           sub_kw_en, sub_hi_sc, sub_kw_txt,
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
-            # 先合成视频
-            out_vid, log_msg, ls_detail, douyin_grp, douyin_ttl = ls_wrap(
-                avatar_sel, aud_for_ls, inp_txt, progress=progress
-            )
+            # 先合成视频（ls_wrap 是生成器，需要逐步 yield）
+            final_result = None
+            for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, progress=progress):
+                # 在视频合成过程中，传递中间结果，但不保存工作台
+                # 返回 7 个值：前 5 个来自 ls_wrap，后 2 个是空的工作台更新
+                yield result + (gr.update(), gr.update())
+                final_result = result
             
-            # 保存工作台状态
-            hint_msg, dropdown_update = _auto_save_workspace(
-                inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
-                avatar_sel, aud_for_ls, out_aud, out_vid,
-                sub_txt, sub_vid,
-                sub_fnt, sub_sz, sub_ps,
-                sub_col, sub_hi, sub_out, sub_out_sz,
-                sub_bg_col, sub_bg_op,
-                sub_kw_en, sub_hi_sc, sub_kw_txt
-            )
-            
-            return out_vid, log_msg, ls_detail, douyin_grp, douyin_ttl, hint_msg, dropdown_update
+            # 视频合成完成后，保存工作台状态
+            if final_result:
+                out_vid_update, log_msg, ls_detail, douyin_grp, douyin_ttl = final_result
+                
+                # 从 gr.update 对象中提取实际的视频路径
+                video_path = ""
+                if isinstance(out_vid_update, dict) and 'value' in out_vid_update:
+                    video_path = out_vid_update['value']
+                elif isinstance(out_vid_update, str):
+                    video_path = out_vid_update
+                
+                # 保存工作台状态
+                # 注意：这里传递的 audio_for_ls 是实际使用的音频，output_audio 也应该是同一个
+                hint_msg, dropdown_update = _auto_save_workspace(
+                    inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                    avatar_sel, aud_for_ls, aud_for_ls, video_path,
+                    sub_txt, sub_vid,
+                    sub_fnt, sub_sz, sub_ps,
+                    sub_col, sub_hi, sub_out, sub_out_sz,
+                    sub_bg_col, sub_bg_op,
+                    sub_kw_en, sub_hi_sc, sub_kw_txt
+                )
+                
+                # 最后一次 yield，包含保存结果
+                yield out_vid_update, log_msg, ls_detail, douyin_grp, douyin_ttl, hint_msg, dropdown_update
         
         ls_btn.click(
             video_and_save,
@@ -3252,10 +3484,15 @@ def build_ui():
         
         # 刷新工作台记录列表
         workspace_refresh_btn.click(
-            lambda: gr.update(choices=_get_workspace_record_choices(), value=None),
+            lambda: gr.update(choices=_get_workspace_record_choices()),
             outputs=[workspace_record_dropdown])
         
-        # 恢复工作台记录
+        # 清空所有工作台记录
+        workspace_clear_btn.click(
+            _clear_workspace_records,
+            outputs=[workspace_record_dropdown, workspace_record_hint])
+        
+        # 恢复工作台记录（通过下拉框选择）
         workspace_restore_btn.click(
             _restore_workspace,
             inputs=[workspace_record_dropdown],
@@ -3267,9 +3504,15 @@ def build_ui():
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
-                workspace_record_dropdown, workspace_record_hint
+                workspace_record_hint
             ])
         
+        # 删除工作台记录（通过下拉框选择）
+        workspace_delete_btn.click(
+            _delete_workspace_record_by_dropdown,
+            inputs=[workspace_record_dropdown],
+            outputs=[workspace_record_dropdown, workspace_record_hint])
+
         # 页面加载时自动刷新工作台记录列表和历史记录
         def _init_load():
             return (
