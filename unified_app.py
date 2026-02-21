@@ -2540,15 +2540,20 @@ def build_ui():
             except Exception as e:
                 raise gr.Error("合成失败: " + str(e))
 
-        gen_btn.click(tts_wrap,
+        # TTS 按钮点击 - 使用 .then() 确保顺序执行
+        tts_output = gen_btn.click(tts_wrap,
             inputs=[input_text, prompt_audio, voice_speed, top_p, top_k, temperature,
                     num_beams, repetition_penalty, max_mel_tokens,
                     emo_mode, emo_audio, emo_weight, emo_text,
                     vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8],
             outputs=[output_audio, op_log_html, audio_for_ls])
 
-        # TTS 完成后自动保存工作台状态
-        gen_btn.click(
+        # TTS 完成后把合成文本同步到字幕文本框（Whisper fallback）
+        def _sync_tts_text(txt): return txt
+        tts_output.then(_sync_tts_text, inputs=[input_text], outputs=[sub_text])
+        
+        # TTS 完成后自动保存工作台状态（使用 .then() 确保在 TTS 完成后执行）
+        tts_output.then(
             _auto_save_workspace,
             inputs=[
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
@@ -2560,10 +2565,6 @@ def build_ui():
                 sub_kw_enable, sub_hi_scale, sub_kw_text
             ],
             outputs=[workspace_record_hint, workspace_record_dropdown])
-
-        # TTS 完成后把合成文本同步到字幕文本框（Whisper fallback）
-        def _sync_tts_text(txt): return txt
-        gen_btn.click(_sync_tts_text, inputs=[input_text], outputs=[sub_text])
 
         # ── 音频模式切换 ──
         def _toggle_audio_mode(mode):
