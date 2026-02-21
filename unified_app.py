@@ -2497,7 +2497,7 @@ def build_ui():
                 
                 rec_name = rec.get("record_name") or rec.get("time", "该记录")
                 new_choices = _get_workspace_record_choices()
-                return gr.update(choices=new_choices, value=None), _hint_html("ok", f"✅ 已删除记录：{rec_name}")
+                return gr.update(choices=new_choices, value=None), _hint_html("ok", f"已删除记录：{rec_name}")
             except Exception as e:
                 return gr.update(), _hint_html("error", f"删除失败: {e}")
         
@@ -2527,6 +2527,7 @@ def build_ui():
                     f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] _auto_save_workspace 被调用\n")
                     f.write(f"  output_audio_val type: {type(output_audio_val)}, value: {output_audio_val}\n")
                     f.write(f"  audio_for_ls_val type: {type(audio_for_ls_val)}, value: {audio_for_ls_val}\n")
+                    f.write(f"  output_video_val type: {type(output_video_val)}, value: {output_video_val}\n")
                     f.write(f"  sub_text_val: {sub_text_val}\n")
                 
                 # 辅助函数：从 Gradio Audio 组件值中提取文件路径
@@ -3293,7 +3294,15 @@ def build_ui():
                 raise gr.Error(str(result["err"]))
 
             out      = result["out"]
-            log_html = _make_log(True, "视频合成完成 — " + os.path.basename(out))
+            
+            # 调试输出
+            debug_file = os.path.join(OUTPUT_DIR, "debug_ls_wrap.txt")
+            with open(debug_file, "a", encoding="utf-8") as f:
+                f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] ls_wrap 完成\n")
+                f.write(f"  out type: {type(out)}\n")
+                f.write(f"  out value: {out}\n")
+            
+            log_html = _make_log(True, "视频合成完成 — " + os.path.basename(out) if out else "视频合成完成")
             try:
                 ps = (
                     "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
@@ -3311,7 +3320,9 @@ def build_ui():
                 pass
             # 视频合成完成后显示抖音发布区域，并自动填充标题
             douyin_title_text = input_txt[:30] if input_txt else ""
-            yield gr.update(value=out, show_download_button=True), log_html, gr.update(visible=False), gr.update(visible=True), douyin_title_text
+            # 返回：视频路径（字符串）、日志、详情、抖音组、抖音标题
+            # 注意：第一个返回值是视频路径字符串，不是 gr.update 对象
+            yield out, log_html, gr.update(visible=False), gr.update(visible=True), douyin_title_text
 
         # 视频合成按钮点击 - 直接在完成后保存
         def video_and_save(avatar_sel, aud_for_ls, inp_txt,
@@ -3334,14 +3345,17 @@ def build_ui():
             
             # 视频合成完成后，保存工作台状态
             if final_result:
-                out_vid_update, log_msg, ls_detail, douyin_grp, douyin_ttl = final_result
+                video_path, log_msg, ls_detail, douyin_grp, douyin_ttl = final_result
                 
-                # 从 gr.update 对象中提取实际的视频路径
-                video_path = ""
-                if isinstance(out_vid_update, dict) and 'value' in out_vid_update:
-                    video_path = out_vid_update['value']
-                elif isinstance(out_vid_update, str):
-                    video_path = out_vid_update
+                # 现在 video_path 直接就是视频路径字符串
+                # 不需要从 gr.update 对象中提取
+                
+                # 调试输出
+                debug_file = os.path.join(OUTPUT_DIR, "debug_video_save.txt")
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] video_and_save 保存前\n")
+                    f.write(f"  video_path type: {type(video_path)}\n")
+                    f.write(f"  video_path value: {video_path}\n")
                 
                 # 保存工作台状态
                 # 注意：这里传递的 audio_for_ls 是实际使用的音频，output_audio 也应该是同一个
@@ -3356,7 +3370,8 @@ def build_ui():
                 )
                 
                 # 最后一次 yield，包含保存结果
-                yield out_vid_update, log_msg, ls_detail, douyin_grp, douyin_ttl, hint_msg, dropdown_update
+                # 注意：第一个值需要是视频路径，Gradio 会自动处理
+                yield video_path, log_msg, ls_detail, douyin_grp, douyin_ttl, hint_msg, dropdown_update
         
         ls_btn.click(
             video_and_save,
