@@ -1593,10 +1593,9 @@ def build_ui():
                                                               variant="secondary")
                             voice_preview = gr.Audio(label="🔊 试听所选音色", interactive=False,
                                                      visible=False)
-                            with gr.Accordion("📎 或上传自定义参考音频", open=False):
-                                prompt_audio = gr.Audio(
-                                    label="参考音频（3-10 秒 WAV/MP3）",
-                                    sources=["upload"], type="filepath")
+                            
+                            # 隐藏的 prompt_audio 组件（用于内部逻辑，不显示给用户）
+                            prompt_audio = gr.Audio(visible=False, type="filepath")
 
                             # ── 语音风格预设 ──
                             voice_style = gr.Radio(
@@ -2314,6 +2313,33 @@ def build_ui():
                                 sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val):
             """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建"""
             try:
+                # 调试：打印接收到的值
+                print(f"[DEBUG] _auto_save_workspace 接收到的值:")
+                print(f"  output_audio_val type: {type(output_audio_val)}, value: {output_audio_val}")
+                print(f"  audio_for_ls_val type: {type(audio_for_ls_val)}, value: {audio_for_ls_val}")
+                print(f"  sub_text_val: {sub_text_val}")
+                
+                # 辅助函数：从 Gradio Audio 组件值中提取文件路径
+                def extract_audio_path(val):
+                    """
+                    Gradio Audio 组件可能返回：
+                    1. 字符串路径
+                    2. 元组 (sample_rate, numpy_array) - 这种情况无法恢复原始路径
+                    3. 字典 {'name': 'path', ...}
+                    """
+                    if val is None:
+                        return ""
+                    if isinstance(val, str):
+                        return val
+                    if isinstance(val, dict) and 'name' in val:
+                        return val['name']
+                    # 如果是元组 (sample_rate, array)，说明音频被加载到内存了
+                    # 这种情况我们无法获取原始文件路径，只能返回空
+                    if isinstance(val, tuple):
+                        print(f"[WARNING] Audio 组件返回了元组格式，无法获取文件路径")
+                        return ""
+                    return ""
+                
                 # 辅助函数：将任何值转换为JSON可序列化的类型
                 def to_json_safe(val):
                     """将值转换为JSON可序列化的类型"""
@@ -2335,6 +2361,14 @@ def build_ui():
                 else:
                     record_name = time.strftime("%H:%M:%S")
                 
+                # 提取音频路径（处理 Gradio Audio 组件的不同返回格式）
+                output_audio_path = extract_audio_path(output_audio_val)
+                audio_for_ls_path = extract_audio_path(audio_for_ls_val)
+                
+                print(f"[DEBUG] 提取的路径:")
+                print(f"  output_audio_path: {output_audio_path}")
+                print(f"  audio_for_ls_path: {audio_for_ls_path}")
+                
                 record = {
                     "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "record_name": record_name,
@@ -2344,8 +2378,8 @@ def build_ui():
                     "audio_mode": to_json_safe(audio_mode_val) or "文字转语音",
                     "direct_audio": to_json_safe(direct_audio),
                     "avatar_select": to_json_safe(avatar_select_val),
-                    "audio_for_ls": to_json_safe(audio_for_ls_val),
-                    "output_audio": to_json_safe(output_audio_val),
+                    "audio_for_ls": output_audio_path,  # 使用提取的路径
+                    "output_audio": output_audio_path,  # 使用提取的路径
                     "output_video": to_json_safe(output_video_val),
                     "sub_text": to_json_safe(sub_text_val),
                     "sub_video": to_json_safe(sub_video_val),
@@ -2405,6 +2439,12 @@ def build_ui():
             
             rec = records[record_idx]
             
+            # 调试：打印记录内容
+            print(f"[DEBUG] _restore_workspace 恢复的记录:")
+            print(f"  output_audio: {rec.get('output_audio', '')}")
+            print(f"  audio_for_ls: {rec.get('audio_for_ls', '')}")
+            print(f"  sub_text: {rec.get('sub_text', '')}")
+            
             # 辅助函数：安全获取文件路径值
             def safe_file_value(path):
                 """只有当路径存在且是文件时才返回，否则返回 None"""
@@ -2414,7 +2454,9 @@ def build_ui():
                 if not path:
                     return None
                 # 检查文件是否存在
-                if os.path.exists(path) and os.path.isfile(path):
+                exists = os.path.exists(path) and os.path.isfile(path)
+                print(f"[DEBUG] safe_file_value: {path} -> exists={exists}")
+                if exists:
                     return path
                 return None
             
@@ -2435,6 +2477,10 @@ def build_ui():
             output_audio_path = rec.get("output_audio", "")
             audio_for_ls_path = rec.get("audio_for_ls", "")
             
+            print(f"[DEBUG] 从记录读取的路径:")
+            print(f"  output_audio_path: {output_audio_path}")
+            print(f"  audio_for_ls_path: {audio_for_ls_path}")
+            
             # 如果 output_audio 存在，优先使用它
             # 如果不存在但有路径记录，也显示路径（虽然文件可能已被删除）
             output_audio_value = safe_file_value(output_audio_path)
@@ -2445,6 +2491,10 @@ def build_ui():
             audio_for_ls_value = safe_file_value(audio_for_ls_path)
             if not audio_for_ls_value and audio_for_ls_path:
                 audio_for_ls_value = audio_for_ls_path
+            
+            print(f"[DEBUG] 最终恢复的值:")
+            print(f"  output_audio_value: {output_audio_value}")
+            print(f"  audio_for_ls_value: {audio_for_ls_value}")
             
             # 返回所有需要更新的组件值
             return [
@@ -2540,31 +2590,61 @@ def build_ui():
             except Exception as e:
                 raise gr.Error("合成失败: " + str(e))
 
-        # TTS 按钮点击 - 使用 .then() 确保顺序执行
-        tts_output = gen_btn.click(tts_wrap,
-            inputs=[input_text, prompt_audio, voice_speed, top_p, top_k, temperature,
-                    num_beams, repetition_penalty, max_mel_tokens,
-                    emo_mode, emo_audio, emo_weight, emo_text,
-                    vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8],
-            outputs=[output_audio, op_log_html, audio_for_ls])
-
-        # TTS 完成后把合成文本同步到字幕文本框（Whisper fallback）
-        def _sync_tts_text(txt): return txt
-        tts_output.then(_sync_tts_text, inputs=[input_text], outputs=[sub_text])
+        # TTS 按钮点击 - 直接在完成后保存
+        def tts_and_save(text, pa, spd, tp, tk, temp, nb, rp, mmt,
+                        emo_m, emo_a, emo_w, emo_t,
+                        v1, v2, v3, v4, v5, v6, v7, v8,
+                        # 保存需要的其他参数
+                        voice_sel, audio_mode_val, direct_aud, avatar_sel,
+                        out_vid, sub_vid,
+                        sub_font_val, sub_size_val, sub_pos_val,
+                        sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
+                        sub_bg_color_val, sub_bg_opacity_val,
+                        sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
+                        progress=gr.Progress()):
+            """TTS合成并自动保存工作台状态"""
+            # 先执行TTS
+            audio_path, log_msg, audio_for_ls_path = tts_wrap(
+                text, pa, spd, tp, tk, temp, nb, rp, mmt,
+                emo_m, emo_a, emo_w, emo_t,
+                v1, v2, v3, v4, v5, v6, v7, v8,
+                progress=progress
+            )
+            
+            # 同步文本到字幕
+            sub_text_val = text
+            
+            # 保存工作台状态
+            hint_msg, dropdown_update = _auto_save_workspace(
+                text, pa, voice_sel, audio_mode_val, direct_aud, avatar_sel,
+                audio_for_ls_path, audio_path, out_vid,
+                sub_text_val, sub_vid,
+                sub_font_val, sub_size_val, sub_pos_val,
+                sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
+                sub_bg_color_val, sub_bg_opacity_val,
+                sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val
+            )
+            
+            # 返回所有需要更新的组件
+            return audio_path, log_msg, audio_for_ls_path, sub_text_val, hint_msg, dropdown_update
         
-        # TTS 完成后自动保存工作台状态（使用 .then() 确保在 TTS 完成后执行）
-        tts_output.then(
-            _auto_save_workspace,
+        gen_btn.click(
+            tts_and_save,
             inputs=[
-                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
-                avatar_select, audio_for_ls, output_audio, output_video,
-                sub_text, sub_video,
+                input_text, prompt_audio, voice_speed, top_p, top_k, temperature,
+                num_beams, repetition_penalty, max_mel_tokens,
+                emo_mode, emo_audio, emo_weight, emo_text,
+                vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                # 保存需要的参数
+                voice_select, audio_mode, direct_audio_upload, avatar_select,
+                output_video, sub_video,
                 sub_font, sub_size, sub_pos,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text
             ],
-            outputs=[workspace_record_hint, workspace_record_dropdown])
+            outputs=[output_audio, op_log_html, audio_for_ls, sub_text, 
+                    workspace_record_hint, workspace_record_dropdown])
 
         # ── 音频模式切换 ──
         def _toggle_audio_mode(mode):
@@ -2797,27 +2877,50 @@ def build_ui():
                         gr.update(visible=False),  # 隐藏抖音发布区域
                         "")
 
-        sub_btn.click(_do_subtitle,
-            inputs=[output_video, audio_for_ls,
-                    sub_text, sub_font, sub_size, sub_pos,
-                    sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
-                    sub_bg_color, sub_bg_opacity,
-                    sub_kw_enable, sub_kw_text, sub_hi_scale],
-            outputs=[sub_video, sub_hint, op_log_html, douyin_group, douyin_title])
+        # 字幕按钮点击 - 直接在完成后保存
+        def subtitle_and_save(out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
+                             sub_col, sub_hi, sub_out, sub_out_sz,
+                             sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
+                             # 保存需要的其他参数
+                             inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                             avatar_sel, out_aud,
+                             progress=gr.Progress()):
+            """生成字幕并自动保存工作台状态"""
+            # 先生成字幕
+            sub_vid, sub_hnt, log_msg, douyin_grp, douyin_ttl = _do_subtitle(
+                out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
+                sub_col, sub_hi, sub_out, sub_out_sz,
+                sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
+                progress=progress
+            )
+            
+            # 保存工作台状态
+            hint_msg, dropdown_update = _auto_save_workspace(
+                inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                avatar_sel, aud_for_ls, out_aud, out_vid,
+                sub_txt, sub_vid,
+                sub_fnt, sub_sz, sub_ps,
+                sub_col, sub_hi, sub_out, sub_out_sz,
+                sub_bg_col, sub_bg_op,
+                sub_kw_en, sub_hi_sc, sub_kw_txt
+            )
+            
+            return sub_vid, sub_hnt, log_msg, douyin_grp, douyin_ttl, hint_msg, dropdown_update
         
-        # 字幕生成完成后自动保存工作台状态
         sub_btn.click(
-            _auto_save_workspace,
+            subtitle_and_save,
             inputs=[
-                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
-                avatar_select, audio_for_ls, output_audio, output_video,
-                sub_text, sub_video,
-                sub_font, sub_size, sub_pos,
+                output_video, audio_for_ls,
+                sub_text, sub_font, sub_size, sub_pos,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
-                sub_kw_enable, sub_hi_scale, sub_kw_text
+                sub_kw_enable, sub_kw_text, sub_hi_scale,
+                # 保存需要的参数
+                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                avatar_select, output_audio
             ],
-            outputs=[workspace_record_hint, workspace_record_dropdown])
+            outputs=[sub_video, sub_hint, op_log_html, douyin_group, douyin_title,
+                    workspace_record_hint, workspace_record_dropdown])
         
         # 抖音发布
         def _do_douyin_publish(video, title_text, topics_text, progress=gr.Progress()):
@@ -2968,23 +3071,49 @@ def build_ui():
             douyin_title_text = input_txt[:30] if input_txt else ""
             yield gr.update(value=out, show_download_button=True), log_html, gr.update(visible=False), gr.update(visible=True), douyin_title_text
 
-        ls_btn.click(ls_wrap,
-            inputs=[avatar_select, audio_for_ls, input_text],
-            outputs=[output_video, op_log_html, ls_detail_html, douyin_group, douyin_title])
+        # 视频合成按钮点击 - 直接在完成后保存
+        def video_and_save(avatar_sel, aud_for_ls, inp_txt,
+                          # 保存需要的其他参数
+                          prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                          out_aud, sub_txt, sub_vid,
+                          sub_fnt, sub_sz, sub_ps,
+                          sub_col, sub_hi, sub_out, sub_out_sz,
+                          sub_bg_col, sub_bg_op,
+                          sub_kw_en, sub_hi_sc, sub_kw_txt,
+                          progress=gr.Progress()):
+            """合成视频并自动保存工作台状态"""
+            # 先合成视频
+            out_vid, log_msg, ls_detail, douyin_grp, douyin_ttl = ls_wrap(
+                avatar_sel, aud_for_ls, inp_txt, progress=progress
+            )
+            
+            # 保存工作台状态
+            hint_msg, dropdown_update = _auto_save_workspace(
+                inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                avatar_sel, aud_for_ls, out_aud, out_vid,
+                sub_txt, sub_vid,
+                sub_fnt, sub_sz, sub_ps,
+                sub_col, sub_hi, sub_out, sub_out_sz,
+                sub_bg_col, sub_bg_op,
+                sub_kw_en, sub_hi_sc, sub_kw_txt
+            )
+            
+            return out_vid, log_msg, ls_detail, douyin_grp, douyin_ttl, hint_msg, dropdown_update
         
-        # 视频合成完成后自动保存工作台状态
         ls_btn.click(
-            _auto_save_workspace,
+            video_and_save,
             inputs=[
-                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
-                avatar_select, audio_for_ls, output_audio, output_video,
-                sub_text, sub_video,
+                avatar_select, audio_for_ls, input_text,
+                # 保存需要的参数
+                prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                output_audio, sub_text, sub_video,
                 sub_font, sub_size, sub_pos,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text
             ],
-            outputs=[workspace_record_hint, workspace_record_dropdown])
+            outputs=[output_video, op_log_html, ls_detail_html, douyin_group, douyin_title,
+                    workspace_record_hint, workspace_record_dropdown])
 
         # 历史操作
         def _do_refresh():
