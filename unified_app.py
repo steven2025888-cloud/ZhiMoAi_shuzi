@@ -827,11 +827,6 @@ input[type=color]:hover{
   transition:border-color .15s,box-shadow .15s;
 }
 .lib-card:hover{border-color:#a5b4fc;box-shadow:0 2px 8px rgba(99,102,241,.1);}
-.avatar-title-badge{
-  background:rgba(0,0,0,.6);backdrop-filter:blur(6px);
-  color:#fff;font-size:13px;font-weight:700;
-  padding:4px 12px;border-radius:8px;display:inline-block;margin-top:6px;
-}
 
 /* ── 输出视频区 ── */
 #output-video-col{overflow:visible!important;}
@@ -922,81 +917,66 @@ input[type=color]:hover{
 
 /* ── 工作台记录面板 ── */
 #workspace-record-panel {
-  background: linear-gradient(135deg, #fafbff 0%, #f8fafc 100%)!important;
-  border: 2px solid #e2e8f0!important;
-  margin-bottom: 18px!important;
-  box-shadow: 0 4px 20px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04)!important;
-  position: relative!important;
-  overflow: visible!important;
-  padding: 20px!important;
+  background: #fff!important;
+  border: 1px solid #e5e7eb!important;
+  margin-bottom: 16px!important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04)!important;
+  padding: 18px!important;
+  border-radius: 16px!important;
+  transition: box-shadow .2s!important;
 }
 
-#workspace-record-panel::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
-  border-radius: 14px 14px 0 0;
+#workspace-record-panel:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,.07), 0 8px 24px rgba(0,0,0,.06)!important;
 }
 
 /* 工作台记录下拉框样式 */
 #workspace-record-panel .gr-dropdown,
 #workspace-record-panel select,
 #workspace-record-panel .wrap {
-  border: 2px solid #e2e8f0!important;
-  border-radius: 12px!important;
-  background: #ffffff!important;
-  transition: all .25s cubic-bezier(.4,0,.2,1)!important;
-  font-size: 14px!important;
-  font-weight: 600!important;
+  border: 1.5px solid #e5e7eb!important;
+  border-radius: 10px!important;
+  background: #fafafa!important;
+  transition: all .2s!important;
+  font-size: 13px!important;
 }
 
 #workspace-record-panel .gr-dropdown:hover,
 #workspace-record-panel .gr-dropdown:focus-within {
   border-color: #6366f1!important;
-  box-shadow: 0 0 0 4px rgba(99,102,241,.08)!important;
-  transform: translateY(-1px)!important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,.12)!important;
+  background: #fff!important;
 }
 
 /* 工作台记录按钮样式 */
 #workspace-record-panel button {
-  font-weight: 700!important;
-  transition: all .2s cubic-bezier(.4,0,.2,1)!important;
+  font-weight: 600!important;
+  transition: all .2s!important;
   border-radius: 10px!important;
   font-size: 13px!important;
-  padding: 10px 16px!important;
-  height: auto!important;
-  min-height: 42px!important;
 }
 
 #workspace-record-panel button.primary {
   background: linear-gradient(135deg, #6366f1, #8b5cf6)!important;
-  box-shadow: 0 4px 12px rgba(99,102,241,.25)!important;
+  box-shadow: 0 2px 8px rgba(99,102,241,.3)!important;
   border: none!important;
 }
 
 #workspace-record-panel button.primary:hover {
-  transform: translateY(-2px)!important;
-  box-shadow: 0 6px 20px rgba(99,102,241,.35)!important;
+  transform: translateY(-1px)!important;
+  box-shadow: 0 4px 14px rgba(99,102,241,.45)!important;
 }
 
 #workspace-record-panel button.secondary {
-  background: #ffffff!important;
-  border: 2px solid #e2e8f0!important;
-  color: #64748b!important;
-  padding: 10px!important;
-  min-width: 42px!important;
-  width: 42px!important;
+  background: #f8fafc!important;
+  border: 1.5px solid #e2e8f0!important;
+  color: #475569!important;
+  min-width: 44px!important;
 }
 
 #workspace-record-panel button.secondary:hover {
-  background: #f8fafc!important;
+  background: #f1f5f9!important;
   border-color: #cbd5e1!important;
-  color: #475569!important;
-  transform: translateY(-1px)!important;
 }
 
 /* 工作台记录行间距 */
@@ -1008,11 +988,7 @@ input[type=color]:hover{
 #workspace-record-panel .hint-ok,
 #workspace-record-panel .hint-warn,
 #workspace-record-panel .hint-err {
-  margin-top: 14px!important;
-  border-radius: 10px!important;
-  font-weight: 600!important;
-  box-shadow: 0 2px 8px rgba(0,0,0,.06)!important;
-  font-size: 13px!important;
+  margin-top: 12px!important;
 }
 
 /* ── 按钮状态颜色增强 ── */
@@ -1573,39 +1549,15 @@ def build_ui():
             with gr.Tab("🎬  工作台"):
                 # ══ 顶部工作台记录管理区 ══
                 with gr.Group(elem_classes="panel", elem_id="workspace-record-panel"):
-                    gr.HTML(
-                        '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">'
-                        '<div style="width:42px;height:42px;border-radius:12px;flex-shrink:0;'
-                        'display:flex;align-items:center;justify-content:center;font-size:20px;'
-                        'background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#ec4899 100%);'
-                        'box-shadow:0 4px 16px rgba(99,102,241,.35);position:relative;">'
-                        '<span style="position:absolute;inset:0;border-radius:12px;'
-                        'background:linear-gradient(135deg,rgba(255,255,255,.2),transparent);"></span>'
-                        '💾</div>'
-                        '<div style="flex:1;">'
-                        '<div style="font-size:17px;font-weight:800;color:#0f172a;margin-bottom:3px;'
-                        'letter-spacing:-.3px;">智能工作台记录</div>'
-                        '<div style="font-size:12px;color:#64748b;font-weight:500;">每次合成自动保存，一键恢复工作状态</div>'
-                        '</div>'
-                        '<div style="display:flex;align-items:center;gap:6px;padding:6px 12px;'
-                        'border-radius:20px;background:linear-gradient(135deg,#f0f9ff,#e0f2fe);'
-                        'border:1.5px solid #bae6fd;flex-shrink:0;">'
-                        '<span style="width:6px;height:6px;border-radius:50%;background:#0ea5e9;'
-                        'animation:pulse 2s infinite;"></span>'
-                        '<span style="font-size:11px;font-weight:700;color:#0369a1;">实时保存</span>'
-                        '</div>'
-                        '</div>'
-                        '<style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style>'
-                    )
                     with gr.Row():
                         workspace_record_dropdown = gr.Dropdown(
-                            label="🔍 选择历史记录恢复",
+                            label="💾 工作台记录",
                             choices=[],
                             value=None,
                             interactive=True,
                             scale=5)
                         workspace_restore_btn = gr.Button("🔄 恢复", variant="primary", scale=1, size="sm")
-                        workspace_refresh_btn = gr.Button("⟳", variant="secondary", scale=0, size="sm", min_width=42)
+                        workspace_refresh_btn = gr.Button("⟳", variant="secondary", scale=0, size="sm", min_width=44)
                     workspace_record_hint = gr.HTML(value="")
                 
                 with gr.Row(elem_classes="workspace"):
@@ -2360,8 +2312,22 @@ def build_ui():
                                 sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                                 sub_bg_color_val, sub_bg_opacity_val,
                                 sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val):
-            """自动保存当前工作台状态"""
+            """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建"""
             try:
+                # 辅助函数：将任何值转换为JSON可序列化的类型
+                def to_json_safe(val):
+                    """将值转换为JSON可序列化的类型"""
+                    if val is None:
+                        return ""
+                    # 处理 numpy 数组
+                    if hasattr(val, 'tolist'):
+                        return val.tolist()
+                    # 处理其他类型
+                    if isinstance(val, (str, int, float, bool)):
+                        return val
+                    # 尝试转换为字符串
+                    return str(val)
+                
                 # 生成记录名称：使用文本前10个字，如果没有则使用时间
                 text = (input_text or "").strip()
                 if text:
@@ -2372,34 +2338,60 @@ def build_ui():
                 record = {
                     "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "record_name": record_name,
-                    "input_text": input_text or "",
-                    "prompt_audio": prompt_audio or "",
-                    "voice_select": voice_select_val or "",
-                    "audio_mode": audio_mode_val or "文字转语音",
-                    "direct_audio": direct_audio or "",
-                    "avatar_select": avatar_select_val or "",
-                    "audio_for_ls": audio_for_ls_val or "",
-                    "output_audio": output_audio_val or "",
-                    "output_video": output_video_val or "",
-                    "sub_text": sub_text_val or "",
-                    "sub_video": sub_video_val or "",
+                    "input_text": to_json_safe(input_text),
+                    "prompt_audio": to_json_safe(prompt_audio),
+                    "voice_select": to_json_safe(voice_select_val),
+                    "audio_mode": to_json_safe(audio_mode_val) or "文字转语音",
+                    "direct_audio": to_json_safe(direct_audio),
+                    "avatar_select": to_json_safe(avatar_select_val),
+                    "audio_for_ls": to_json_safe(audio_for_ls_val),
+                    "output_audio": to_json_safe(output_audio_val),
+                    "output_video": to_json_safe(output_video_val),
+                    "sub_text": to_json_safe(sub_text_val),
+                    "sub_video": to_json_safe(sub_video_val),
                     # 字幕参数
-                    "sub_font": sub_font_val or "",
-                    "sub_size": sub_size_val or 32,
-                    "sub_pos": sub_pos_val or "下",
-                    "sub_color": sub_color_val or "#FFFFFF",
-                    "sub_hi_color": sub_hi_val or "#FFD700",
-                    "sub_outline_color": sub_outline_val or "#000000",
-                    "sub_outline_size": sub_outline_size_val or 6,
-                    "sub_bg_color": sub_bg_color_val or "#000000",
-                    "sub_bg_opacity": sub_bg_opacity_val or 0,
-                    "sub_kw_enable": sub_kw_enable_val or False,
-                    "sub_hi_scale": sub_hi_scale_val or 1.5,
-                    "sub_kw_text": sub_kw_text_val or "",
+                    "sub_font": to_json_safe(sub_font_val),
+                    "sub_size": to_json_safe(sub_size_val) or 32,
+                    "sub_pos": to_json_safe(sub_pos_val) or "下",
+                    "sub_color": to_json_safe(sub_color_val) or "#FFFFFF",
+                    "sub_hi_color": to_json_safe(sub_hi_val) or "#FFD700",
+                    "sub_outline_color": to_json_safe(sub_outline_val) or "#000000",
+                    "sub_outline_size": to_json_safe(sub_outline_size_val) or 6,
+                    "sub_bg_color": to_json_safe(sub_bg_color_val) or "#000000",
+                    "sub_bg_opacity": to_json_safe(sub_bg_opacity_val) or 0,
+                    "sub_kw_enable": bool(sub_kw_enable_val) if sub_kw_enable_val is not None else False,
+                    "sub_hi_scale": to_json_safe(sub_hi_scale_val) or 1.5,
+                    "sub_kw_text": to_json_safe(sub_kw_text_val),
                 }
-                _save_workspace_record(record)
-                return _hint_html("ok", f"✅ 已保存：{record_name}"), gr.update(choices=_get_workspace_record_choices())
+                
+                # 读取现有记录
+                records = _load_workspace_records()
+                
+                # 查找是否有相同文本的记录（只比较文本内容）
+                existing_idx = -1
+                for i, rec in enumerate(records):
+                    if rec.get("input_text", "").strip() == text:
+                        existing_idx = i
+                        break
+                
+                if existing_idx >= 0:
+                    # 更新现有记录
+                    records[existing_idx] = record
+                    msg = f"✅ 已更新：{record_name}"
+                else:
+                    # 新建记录
+                    records.insert(0, record)
+                    records = records[:100]  # 最多保留100条
+                    msg = f"✅ 已保存：{record_name}"
+                
+                # 保存到文件
+                with open(WORKSPACE_RECORDS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(records, f, ensure_ascii=False, indent=2)
+                
+                return _hint_html("ok", msg), gr.update(choices=_get_workspace_record_choices())
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 return _hint_html("error", f"保存失败: {str(e)}"), gr.update()
 
         def _restore_workspace(record_idx):
@@ -2439,6 +2431,21 @@ def build_ui():
                     pass
                 return None
             
+            # 获取音频文件路径（即使文件不存在也恢复路径，让用户知道之前的文件）
+            output_audio_path = rec.get("output_audio", "")
+            audio_for_ls_path = rec.get("audio_for_ls", "")
+            
+            # 如果 output_audio 存在，优先使用它
+            # 如果不存在但有路径记录，也显示路径（虽然文件可能已被删除）
+            output_audio_value = safe_file_value(output_audio_path)
+            if not output_audio_value and output_audio_path:
+                # 文件不存在但有路径记录，仍然尝试恢复（Gradio会显示错误但保留路径）
+                output_audio_value = output_audio_path
+            
+            audio_for_ls_value = safe_file_value(audio_for_ls_path)
+            if not audio_for_ls_value and audio_for_ls_path:
+                audio_for_ls_value = audio_for_ls_path
+            
             # 返回所有需要更新的组件值
             return [
                 gr.update(value=rec.get("input_text", "")),           # input_text
@@ -2447,10 +2454,10 @@ def build_ui():
                 gr.update(value=rec.get("audio_mode", "文字转语音")), # audio_mode
                 gr.update(value=safe_file_value(rec.get("direct_audio"))),  # direct_audio
                 gr.update(value=safe_dropdown_value(rec.get("avatar_select"), lambda: _av.get_choices() if _LIBS_OK else [])),  # avatar_select
-                gr.update(value=safe_file_value(rec.get("audio_for_ls"))),  # audio_for_ls
-                gr.update(value=safe_file_value(rec.get("output_audio"))),  # output_audio
+                gr.update(value=audio_for_ls_value),                   # audio_for_ls - 恢复路径
+                gr.update(value=output_audio_value),                   # output_audio - 恢复路径
                 gr.update(value=safe_file_value(rec.get("output_video"))),  # output_video
-                gr.update(value=rec.get("sub_text", "")),             # sub_text
+                gr.update(value=rec.get("sub_text", "")),             # sub_text - 直接恢复文本
                 gr.update(value=safe_file_value(rec.get("sub_video"))),     # sub_video
                 # 字幕参数
                 gr.update(value=rec.get("sub_font", "")),             # sub_font
@@ -2573,7 +2580,7 @@ def build_ui():
             "标准":     dict(tp=0.8,  tk=30, temp=0.7, nb=1, rp=8.0,  mmt=1500, spd=1.0),
             "稳定播报": dict(tp=0.6,  tk=10, temp=0.2, nb=3, rp=14.0, mmt=1500, spd=0.95),
             "活泼生动": dict(tp=0.95, tk=60, temp=1.4, nb=1, rp=4.0,  mmt=1500, spd=1.1),
-            "慢速朗读": dict(tp=0.6,  tk=10, temp=0.15,nb=3, rp=14.0, mmt=2500, spd=0.6),
+            "慢速朗读": dict(tp=0.6,  tk=10, temp=0.15,nb=3, rp=14.0, mmt=2500, spd=0.9),
         }
         def _on_voice_style(style):
             is_pro = (style == "专业模式")
@@ -2638,8 +2645,7 @@ def build_ui():
             path = _av.get_path(name)
             if not path or not os.path.exists(path):
                 return gr.update(visible=False), gr.update(value="", visible=False)
-            title = (f'<div class="avatar-title-badge">🎭 {name}</div>')
-            return gr.update(value=path, visible=True, show_download_button=True), gr.update(value=title, visible=True)
+            return gr.update(value=path, visible=True, show_download_button=True), gr.update(value="", visible=False)
 
         avatar_select.change(_on_avatar_select,
             inputs=[avatar_select], outputs=[avatar_preview, avatar_preview_title])
@@ -2694,8 +2700,7 @@ def build_ui():
             if not _LIBS_OK or not name or name.startswith("（"):
                 return gr.update(value=None), ""
             path = _av.get_path(name)
-            title = f'<div class="avatar-title-badge">🎭 {name}</div>' if (path and os.path.exists(path)) else ""
-            return (gr.update(value=path, show_download_button=True) if path and os.path.exists(path) else gr.update(value=None)), title
+            return (gr.update(value=path, show_download_button=True) if path and os.path.exists(path) else gr.update(value=None)), ""
 
         av_prev_js_input.change(_preview_avatar,
             inputs=[av_prev_js_input], outputs=[av_prev_video, av_prev_title])
@@ -2901,7 +2906,7 @@ def build_ui():
             outputs=[douyin_hint, op_log_html])
 
         # 视频合成
-        def ls_wrap(avatar_name, auto_a, progress=gr.Progress()):
+        def ls_wrap(avatar_name, auto_a, input_txt, progress=gr.Progress()):
             # 把数字人名转换成文件路径
             video = None
             if _LIBS_OK and avatar_name and not avatar_name.startswith("（"):
@@ -2925,7 +2930,7 @@ def build_ui():
             threading.Thread(target=_run, daemon=True).start()
 
             # 简洁的状态提示（不用大块HTML，直接进度条推进）
-            yield gr.update(), gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True)
+            yield gr.update(), gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True), gr.update(), gr.update()
 
             while True:
                 try:
@@ -2933,12 +2938,12 @@ def build_ui():
                     if item[0] == "done":
                         break
                     elif item[0] == "detail":
-                        yield gr.update(), gr.update(), gr.update(value=item[1], visible=True)
+                        yield gr.update(), gr.update(), gr.update(value=item[1], visible=True), gr.update(), gr.update()
                 except _queue.Empty:
-                    yield gr.update(), gr.update(), gr.update()
+                    yield gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
             if result["err"]:
-                yield gr.update(), _make_log(False, f"视频合成失败: {result['err']}"), gr.update(visible=False)
+                yield gr.update(), _make_log(False, f"视频合成失败: {result['err']}"), gr.update(visible=False), gr.update(visible=False), ""
                 raise gr.Error(str(result["err"]))
 
             out      = result["out"]
@@ -2958,11 +2963,13 @@ def build_ui():
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
-            yield gr.update(value=out, show_download_button=True), log_html, gr.update(visible=False)
+            # 视频合成完成后显示抖音发布区域，并自动填充标题
+            douyin_title_text = input_txt[:30] if input_txt else ""
+            yield gr.update(value=out, show_download_button=True), log_html, gr.update(visible=False), gr.update(visible=True), douyin_title_text
 
         ls_btn.click(ls_wrap,
-            inputs=[avatar_select, audio_for_ls],
-            outputs=[output_video, op_log_html, ls_detail_html])
+            inputs=[avatar_select, audio_for_ls, input_text],
+            outputs=[output_video, op_log_html, ls_detail_html, douyin_group, douyin_title])
         
         # 视频合成完成后自动保存工作台状态
         ls_btn.click(
