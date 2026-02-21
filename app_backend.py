@@ -580,6 +580,15 @@ if __name__ == "__main__":
 
     # ── 先进行激活验证（在启动任何服务之前）─────────────────
     print("[LICENSE] 开始激活验证...")
+    
+    # 立即启动服务（双击就启动，不等登录）
+    print("[LICENSE] 立即启动后台服务...")
+    signal.signal(signal.SIGINT, lambda s, f: cleanup())
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, lambda s, f: cleanup())
+    threading.Thread(target=start_gradio, daemon=True).start()
+    threading.Thread(target=wait_for_gradio, daemon=True).start()
+    
     try:
         sys.path.insert(0, BASE_DIR)
         import lib_license as lic
@@ -587,129 +596,259 @@ if __name__ == "__main__":
         # 检查本地保存的卡密状态
         status, info = lic.check_saved_license()
         
-        if status == "none":
-            # 没有卡密，弹出激活窗口
-            print("[LICENSE] 未找到激活信息，弹出激活窗口...")
-            try:
-                import tkinter as tk
-                from tkinter import messagebox
-                
-                machine_code = lic.get_machine_code()
-                result = {"passed": False}
-
-                root = tk.Tk()
-                root.title("软件激活")
-                root.resizable(False, False)
-                root.configure(bg="#f8fafc")
-
-                # 居中
-                w, h = 420, 260
-                sx = (root.winfo_screenwidth() - w) // 2
-                sy = (root.winfo_screenheight() - h) // 2
-                root.geometry(f"{w}x{h}+{sx}+{sy}")
-
-                # 标题
-                tk.Label(root, text="软件激活", font=("Microsoft YaHei", 16, "bold"),
-                         bg="#f8fafc", fg="#0f172a").pack(pady=(24, 4))
-                tk.Label(root, text="请输入卡密以激活使用", font=("Microsoft YaHei", 10),
-                         bg="#f8fafc", fg="#94a3b8").pack(pady=(0, 16))
-
-                # 卡密输入
-                frm = tk.Frame(root, bg="#f8fafc")
-                frm.pack(padx=32, fill="x")
-
-                tk.Label(frm, text="卡密", font=("Microsoft YaHei", 9, "bold"),
-                         bg="#f8fafc", fg="#374151", anchor="w").pack(fill="x")
-                key_entry = tk.Entry(frm, font=("Consolas", 11), relief="solid", bd=1)
-                key_entry.pack(fill="x", ipady=4, pady=(2, 16))
-
-                msg_label = tk.Label(frm, text="", font=("Microsoft YaHei", 9),
-                                      bg="#f8fafc", fg="#ef4444")
-                msg_label.pack(fill="x")
-
-                def _do_login():
-                    key = key_entry.get().strip()
-                    if not key:
-                        msg_label.config(text="请输入卡密", fg="#ef4444")
-                        return
-                    msg_label.config(text="正在验证...", fg="#6366f1")
-                    root.update()
-                    ok, msg = lic.validate_online(key)
-                    if ok:
-                        msg_label.config(text="激活成功!", fg="#16a34a")
-                        result["passed"] = True
-                        root.after(600, root.destroy)
-                    else:
-                        msg_label.config(text=msg, fg="#ef4444")
-
-                btn = tk.Button(frm, text="激活登录", font=("Microsoft YaHei", 11, "bold"),
-                                 bg="#6366f1", fg="white", relief="flat", cursor="hand2",
-                                 activebackground="#4f46e5", activeforeground="white",
-                                 command=_do_login)
-                btn.pack(fill="x", ipady=6, pady=(4, 0))
-
-                key_entry.bind("<Return>", lambda e: _do_login())
-
-                def _on_close():
-                    result["passed"] = False
-                    root.destroy()
-
-                root.protocol("WM_DELETE_WINDOW", _on_close)
-                root.mainloop()
-
-                if not result["passed"]:
-                    print("[LICENSE] 激活失败或取消，退出程序")
-                    sys.exit(0)
-                    
-            except Exception as e:
-                print(f"[LICENSE] 激活窗口异常: {e}")
-                import traceback
-                traceback.print_exc()
-                sys.exit(0)
-                
-        elif status == "expired":
-            # 卡密已过期
-            print(f"[LICENSE] 卡密已过期，需要重新激活")
-            # 递归调用自己（重新启动以弹出激活窗口）
-            import subprocess
-            subprocess.Popen([sys.executable] + sys.argv)
-            sys.exit(0)
+        # 无论什么状态，都弹出登录窗口
+        print("[LICENSE] 弹出登录窗口...")
+        try:
+            import tkinter as tk
+            from tkinter import ttk
             
-        else:  # status == "valid"
-            # 有效的卡密，再次在线验证
-            print(f"[LICENSE] 找到已保存的卡密，验证中...")
-            license_key = info.get("license_key", "")
-            if license_key:
-                ok, msg = lic.validate_online(license_key)
-                if not ok:
-                    print(f"[LICENSE] 激活验证失败: {msg}")
-                    # 清除旧卡密，重新启动
-                    lic._clear_local()
-                    import subprocess
-                    subprocess.Popen([sys.executable] + sys.argv)
-                    sys.exit(0)
-                print("[LICENSE] 激活验证通过 ✓")
+            machine_code = lic.get_machine_code()
+            result = {"passed": False}
+
+            root = tk.Tk()
+            root.title("织梦AI大模型 - 专业版")
+            root.resizable(False, False)
+            
+            # 设置窗口图标
+            try:
+                icon_path = os.path.join(BASE_DIR, "logo.ico")
+                if os.path.exists(icon_path):
+                    root.iconbitmap(icon_path)
+            except Exception:
+                pass
+
+            # 居中
+            w, h = 520, 620  # 增加窗口高度
+            sx = (root.winfo_screenwidth() - w) // 2
+            sy = (root.winfo_screenheight() - h) // 2
+            root.geometry(f"{w}x{h}+{sx}+{sy}")
+
+            # 创建渐变背景效果的画布
+            canvas = tk.Canvas(root, width=w, height=h, highlightthickness=0)
+            canvas.pack(fill="both", expand=True)
+            
+            # 绘制渐变背景（从深蓝到紫色）
+            for i in range(h):
+                ratio = i / h
+                r = int(15 + (99 - 15) * ratio)
+                g = int(23 + (102 - 23) * ratio)
+                b = int(42 + (241 - 42) * ratio)
+                color = f'#{r:02x}{g:02x}{b:02x}'
+                canvas.create_line(0, i, w, i, fill=color)
+            
+            # 顶部装饰圆点
+            for i in range(8):
+                x = 60 + i * 60
+                y = 40 + (i % 2) * 10
+                canvas.create_oval(x-3, y-3, x+3, y+3, 
+                                   fill="#ffffff", outline="", 
+                                   stipple="gray50")
+
+            # Logo 区域
+            logo_y = 80
+            try:
+                logo_path = os.path.join(BASE_DIR, "logo.jpg")
+                if os.path.exists(logo_path):
+                    from PIL import Image, ImageTk, ImageDraw
+                    img = Image.open(logo_path).convert("RGBA")
+                    
+                    # 创建圆形遮罩
+                    size = (100, 100)
+                    img = img.resize(size, Image.Resampling.LANCZOS)
+                    mask = Image.new('L', size, 0)
+                    draw = ImageDraw.Draw(mask)
+                    draw.ellipse((0, 0) + size, fill=255)
+                    
+                    # 应用遮罩
+                    output = Image.new('RGBA', size, (0, 0, 0, 0))
+                    output.paste(img, (0, 0))
+                    output.putalpha(mask)
+                    
+                    photo = ImageTk.PhotoImage(output)
+                    canvas.create_image(w//2, logo_y, image=photo)
+                    canvas.image = photo  # 保持引用
+                    
+                    # Logo 外圈光晕
+                    canvas.create_oval(w//2-55, logo_y-55, w//2+55, logo_y+55,
+                                       outline="#ffffff", width=2, stipple="gray25")
+                else:
+                    raise Exception("Logo not found")
+            except Exception:
+                # 使用渐变圆形作为 Logo
+                canvas.create_oval(w//2-50, logo_y-50, w//2+50, logo_y+50,
+                                   fill="#6366f1", outline="#8b5cf6", width=3)
+                canvas.create_text(w//2, logo_y, text="🌟", 
+                                   font=("Segoe UI Emoji", 40), fill="#ffffff")
+
+            # 标题
+            canvas.create_text(w//2, 200, text="织梦AI大模型", 
+                               font=("Microsoft YaHei", 26, "bold"),
+                               fill="#ffffff")
+            canvas.create_text(w//2, 235, 
+                               text="AI语音克隆 · 智能视频合成 · 专业级解决方案", 
+                               font=("Microsoft YaHei", 10),
+                               fill="#e0e7ff")
+
+            # 卡密输入区域（白色卡片）
+            card_y = 280
+            card_h = 260  # 增加高度以容纳所有内容
+            # 卡片阴影
+            canvas.create_rectangle(42, card_y+4, w-42, card_y+card_h+4,
+                                    fill="#1e293b", outline="")
+            # 卡片主体
+            canvas.create_rectangle(40, card_y, w-40, card_y+card_h,
+                                    fill="#ffffff", outline="", width=0)
+            
+            # 卡片内容容器
+            card_frame = tk.Frame(root, bg="#ffffff")
+            card_frame.place(x=60, y=card_y+20, width=w-120, height=card_h-40)
+
+            # 卡密标签
+            tk.Label(card_frame, text="🔐  卡密激活", 
+                     font=("Microsoft YaHei", 11, "bold"),
+                     bg="#ffffff", fg="#1e293b", anchor="w").pack(fill="x", pady=(0, 12))
+            
+            # 卡密输入框
+            entry_frame = tk.Frame(card_frame, bg="#f1f5f9", 
+                                   highlightbackground="#e2e8f0", 
+                                   highlightthickness=1)
+            entry_frame.pack(fill="x", pady=(0, 8))
+            
+            key_entry = tk.Entry(entry_frame, 
+                                 font=("Consolas", 11), 
+                                 relief="flat",
+                                 bg="#f1f5f9", 
+                                 fg="#1e293b",
+                                 insertbackground="#6366f1",
+                                 bd=0)
+            key_entry.pack(fill="x", padx=14, pady=11)
+            
+            # 如果有保存的卡密，预填
+            if status == "valid" and info.get("license_key"):
+                key_entry.insert(0, info["license_key"])
+            
+            # 状态提示
+            status_frame = tk.Frame(card_frame, bg="#ffffff")
+            status_frame.pack(fill="x", pady=(0, 12))
+            
+            if status == "valid":
+                expire_time = info.get("expire_time", "")
+                status_icon = "✓"
+                status_color = "#22c55e"
+                if expire_time:
+                    status_text = f"已保存的卡密 · 有效期至 {expire_time}"
+                else:
+                    status_text = "已保存的卡密 · 永久有效"
+            elif status == "expired":
+                status_icon = "⚠"
+                status_color = "#f59e0b"
+                status_text = "卡密已过期，请重新输入"
             else:
-                print("[LICENSE] 卡密信息异常，重新激活")
-                lic._clear_local()
-                import subprocess
-                subprocess.Popen([sys.executable] + sys.argv)
+                status_icon = "ℹ"
+                status_color = "#6366f1"
+                status_text = "首次使用请输入卡密激活"
+            
+            tk.Label(status_frame, text=status_icon, 
+                     font=("Segoe UI Emoji", 10),
+                     bg="#ffffff", fg=status_color).pack(side="left")
+            tk.Label(status_frame, text=status_text, 
+                     font=("Microsoft YaHei", 9),
+                     bg="#ffffff", fg="#64748b").pack(side="left", padx=(4, 0))
+
+            # 消息提示
+            msg_label = tk.Label(card_frame, text="", 
+                                 font=("Microsoft YaHei", 9),
+                                 bg="#ffffff", fg="#ef4444",
+                                 wraplength=360, justify="center",
+                                 height=2)
+            msg_label.pack(fill="x", pady=(0, 16))
+
+            # 登录按钮
+            def _do_login():
+                key = key_entry.get().strip()
+                if not key:
+                    msg_label.config(text="⚠ 请输入卡密", fg="#f59e0b")
+                    return
+                
+                # 禁用按钮和输入框
+                login_btn.config(state="disabled", text="⏳ 验证中...", bg="#94a3b8")
+                key_entry.config(state="disabled")
+                msg_label.config(text="🔄 正在验证卡密，请稍候...", fg="#6366f1")
+                root.update()
+                
+                # 验证卡密
+                ok, msg = lic.validate_online(key)
+                if ok:
+                    msg_label.config(text="✓ 激活成功！正在启动程序...", fg="#22c55e")
+                    login_btn.config(text="✓ 启动中...", bg="#22c55e")
+                    result["passed"] = True
+                    root.after(1200, root.destroy)
+                else:
+                    msg_label.config(text=f"✗ {msg}", fg="#ef4444")
+                    login_btn.config(state="normal", text="🚀 登录启动", bg="#6366f1")
+                    key_entry.config(state="normal")
+
+            login_btn = tk.Button(card_frame, 
+                                  text="🚀 登录启动", 
+                                  font=("Microsoft YaHei", 12, "bold"),
+                                  bg="#6366f1", 
+                                  fg="white", 
+                                  relief="flat", 
+                                  cursor="hand2",
+                                  activebackground="#4f46e5", 
+                                  activeforeground="white",
+                                  bd=0,
+                                  command=_do_login)
+            login_btn.pack(fill="x", ipady=12)
+            
+            # 按钮悬停效果
+            def on_enter(e):
+                if login_btn['state'] != 'disabled':
+                    login_btn.config(bg="#4f46e5")
+                    
+            def on_leave(e):
+                if login_btn['state'] != 'disabled':
+                    login_btn.config(bg="#6366f1")
+
+            login_btn.bind("<Enter>", on_enter)
+            login_btn.bind("<Leave>", on_leave)
+
+            key_entry.bind("<Return>", lambda e: _do_login())
+            key_entry.focus_set()
+
+            # 底部信息
+            canvas.create_text(w//2, h-30, 
+                               text="© 2024 织梦AI · 专业版 · 保留所有权利", 
+                               font=("Microsoft YaHei", 8),
+                               fill="#cbd5e1")
+
+            def _on_close():
+                result["passed"] = False
+                root.destroy()
+
+            root.protocol("WM_DELETE_WINDOW", _on_close)
+            root.mainloop()
+
+            if not result["passed"]:
+                print("[LICENSE] 用户取消登录，退出程序")
+                cleanup()
                 sys.exit(0)
+                
+        except Exception as e:
+            print(f"[LICENSE] 登录窗口异常: {e}")
+            import traceback
+            traceback.print_exc()
+            cleanup()
+            sys.exit(0)
             
     except Exception as e:
         print(f"[LICENSE] 激活检查异常: {e}")
         import traceback
         traceback.print_exc()
-        # 激活检查异常时退出，避免未授权使用
+        cleanup()
         sys.exit(1)
 
-    # ── 激活通过后，启动服务和初始化窗口 ─────────────────
-    signal.signal(signal.SIGINT, lambda s, f: cleanup())
-    if hasattr(signal, 'SIGTERM'):
-        signal.signal(signal.SIGTERM, lambda s, f: cleanup())
-
-    threading.Thread(target=start_gradio,    daemon=True).start()
-    threading.Thread(target=wait_for_gradio, daemon=True).start()
+    print("[LICENSE] 激活验证通过 ✓")
 
     try:
         root, status_var = build_splash()
