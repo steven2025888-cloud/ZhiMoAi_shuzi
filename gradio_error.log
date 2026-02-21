@@ -637,3 +637,54 @@ torch.Size([1, 260608])
 [LS] 99%|ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½| 295/297 [00:16<00:00, 17.37it/s]
 [LS] 100%|ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½| 297/297 [00:16<00:00, 17.62it/s]
 [LS] 100%|ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½| 297/297 [00:16<00:00, 17.91it/s]
+>> starting inference...
+  >> Warning: input text contains 1 unknown tokens (id=2):
+     Tokens which can't be encoded:  Traceback (most recent call last):
+  File "D:\ZhiMoAi_shuzi\unified_app.py", line 1090, in generate_speech
+    tts.infer(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\indextts\infer_v2.py", line 400, in infer
+    return list(self.infer_generator(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\indextts\infer_v2.py", line 538, in infer_generator
+    print( "     Tokens which can't be encoded: ", [t for t, id in zip(text_tokens_list, text_token_ids) if id == self.tokenizer.unk_token_id])
+UnicodeEncodeError: 'gbk' codec can't encode character '\U0001f40e' in position 2: illegal multibyte sequence
+Traceback (most recent call last):
+  File "D:\ZhiMoAi_shuzi\unified_app.py", line 1090, in generate_speech
+    tts.infer(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\indextts\infer_v2.py", line 400, in infer
+    return list(self.infer_generator(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\indextts\infer_v2.py", line 538, in infer_generator
+    print( "     Tokens which can't be encoded: ", [t for t, id in zip(text_tokens_list, text_token_ids) if id == self.tokenizer.unk_token_id])
+UnicodeEncodeError: 'gbk' codec can't encode character '\U0001f40e' in position 2: illegal multibyte sequence
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\gradio\queueing.py", line 745, in process_events
+    response = await route_utils.call_process_api(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\gradio\route_utils.py", line 349, in call_process_api
+    output = await app.get_blocks().process_api(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\gradio\blocks.py", line 2123, in process_api
+    result = await self.call_function(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\gradio\blocks.py", line 1630, in call_function
+    prediction = await anyio.to_thread.run_sync(  # type: ignore
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\anyio\to_thread.py", line 61, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\anyio\_backends\_asyncio.py", line 2525, in run_sync_in_worker_thread
+    return await future
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\anyio\_backends\_asyncio.py", line 986, in run
+    result = context.run(func, *args)
+  File "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\lib\site-packages\gradio\utils.py", line 915, in wrapper
+    response = f(*args, **kwargs)
+  File "D:\ZhiMoAi_shuzi\unified_app.py", line 2190, in tts_wrap
+    r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt,
+  File "D:\ZhiMoAi_shuzi\unified_app.py", line 1102, in generate_speech
+    raise gr.Error("TTS Ê§°Ü: " + str(e))
+gradio.exceptions.Error: "TTS Ê§°Ü: 'gbk' codec can't encode character '\\U0001f40e' in position 2: illegal multibyte sequence"
+>> starting inference...
+Use the specified emotion vector
+The following generation flags are not valid and may be ignored: ['length_penalty']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+  0%|          | 0/25 [00:00<?, ?it/s]  4%|¨…         | 1/25 [00:00<00:12,  1.90it/s] 20%|¨€¨€        | 5/25 [00:00<00:02,  7.51it/s] 24%|¨€¨€¨…       | 6/25 [00:01<00:04,  4.45it/s] 28%|¨€¨€¨‚       | 7/25 [00:01<00:05,  3.37it/s] 32%|¨€¨€¨€¨‡      | 8/25 [00:02<00:06,  2.80it/s] 36%|¨€¨€¨€¨„      | 9/25 [00:02<00:06,  2.48it/s] 40%|¨€¨€¨€¨€      | 10/25 [00:03<00:06,  2.27it/s] 44%|¨€¨€¨€¨€¨…     | 11/25 [00:03<00:06,  2.08it/s] 48%|¨€¨€¨€¨€¨‚     | 12/25 [00:04<00:06,  1.98it/s] 52%|¨€¨€¨€¨€¨€¨‡    | 13/25 [00:05<00:06,  1.88it/s] 56%|¨€¨€¨€¨€¨€¨„    | 14/25 [00:05<00:05,  1.85it/s] 60%|¨€¨€¨€¨€¨€¨€    | 15/25 [00:06<00:05,  1.87it/s] 64%|¨€¨€¨€¨€¨€¨€¨…   | 16/25 [00:06<00:04,  1.86it/s] 68%|¨€¨€¨€¨€¨€¨€¨‚   | 17/25 [00:07<00:04,  1.88it/s] 72%|¨€¨€¨€¨€¨€¨€¨€¨‡  | 18/25 [00:07<00:03,  1.90it/s] 76%|¨€¨€¨€¨€¨€¨€¨€¨„  | 19/25 [00:08<00:03,  1.91it/s] 80%|¨€¨€¨€¨€¨€¨€¨€¨€  | 20/25 [00:08<00:02,  1.89it/s] 84%|¨€¨€¨€¨€¨€¨€¨€¨€¨… | 21/25 [00:09<00:02,  1.85it/s] 88%|¨€¨€¨€¨€¨€¨€¨€¨€¨‚ | 22/25 [00:10<00:02,  1.47it/s] 92%|¨€¨€¨€¨€¨€¨€¨€¨€¨€¨‡| 23/25 [00:11<00:01,  1.49it/s] 96%|¨€¨€¨€¨€¨€¨€¨€¨€¨€¨„| 24/25 [00:11<00:00,  1.52it/s]100%|¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€| 25/25 [00:12<00:00,  1.50it/s]100%|¨€¨€¨€¨€¨€¨€¨€¨€¨€¨€| 25/25 [00:12<00:00,  2.02it/s]
+torch.Size([1, 264960])
+Use the specified emotion vector
+The following generation flags are not valid and may be ignored: ['length_penalty']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+  0%|          | 0/25 [00:00<?, ?it/s]  4%|¨…         | 1/25 [00:00<00:11,  2.07it/s] 20%|¨€¨€        | 5/25 [00:00<00:02,  8.17it/s] 28%|¨€¨€¨‚       | 7/25 [00:01<00:04,  3.79it/s] 32%|¨€¨€¨€¨‡      | 8/25 [00:02<00:05,  3.25it/s] 36%|¨€¨€¨€¨„      | 9/25 [00:02<00:05,  2.96it/s] 40%|¨€¨€¨€¨€      | 10/25 [00:03<00:05,  2.63it/s] 44%|¨€¨€¨€¨€¨…     | 11/25 [00:03<00:06,  2.33it/s] 48%|¨€¨€¨€¨€¨‚     | 12/25 [00:04<00:06,  2.15it/s] 52%|¨€¨€¨€¨€¨€¨‡    | 13/25 [00:04<00:05,  2.05it/s] 56%|¨€¨€¨€¨€¨€¨„    | 14/25 [00:05<00:05,  2.13it/s] 60%|¨€¨€¨€¨€¨€¨€    | 15/25 [00:05<00:04,  2.15it/s] 64%|¨€¨€¨€¨€¨€¨€¨…   | 16/25 [00:06<00:04,  2.18it/s]
