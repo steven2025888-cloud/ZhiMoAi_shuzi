@@ -20,11 +20,63 @@ def load_meta():
 
 
 def save_meta(data):
-    try:
-        with open(AVATARS_META, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    """保存元数据到 meta.json — 三重保障写入"""
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    written = False
+    
+    # 策略1: 直接覆盖写入
+    for attempt in range(3):
+        try:
+            # 先删后写，避免 Windows 文件锁
+            if os.path.exists(AVATARS_META):
+                try:
+                    os.remove(AVATARS_META)
+                except Exception:
+                    pass
+            
+            with open(AVATARS_META, 'w', encoding='utf-8') as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            
+            # 验证写入内容
+            time.sleep(0.05)  # Windows 文件系统延迟
+            with open(AVATARS_META, 'r', encoding='utf-8') as f:
+                check = json.load(f)
+            if len(check) == len(data):
+                written = True
+                print(f"[save_meta] [OK] 成功（策略1，尝试{attempt+1}）: {len(data)} 条 -> {AVATARS_META}")
+                break
+            else:
+                print(f"[save_meta] [WARN] 验证不匹配（尝试{attempt+1}）: 期望{len(data)}，实际{len(check)}")
+        except Exception as e:
+            print(f"[save_meta] 策略1 尝试{attempt+1} 失败: {e}")
+            time.sleep(0.1)
+    
+    # 策略2: 写临时文件再替换
+    if not written:
+        try:
+            tmp = AVATARS_META + f".tmp.{int(time.time())}"
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            # 强制删除旧文件
+            for _ in range(3):
+                try:
+                    if os.path.exists(AVATARS_META):
+                        os.remove(AVATARS_META)
+                    break
+                except Exception:
+                    time.sleep(0.1)
+            os.rename(tmp, AVATARS_META)
+            written = True
+            print(f"[save_meta] [OK] 成功（策略2）")
+        except Exception as e:
+            print(f"[save_meta] [ERR] 策略2 失败: {e}")
+    
+    if not written:
+        print(f"[save_meta] [FAIL] 所有策略均失败！数据可能未保存！")
 
 
 def get_choices():
@@ -82,8 +134,14 @@ def del_avatar(name):
             new_meta.append(m)
     if deleted:
         save_meta(new_meta)
-        print(f"[删除] 已保存元数据，剩余 {len(new_meta)} 个数字人")
-        print(f"[删除] 元数据文件: {AVATARS_META}")
+        # 验证保存成功
+        verify = load_meta()
+        found = any(m.get("name") == name for m in verify)
+        if found:
+            print(f"[删除] [WARN] 验证失败：meta.json中仍存在「{name}」, 强制重写")
+            save_meta(new_meta)
+        else:
+            print(f"[删除] [OK] 验证通过，剩余 {len(verify)} 个数字人")
         return True, f"已删除「{name}」"
     return False, "未找到该数字人"
 

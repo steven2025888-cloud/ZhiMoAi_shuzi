@@ -146,17 +146,24 @@ def build_ass(words, font_name, font_size,
 
     # 背景色处理
     bg_op = max(0, min(100, int(bg_opacity or 0)))
-    bc = _hex2ass_alpha(bg_color or "#000000", bg_op)
+    has_bg = bg_op > 0
 
-    # BorderStyle: 1=outline+shadow, 3=opaque box, 4=outline+opaque box
-    # 有背景时用 BorderStyle=4（带描边的背景框），无背景时用 BorderStyle=1（仅描边）
-    if bg_op > 0:
-        border_style = 4
-        shadow_size = 3  # 背景框padding
-    else:
-        border_style = 1
-        shadow_size = 0
-        bc = "&H00000000&"  # 全透明
+    # 文字样式始终用 BorderStyle=1 (仅描边)
+    border_style = 1
+    shadow_size = 0
+
+    # 背景样式: 用大 bord 值创建胶囊/药丸形背景
+    # 原理: 文字颜色设为背景色，描边颜色也设为背景色，大描边值自动形成圆角
+    bg_style_line = ""
+    if has_bg:
+        bg_c = _hex2ass_alpha(bg_color or "#000000", bg_op)
+        bg_bord = max(8, int(fs * 0.35))  # 背景 padding 大小
+        bg_style_line = (
+            f"Style: SubBG,{fn},{fs},"
+            f"{bg_c},&H00000000&,{bg_c},&H00000000&,"
+            f"0,0,0,0,100,100,0,0,1,{bg_bord},0,"
+            f"{align},20,20,{marginv},1\n"
+        )
 
     header = (
         "[Script Info]\n"
@@ -168,9 +175,10 @@ def build_ass(words, font_name, font_size,
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{fn},{fs},"
-        f"{tc},&H000000FF&,{oc},{bc},"
+        f"{tc},&H000000FF&,{oc},&H00000000&,"
         f"0,0,0,0,100,100,0,0,{border_style},{osz},{shadow_size},"
-        f"{align},20,20,{marginv},1\n\n"
+        f"{align},20,20,{marginv},1\n"
+        f"{bg_style_line}\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -250,7 +258,18 @@ def build_ass(words, font_name, font_size,
         line_text = " ".join(parts)  # 词间用单空格分隔
         ts = _ass_time(t_start)
         te = _ass_time(max(float(t_end), float(t_start) + 0.05))
-        events += f"Dialogue: 0,{ts},{te},Default,,0,0,0,,{line_text}\n"
+
+        # 有背景时在 Layer 0 输出背景层（SubBG 样式的大 bord 自动形成圆角胶囊形）
+        if has_bg:
+            # 纯文本（去掉高亮标签），SubBG 样式会自动渲染为圆角背景
+            raw_text = "".join(
+                w["word"].strip().translate({ord(p): '' for p in sentence_ends})
+                for w in sentence
+            ).strip()
+            if raw_text:
+                events += f"Dialogue: 0,{ts},{te},SubBG,,0,0,0,,{raw_text}\n"
+
+        events += f"Dialogue: 1,{ts},{te},Default,,0,0,0,,{line_text}\n"
 
     return header + events
 

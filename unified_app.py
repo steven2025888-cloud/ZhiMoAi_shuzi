@@ -220,7 +220,7 @@ INIT_JS = r"""
     }
     setTimeout(_syncLog, 1800);
 
-    /* ── 6. 进度浮层（口型同步期间显示生成进度）── */
+    /* ── 6. 进度浮层（视频合成期间显示生成进度）── */
     document.body.insertAdjacentHTML('beforeend', `
       <div id="zdai-prog" style="
           display:none;position:fixed;
@@ -489,6 +489,45 @@ INIT_JS = r"""
             }, 100);
         }
     };
+
+    /* ── 11. 合成按钮互锁（任一合成按钮执行时禁止所有合成按钮）── */
+    (function() {
+        function checkBusy() {
+            /* Gradio 在运行时会给按钮添加 .loading 类，或在容器上添加 .pending */
+            var anyBusy = !!document.querySelector(
+                'button.primary.loading, button.primary[disabled], ' +
+                '.pending button.primary, .generating button.primary, ' +
+                '.progress-bar:not([style*="display: none"]):not([style*="display:none"])'
+            );
+            /* 找到所有主按钮 */
+            var allBtns = document.querySelectorAll('button.primary');
+            if (allBtns.length === 0) return;
+            
+            allBtns.forEach(function(b) {
+                var isSelf = b.classList.contains('loading') || b.disabled;
+                if (anyBusy && !isSelf) {
+                    if (!b.dataset.zdLock) {
+                        b.dataset.zdLock = '1';
+                        b.dataset.zdOrigOpacity = b.style.opacity || '';
+                        b.style.opacity = '0.45';
+                        b.style.pointerEvents = 'none';
+                        b.style.filter = 'grayscale(0.3)';
+                    }
+                } else if (b.dataset.zdLock) {
+                    b.style.opacity = b.dataset.zdOrigOpacity || '';
+                    b.style.pointerEvents = '';
+                    b.style.filter = '';
+                    delete b.dataset.zdLock;
+                    delete b.dataset.zdOrigOpacity;
+                }
+            });
+        }
+        setInterval(checkBusy, 500);
+        new MutationObserver(checkBusy).observe(document.documentElement, {
+            childList: true, subtree: true, attributes: true,
+            attributeFilter: ['class','disabled','style']
+        });
+    })();
 }
 """
 
@@ -513,23 +552,24 @@ body,.gradio-container{background:#f0f2f7!important;font-family:'Microsoft YaHei
 
 /* ── 顶栏 ── */
 .topbar{
-  background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e1b4b 100%);
-  border-bottom:1px solid rgba(255,255,255,.08);
-  padding:0 28px;height:60px;
+  background:#0f172a;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  padding:0 24px;height:48px;
   display:flex;align-items:center;justify-content:space-between;
-  box-shadow:0 2px 16px rgba(99,102,241,.25);
   position:sticky;top:0;z-index:100;
 }
-.topbar-brand{display:flex;align-items:center;gap:14px;}
+.topbar-brand{display:flex;align-items:center;gap:10px;}
 .topbar-logo{
-  width:38px;height:38px;border-radius:10px;
-  background:linear-gradient(135deg,#6366f1,#a78bfa);
+  width:30px;height:30px;border-radius:8px;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
   display:flex;align-items:center;justify-content:center;
-  font-size:18px;box-shadow:0 2px 8px rgba(99,102,241,.4);
-  border:1.5px solid rgba(255,255,255,.2);
+  font-size:14px;
+  box-shadow:0 0 12px rgba(99,102,241,.3);
 }
-.topbar-title{font-size:17px;font-weight:800;color:#fff;letter-spacing:.3px;}
-.topbar-sub{font-size:11px;color:rgba(255,255,255,.55);letter-spacing:.5px;margin-top:2px;}
+.topbar-name{
+  font-size:15px;font-weight:700;color:#f1f5f9;letter-spacing:.3px;
+}
+.topbar-sub{font-size:10px;color:rgba(148,163,184,.45);letter-spacing:.2px;margin-top:0px;}
 
 /* ── Tab 导航 ── */
 .tabs button[role=tab]{
@@ -693,27 +733,34 @@ input[type=color]:hover{
   padding:2px 8px;border-radius:20px;}
 
 /* ── 字幕位置选择器 ── */
-.sub-pos-radio{
-  min-width:0!important;
-}
+.sub-pos-radio{min-width:0!important;}
 .sub-pos-radio .wrap{
   display:flex!important;gap:4px!important;flex-direction:row!important;flex-wrap:nowrap!important;
   width:100%!important;
 }
 .sub-pos-radio label{
-  flex:1 1 0%!important;text-align:center!important;font-size:13px!important;font-weight:800!important;
-  padding:8px 0!important;border-radius:8px!important;
+  flex:1 1 0%!important;
+  padding:0!important;margin:0!important;border-radius:8px!important;
   border:2px solid #e2e8f0!important;
   cursor:pointer!important;transition:all .18s!important;
-  background:#f8fafc!important;min-width:36px!important;max-width:none!important;
-  overflow:hidden!important;white-space:nowrap!important;
-  line-height:1!important;height:36px!important;
-  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+  background:#f8fafc!important;
+  height:36px!important;min-width:0!important;max-width:none!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
   box-sizing:border-box!important;
+  overflow:hidden!important;white-space:nowrap!important;
 }
-.sub-pos-radio label *{
-  overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;
-  font-size:13px!important;
+/* 关键：让 Gradio 嵌套的所有 span 都居中 */
+.sub-pos-radio label>*:not(input),
+.sub-pos-radio label span,
+.sub-pos-radio label span span,
+.sub-pos-radio label [data-testid]{
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  width:100%!important;height:100%!important;
+  font-size:14px!important;font-weight:800!important;
+  text-align:center!important;
+  margin:0!important;padding:0!important;
+  pointer-events:none!important;
+  color:inherit!important;
 }
 .sub-pos-radio label:has(input:checked){
   border-color:#0ea5e9!important;background:linear-gradient(135deg,#e0f2fe,#bae6fd)!important;
@@ -868,18 +915,16 @@ input[type=color]:hover{
 
 /* ── 模型状态徽章 ── */
 .badge-ok {
-  background: linear-gradient(135deg,#dcfce7,#bbf7d0);
-  color: #166534; border: 1.5px solid #86efac;
-  border-radius: 20px; padding: 4px 14px;
-  font-size: 12px; font-weight: 700;
-  display: inline-flex; align-items: center; gap: 6px;
+  color: #4ade80;
+  border-radius: 20px; padding: 2px 8px;
+  font-size: 10px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 3px;
 }
 .badge-err {
-  background: linear-gradient(135deg,#fee2e2,#fecaca);
-  color: #991b1b; border: 1.5px solid #fca5a5;
-  border-radius: 20px; padding: 4px 14px;
-  font-size: 12px; font-weight: 700;
-  display: inline-flex; align-items: center; gap: 6px;
+  color: #f87171;
+  border-radius: 20px; padding: 2px 8px;
+  font-size: 10px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 3px;
 }
 
 /* ── Gradio flex 修复 ── */
@@ -1144,7 +1189,7 @@ def _make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog):
     )
 
 # ══════════════════════════════════════════════════════════════
-#  口型同步（带进度更新）
+#  视频合成（带进度更新）
 # ══════════════════════════════════════════════════════════════
 def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None, output_path_override=None):
     if not video_path:                 raise gr.Error("请上传人物视频")
@@ -1187,16 +1232,14 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
         raise gr.Error("启动生成引擎失败: " + str(e))
 
     last = 0.05
-    progress(0.08, desc="🔄 正在初始化推理管线...")
+    progress(0.08, desc="正在生成视频...")
 
     # 保存两层进度信息
     step_progress = None  # 步骤进度 (3/4)
     frame_progress = None  # 帧进度 (13/21)
     
-    # 模型加载阶段的进度模拟
-    loading_stage = 0
-    loading_keywords = ["Loading", "loading", "Initializing", "initializing", "model", "checkpoint"]
-    first_output = True
+    # 模型加载阶段 — 静默处理，只显示统一的"正在生成"
+    model_loaded = False
 
     while True:
         line = proc.stdout.readline()
@@ -1206,21 +1249,17 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
         if not line: continue
         safe_print("[LS] " + line)
         
-        # 检测模型加载阶段
-        if first_output or any(kw in line for kw in loading_keywords):
-            first_output = False
-            loading_stage += 1
-            if loading_stage <= 3:
-                progress(0.08 + loading_stage * 0.01, desc="⏳ 正在加载 UNet 模型...")
-            elif loading_stage <= 6:
-                progress(0.08 + loading_stage * 0.01, desc="⏳ 正在加载 VAE 解码器...")
-            elif loading_stage <= 10:
-                progress(0.08 + loading_stage * 0.01, desc="⏳ 正在初始化音频编码器...")
-            else:
-                progress(0.12, desc="✓ 模型加载完成，开始处理...")
+        # 模型加载阶段：不显示细节，统一显示"正在生成视频"
+        loading_keywords = ["Loading", "loading", "Initializing", "initializing", "model", "checkpoint"]
+        if not model_loaded and any(kw in line for kw in loading_keywords):
+            if last < 0.12:
+                last = min(last + 0.005, 0.12)
+                progress(last, desc="正在生成视频...")
+            continue
         
         parsed = parse_progress_line(line)
         if not parsed: continue
+        model_loaded = True  # 有实际进度了 = 模型已加载
         stage, pct, cur, total, progress_type = parsed
 
         # 根据类型保存进度
@@ -1231,43 +1270,41 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
 
         if stage == "预处理":
             prog = 0.08 + (pct / 100.0) * 0.04
-            desc = f"预处理 {pct}%  ({cur}/{total})"
+            desc = f"预处理 {pct}%"
         elif stage in ("推理", "生成"):
             if pct >= 100:
-                prog = 0.89; desc = "推理完成，正在合成视频..."
+                prog = 0.89; desc = "生成中..."
             else:
-                # 计算总体进度（使用帧进度优先）
                 if frame_progress:
                     prog = 0.12 + (frame_progress[0] / 100.0) * 0.76
                     f_pct, f_cur, f_total = frame_progress
-                    # 显示帧进度和步骤进度（用空格分隔，模拟两行效果）
                     if step_progress:
                         s_pct, s_cur, s_total = step_progress
-                        desc = f"帧 {f_pct}%({f_cur}/{f_total})  步骤 {s_pct}%({s_cur}/{s_total})  总 {prog*100:.1f}%"
+                        desc = f"生成中 {prog*100:.0f}%  帧{f_cur}/{f_total}  步骤{s_cur}/{s_total}"
                         if detail_cb:
                             detail_cb(_make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog))
                     else:
-                        desc = f"帧画面 {f_pct}%（{f_cur}/{f_total}）  总进度 {prog*100:.1f}%"
+                        desc = f"生成中 {prog*100:.0f}%（{f_cur}/{f_total}）"
                 else:
                     prog = 0.12 + (pct / 100.0) * 0.76
-                    desc = f"帧画面 {pct}%（{cur}/{total}）  总进度 {prog*100:.1f}%"
+                    desc = f"生成中 {prog*100:.0f}%（{cur}/{total}）"
         elif stage == "后处理":
             prog = 0.90 + (pct / 100.0) * 0.06
-            desc = f"后处理 {pct}%  ({cur}/{total})"
+            desc = f"收尾处理 {pct}%"
         else:
-            prog = last; desc = f"{stage} {pct}%  ({cur}/{total})"
+            prog = last; desc = f"{stage} {pct}%"
 
         prog = max(prog, last); last = prog
         progress(prog, desc=desc)
 
     if last < 0.93:
-        progress(0.94, desc="正在写入视频文件...")
+        progress(0.94, desc="写入文件...")
     if proc.wait() != 0:
         raise gr.Error("视频合成失败，请检查视频/音频格式是否正确")
     if not os.path.exists(out):
         raise gr.Error("输出视频文件未找到，请重试")
 
-    progress(1.0, desc="✅ 生成完成")
+    progress(1.0, desc="✅ 完成")
     for f in (sv, sa):
         try:
             if os.path.exists(f): os.remove(f)
@@ -1410,8 +1447,8 @@ def _render_batch_prog(done, total, cur_name, status, msg, out_folder=""):
 #  构建 UI
 # ══════════════════════════════════════════════════════════════
 def build_ui():
-    badge = ('<span class="badge-ok">● 引擎已就绪 · 可直接合成</span>' if tts
-             else '<span class="badge-err">● 模型加载失败，请重启</span>')
+    badge = ('<span class="badge-ok">● 就绪</span>' if tts
+             else '<span class="badge-err">● 未就绪</span>')
 
     # logo 路径：使用相对路径或base64编码
     logo_path = os.path.join(BASE_DIR, 'logo.jpg')
@@ -1437,38 +1474,30 @@ def build_ui():
         logo_img_html = ''
         if logo_url:
             logo_img_html = f'''<img src="file/{logo_url}"
-                 style="width:36px;height:36px;border-radius:10px;object-fit:cover;box-shadow:0 2px 8px rgba(0,0,0,.15);"
+                 style="width:30px;height:30px;border-radius:8px;object-fit:cover;"
                  onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">'''
 
         gr.HTML(f"""
         <div class="topbar">
           <div class="topbar-brand">
             {logo_img_html}
-            <div class="topbar-logo" style="display:{'none' if logo_url else 'flex'};">织</div>
-            <div>
-              <div class="topbar-name">{APP_NAME}</div>
-              <div class="topbar-sub">{APP_SUB}</div>
-            </div>
+            <div class="topbar-logo" style="display:{'none' if logo_url else 'flex'};">✦</div>
           </div>
-          <div style="display:flex;align-items:center;gap:12px;">
+          <div style="display:flex;align-items:center;gap:8px;">
             {badge}
-            <span style="font-size:11px;color:#cbd5e1;background:#1e293b;
-                padding:3px 10px;border-radius:20px;border:1px solid #334155;">
-              v2.0 专业版
-            </span>
             <button onclick="try{{window._zm.show()}}catch(e){{if(window.pywebview?.api?.close_window)window.pywebview.api.close_window();else window.close()}}"
-                style="background:rgba(239,68,68,.15);border:1.5px solid rgba(239,68,68,.3);
-                color:#fca5a5;width:32px;height:32px;border-radius:8px;cursor:pointer;
-                font-size:16px;display:flex;align-items:center;justify-content:center;
+                style="background:transparent;border:none;
+                color:rgba(148,163,184,.35);width:24px;height:24px;border-radius:6px;cursor:pointer;
+                font-size:14px;display:flex;align-items:center;justify-content:center;
                 transition:all .15s;font-family:inherit;padding:0;"
-                onmouseover="this.style.background='#dc2626';this.style.borderColor='#dc2626';this.style.color='#fff'"
-                onmouseout="this.style.background='rgba(239,68,68,.15)';this.style.borderColor='rgba(239,68,68,.3)';this.style.color='#fca5a5'"
+                onmouseover="this.style.background='rgba(239,68,68,.15)';this.style.color='#fca5a5'"
+                onmouseout="this.style.background='transparent';this.style.color='rgba(148,163,184,.35)'"
                 title="关闭程序">✕</button>
           </div>
         </div>
         """)
 
-        # ── 进度提示横幅（口型同步时显示）────────────────────
+        # ── 进度提示横幅（视频合成时显示）────────────────────
         progress_banner = gr.HTML(
             value='',
             elem_id="zdai-progress-banner",
@@ -2156,11 +2185,7 @@ def build_ui():
             if pa is None:
                 raise gr.Error("请先选择音色或上传参考音频")
             try:
-                progress(0.02, desc="🎤 准备合成...")
-                progress(0.05, desc="📝 分析文本内容...")
-                progress(0.10, desc="🎵 加载音色特征...")
-                progress(0.15, desc="⚙️ 初始化生成器...")
-                progress(0.20, desc="🔄 正在生成语音（这可能需要 10-30 秒）...")
+                progress(0.05, desc="正在合成语音...")
                 
                 r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt,
                                     emo_m, emo_a, emo_w, emo_t,
@@ -2168,8 +2193,7 @@ def build_ui():
                                     progress=progress)
                 out_path = r[0]
                 
-                progress(0.95, desc="✨ 优化音频质量...")
-                progress(1.0, desc="✅ 合成完成！")
+                progress(1.0, desc="✅ 完成")
                 
                 # Windows Toast
                 try:
@@ -2415,7 +2439,7 @@ def build_ui():
                     sub_kw_enable, sub_kw_text, sub_hi_scale],
             outputs=[sub_video, sub_hint, op_log_html])
 
-        # 口型同步
+        # 视频合成
         def ls_wrap(avatar_name, auto_a, progress=gr.Progress()):
             # 把数字人名转换成文件路径
             video = None
@@ -2439,22 +2463,8 @@ def build_ui():
 
             threading.Thread(target=_run, daemon=True).start()
 
-            # 显示加载状态 - 更详细的提示
-            loading_html = (
-                '<div style="background:linear-gradient(135deg,#1e293b,#0f172a);' +
-                'border:1.5px solid #6366f1;border-radius:12px;padding:16px 20px;' +
-                'font-family:Microsoft YaHei,sans-serif;">' +
-                '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">' +
-                '<div style="width:10px;height:10px;border-radius:50%;background:#6366f1;animation:pulse 1.5s infinite;"></div>' +
-                '<span style="color:#e2e8f0;font-weight:700;font-size:14px;">正在准备生成环境</span></div>' +
-                '<div style="font-size:12px;color:#94a3b8;line-height:1.8;">' +
-                '⏳ 正在初始化推理管线...<br>' +
-                '📦 加载 UNet、VAE、音频编码器等组件<br>' +
-                '💡 引擎已在启动时预热，加载速度更快</div>' +
-                '<style>@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}</style>' +
-                '</div>'
-            )
-            yield gr.update(), gr.update(), gr.update(value=loading_html, visible=True)
+            # 简洁的状态提示（不用大块HTML，直接进度条推进）
+            yield gr.update(), gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True)
 
             while True:
                 try:

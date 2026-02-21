@@ -20,11 +20,51 @@ def load_meta():
 
 
 def save_meta(data):
-    try:
-        with open(VOICES_META, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    """保存元数据到 meta.json — 三重保障写入"""
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    written = False
+    
+    for attempt in range(3):
+        try:
+            if os.path.exists(VOICES_META):
+                try:
+                    os.remove(VOICES_META)
+                except Exception:
+                    pass
+            with open(VOICES_META, 'w', encoding='utf-8') as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            time.sleep(0.05)
+            with open(VOICES_META, 'r', encoding='utf-8') as f:
+                check = json.load(f)
+            if len(check) == len(data):
+                written = True
+                print(f"[save_meta] [OK] 成功（尝试{attempt+1}）: {len(data)} 条 -> {VOICES_META}")
+                break
+        except Exception as e:
+            print(f"[save_meta] 尝试{attempt+1} 失败: {e}")
+            time.sleep(0.1)
+    
+    if not written:
+        try:
+            tmp = VOICES_META + f".tmp.{int(time.time())}"
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            for _ in range(3):
+                try:
+                    if os.path.exists(VOICES_META):
+                        os.remove(VOICES_META)
+                    break
+                except Exception:
+                    time.sleep(0.1)
+            os.rename(tmp, VOICES_META)
+            written = True
+            print(f"[save_meta] [OK] 成功（回退策略）")
+        except Exception as e:
+            print(f"[save_meta] [FAIL] 所有策略均失败: {e}")
 
 
 def get_choices():
@@ -82,8 +122,14 @@ def del_voice(name):
             new_meta.append(m)
     if deleted:
         save_meta(new_meta)
-        print(f"[删除] 已保存元数据，剩余 {len(new_meta)} 个音色")
-        print(f"[删除] 元数据文件: {VOICES_META}")
+        # 验证保存成功
+        verify = load_meta()
+        found = any(m.get("name") == name for m in verify)
+        if found:
+            print(f"[删除] [WARN] 验证失败：meta.json中仍存在「{name}」, 强制重写")
+            save_meta(new_meta)
+        else:
+            print(f"[删除] [OK] 验证通过，剩余 {len(verify)} 个音色")
         return True, f"已删除「{name}」"
     return False, "未找到该音色"
 
