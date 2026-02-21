@@ -1696,8 +1696,7 @@ def build_ui():
                         gr.HTML('<div class="section-label">🔊 音频（自动引用步骤1的结果，也可手动上传）</div>')
                         audio_for_ls = gr.Audio(
                             label="用于视频合成的音频",
-                            type="filepath", interactive=True,
-                            sources=["upload"])
+                            type="filepath", interactive=True)
 
                         ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
 
@@ -2313,11 +2312,13 @@ def build_ui():
                                 sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val):
             """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建"""
             try:
-                # 调试：打印接收到的值
-                print(f"[DEBUG] _auto_save_workspace 接收到的值:")
-                print(f"  output_audio_val type: {type(output_audio_val)}, value: {output_audio_val}")
-                print(f"  audio_for_ls_val type: {type(audio_for_ls_val)}, value: {audio_for_ls_val}")
-                print(f"  sub_text_val: {sub_text_val}")
+                # 强制输出到文件以便调试
+                debug_file = os.path.join(OUTPUT_DIR, "debug_save.txt")
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] _auto_save_workspace 被调用\n")
+                    f.write(f"  output_audio_val type: {type(output_audio_val)}, value: {output_audio_val}\n")
+                    f.write(f"  audio_for_ls_val type: {type(audio_for_ls_val)}, value: {audio_for_ls_val}\n")
+                    f.write(f"  sub_text_val: {sub_text_val}\n")
                 
                 # 辅助函数：从 Gradio Audio 组件值中提取文件路径
                 def extract_audio_path(val):
@@ -2336,7 +2337,8 @@ def build_ui():
                     # 如果是元组 (sample_rate, array)，说明音频被加载到内存了
                     # 这种情况我们无法获取原始文件路径，只能返回空
                     if isinstance(val, tuple):
-                        print(f"[WARNING] Audio 组件返回了元组格式，无法获取文件路径")
+                        with open(debug_file, "a", encoding="utf-8") as f:
+                            f.write(f"  [WARNING] Audio 组件返回了元组格式，无法获取文件路径\n")
                         return ""
                     return ""
                 
@@ -2365,9 +2367,10 @@ def build_ui():
                 output_audio_path = extract_audio_path(output_audio_val)
                 audio_for_ls_path = extract_audio_path(audio_for_ls_val)
                 
-                print(f"[DEBUG] 提取的路径:")
-                print(f"  output_audio_path: {output_audio_path}")
-                print(f"  audio_for_ls_path: {audio_for_ls_path}")
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"  提取的路径:\n")
+                    f.write(f"    output_audio_path: {output_audio_path}\n")
+                    f.write(f"    audio_for_ls_path: {audio_for_ls_path}\n")
                 
                 record = {
                     "time": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -2439,11 +2442,13 @@ def build_ui():
             
             rec = records[record_idx]
             
-            # 调试：打印记录内容
-            print(f"[DEBUG] _restore_workspace 恢复的记录:")
-            print(f"  output_audio: {rec.get('output_audio', '')}")
-            print(f"  audio_for_ls: {rec.get('audio_for_ls', '')}")
-            print(f"  sub_text: {rec.get('sub_text', '')}")
+            # 强制输出到文件以便调试
+            debug_file = os.path.join(OUTPUT_DIR, "debug_restore.txt")
+            with open(debug_file, "a", encoding="utf-8") as f:
+                f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] _restore_workspace 被调用\n")
+                f.write(f"  output_audio: {rec.get('output_audio', '')}\n")
+                f.write(f"  audio_for_ls: {rec.get('audio_for_ls', '')}\n")
+                f.write(f"  sub_text: {rec.get('sub_text', '')}\n")
             
             # 辅助函数：安全获取文件路径值
             def safe_file_value(path):
@@ -2455,7 +2460,8 @@ def build_ui():
                     return None
                 # 检查文件是否存在
                 exists = os.path.exists(path) and os.path.isfile(path)
-                print(f"[DEBUG] safe_file_value: {path} -> exists={exists}")
+                with open(debug_file, "a", encoding="utf-8") as f:
+                    f.write(f"  safe_file_value: {path} -> exists={exists}\n")
                 if exists:
                     return path
                 return None
@@ -2477,9 +2483,10 @@ def build_ui():
             output_audio_path = rec.get("output_audio", "")
             audio_for_ls_path = rec.get("audio_for_ls", "")
             
-            print(f"[DEBUG] 从记录读取的路径:")
-            print(f"  output_audio_path: {output_audio_path}")
-            print(f"  audio_for_ls_path: {audio_for_ls_path}")
+            with open(debug_file, "a", encoding="utf-8") as f:
+                f.write(f"  从记录读取的路径:\n")
+                f.write(f"    output_audio_path: {output_audio_path}\n")
+                f.write(f"    audio_for_ls_path: {audio_for_ls_path}\n")
             
             # 如果 output_audio 存在，优先使用它
             # 如果不存在但有路径记录，也显示路径（虽然文件可能已被删除）
@@ -2492,20 +2499,24 @@ def build_ui():
             if not audio_for_ls_value and audio_for_ls_path:
                 audio_for_ls_value = audio_for_ls_path
             
-            print(f"[DEBUG] 最终恢复的值:")
-            print(f"  output_audio_value: {output_audio_value}")
-            print(f"  audio_for_ls_value: {audio_for_ls_value}")
+            with open(debug_file, "a", encoding="utf-8") as f:
+                f.write(f"  最终恢复的值:\n")
+                f.write(f"    output_audio_value: {output_audio_value}\n")
+                f.write(f"    audio_for_ls_value: {audio_for_ls_value}\n")
+                f.write(f"    sub_text: {rec.get('sub_text', '')}\n")
             
             # 返回所有需要更新的组件值
-            return [
+            # 注意：对于 Audio 组件，如果直接返回路径字符串不起作用，
+            # 可以尝试返回字典格式 {"name": path, "data": None}
+            result = [
                 gr.update(value=rec.get("input_text", "")),           # input_text
                 gr.update(value=safe_file_value(rec.get("prompt_audio"))),  # prompt_audio
                 gr.update(value=safe_dropdown_value(rec.get("voice_select"), lambda: _vc.get_choices() if _LIBS_OK else [])),  # voice_select
                 gr.update(value=rec.get("audio_mode", "文字转语音")), # audio_mode
                 gr.update(value=safe_file_value(rec.get("direct_audio"))),  # direct_audio
                 gr.update(value=safe_dropdown_value(rec.get("avatar_select"), lambda: _av.get_choices() if _LIBS_OK else [])),  # avatar_select
-                gr.update(value=audio_for_ls_value),                   # audio_for_ls - 恢复路径
-                gr.update(value=output_audio_value),                   # output_audio - 恢复路径
+                gr.update(value=audio_for_ls_value) if audio_for_ls_value else gr.update(),  # audio_for_ls
+                gr.update(value=output_audio_value) if output_audio_value else gr.update(),  # output_audio
                 gr.update(value=safe_file_value(rec.get("output_video"))),  # output_video
                 gr.update(value=rec.get("sub_text", "")),             # sub_text - 直接恢复文本
                 gr.update(value=safe_file_value(rec.get("sub_video"))),     # sub_video
@@ -2525,6 +2536,11 @@ def build_ui():
                 gr.update(value=None),                                 # 清空下拉选择
                 _hint_html("ok", f"✅ 已恢复记录：{rec.get('record_name', rec.get('time', '未知'))}")
             ]
+            
+            with open(debug_file, "a", encoding="utf-8") as f:
+                f.write(f"  返回的 audio_for_ls 更新: {result[6]}\n")
+            
+            return result
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, spd, tp, tk, temp, nb, rp, mmt,
@@ -2626,6 +2642,13 @@ def build_ui():
             )
             
             # 返回所有需要更新的组件
+            debug_file = os.path.join(OUTPUT_DIR, "debug_tts.txt")
+            with open(debug_file, "a", encoding="utf-8") as f:
+                f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] tts_and_save 返回值:\n")
+                f.write(f"  audio_path (output_audio): {audio_path}\n")
+                f.write(f"  audio_for_ls_path: {audio_for_ls_path}\n")
+                f.write(f"  sub_text_val: {sub_text_val}\n")
+            
             return audio_path, log_msg, audio_for_ls_path, sub_text_val, hint_msg, dropdown_update
         
         gen_btn.click(
@@ -2684,7 +2707,10 @@ def build_ui():
 
         # 直接上传音频时自动填入 audio_for_ls
         def _on_direct_audio(audio_path):
-            return audio_path
+            # 只有当有实际音频路径时才返回，否则返回 gr.update() 不更新
+            if audio_path and isinstance(audio_path, str) and audio_path.strip():
+                return audio_path
+            return gr.update()  # 不更新
         direct_audio_upload.change(_on_direct_audio,
             inputs=[direct_audio_upload],
             outputs=[audio_for_ls])
