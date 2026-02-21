@@ -1053,9 +1053,25 @@ if __name__ == "__main__":
 
         threading.Thread(target=_set_icon_later, daemon=True).start()
 
-        # 拦截 X 按钮 - 改进：无论页面是否加载成功都能弹出确认对话框
+        # 拦截 X 按钮 - 改进：无论页面是否加载成功都能弹出确认对话框，并添加强制退出机制
         def on_closing():
+            def _force_exit():
+                """强制退出，无论任何状态"""
+                try:
+                    print("[EXIT] 强制退出程序...")
+                    cleanup()
+                except Exception:
+                    print("[EXIT] cleanup失败，直接终止")
+                    try:
+                        # 强制杀死所有相关进程
+                        if gradio_process and gradio_process.pid:
+                            kill_process_tree(gradio_process.pid)
+                    except Exception:
+                        pass
+                    os._exit(0)
+            
             def _show_confirm():
+                exit_timer = None
                 try:
                     # 先尝试通过 JS 显示自定义对话框
                     window.evaluate_js("window._zm && window._zm.show()")
@@ -1070,6 +1086,17 @@ if __name__ == "__main__":
                         root.withdraw()
                         root.attributes('-topmost', True)
                         
+                        # 设置10秒超时强制退出（防止对话框卡住）
+                        def timeout_exit():
+                            try:
+                                root.destroy()
+                            except Exception:
+                                pass
+                            print("[EXIT] 对话框超时，强制退出")
+                            _force_exit()
+                        
+                        exit_timer = root.after(10000, timeout_exit)
+                        
                         # 显示确认对话框
                         result = messagebox.askyesnocancel(
                             "关闭程序",
@@ -1079,6 +1106,10 @@ if __name__ == "__main__":
                             "「取消」- 返回",
                             icon='question'
                         )
+                        
+                        # 取消超时定时器
+                        if exit_timer:
+                            root.after_cancel(exit_timer)
                         
                         root.destroy()
                         
@@ -1091,13 +1122,13 @@ if __name__ == "__main__":
                             except Exception:
                                 pass
                         elif result is False:  # 否 - 退出
-                            cleanup()
+                            _force_exit()
                         # None - 取消，什么都不做
                         
                     except Exception as e:
                         print(f"[CLOSE] 对话框异常: {e}")
-                        # 最后的保底：直接退出
-                        cleanup()
+                        # 最后的保底：直接强制退出
+                        _force_exit()
             
             threading.Thread(target=_show_confirm, daemon=True).start()
             return False

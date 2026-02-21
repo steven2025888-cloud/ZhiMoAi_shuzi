@@ -38,6 +38,7 @@ INDEXTTS_DIR   = os.path.join(BASE_DIR, "IndexTTS2-SonicVale")
 LATENTSYNC_DIR = os.path.join(BASE_DIR, "LatentSync")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
 HISTORY_FILE   = os.path.join(OUTPUT_DIR, "history.json")
+WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 HF_CACHE_DIR = os.path.abspath(os.path.join(INDEXTTS_DIR, "checkpoints", "hf_cache"))
@@ -517,6 +518,25 @@ INIT_JS = r"""
             attributeFilter: ['class','disabled','style']
         });
     })();
+    
+    /* ── 12. 全局强制退出快捷键（Ctrl+Shift+Q）── */
+    document.addEventListener('keydown', function(e) {
+        // Ctrl+Shift+Q 强制退出
+        if (e.ctrlKey && e.shiftKey && e.key === 'Q') {
+            e.preventDefault();
+            if (confirm('确定要强制退出程序吗？\n\n这将立即关闭所有进程。')) {
+                try {
+                    if (window.pywebview?.api?.close_app) {
+                        window.pywebview.api.close_app();
+                    }
+                } catch(err) {
+                    console.error('[EXIT] 强制退出失败:', err);
+                }
+            }
+        }
+    });
+    
+    console.log('[织梦AI] 初始化完成 | Ctrl+Shift+Q 强制退出');
 }
 """
 
@@ -892,6 +912,107 @@ input[type=color]:hover{
   width:1px!important;height:1px!important;
   overflow:hidden!important;opacity:0!important;
   pointer-events:none!important;z-index:-1!important;
+}
+
+/* ── 隐藏HTML容器的padding ── */
+.html-container.svelte-phx28p.padding,
+[class*="html-container"][class*="padding"] {
+  padding: 0!important;
+}
+
+/* ── 工作台记录面板 ── */
+#workspace-record-panel {
+  background: linear-gradient(135deg, #fafbff 0%, #f8fafc 100%)!important;
+  border: 2px solid #e2e8f0!important;
+  margin-bottom: 18px!important;
+  box-shadow: 0 4px 20px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04)!important;
+  position: relative!important;
+  overflow: visible!important;
+  padding: 20px!important;
+}
+
+#workspace-record-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+  border-radius: 14px 14px 0 0;
+}
+
+/* 工作台记录下拉框样式 */
+#workspace-record-panel .gr-dropdown,
+#workspace-record-panel select,
+#workspace-record-panel .wrap {
+  border: 2px solid #e2e8f0!important;
+  border-radius: 12px!important;
+  background: #ffffff!important;
+  transition: all .25s cubic-bezier(.4,0,.2,1)!important;
+  font-size: 14px!important;
+  font-weight: 600!important;
+}
+
+#workspace-record-panel .gr-dropdown:hover,
+#workspace-record-panel .gr-dropdown:focus-within {
+  border-color: #6366f1!important;
+  box-shadow: 0 0 0 4px rgba(99,102,241,.08)!important;
+  transform: translateY(-1px)!important;
+}
+
+/* 工作台记录按钮样式 */
+#workspace-record-panel button {
+  font-weight: 700!important;
+  transition: all .2s cubic-bezier(.4,0,.2,1)!important;
+  border-radius: 10px!important;
+  font-size: 13px!important;
+  padding: 10px 16px!important;
+  height: auto!important;
+  min-height: 42px!important;
+}
+
+#workspace-record-panel button.primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6)!important;
+  box-shadow: 0 4px 12px rgba(99,102,241,.25)!important;
+  border: none!important;
+}
+
+#workspace-record-panel button.primary:hover {
+  transform: translateY(-2px)!important;
+  box-shadow: 0 6px 20px rgba(99,102,241,.35)!important;
+}
+
+#workspace-record-panel button.secondary {
+  background: #ffffff!important;
+  border: 2px solid #e2e8f0!important;
+  color: #64748b!important;
+  padding: 10px!important;
+  min-width: 42px!important;
+  width: 42px!important;
+}
+
+#workspace-record-panel button.secondary:hover {
+  background: #f8fafc!important;
+  border-color: #cbd5e1!important;
+  color: #475569!important;
+  transform: translateY(-1px)!important;
+}
+
+/* 工作台记录行间距 */
+#workspace-record-panel .gr-row {
+  gap: 10px!important;
+}
+
+/* 工作台记录提示信息样式 */
+#workspace-record-panel .hint-ok,
+#workspace-record-panel .hint-warn,
+#workspace-record-panel .hint-err {
+  margin-top: 14px!important;
+  border-radius: 10px!important;
+  font-weight: 600!important;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06)!important;
+  font-size: 13px!important;
 }
 
 /* ── 按钮状态颜色增强 ── */
@@ -1450,6 +1571,43 @@ def build_ui():
 
             # ── Tab 1：工作台 ────────────────────────────────
             with gr.Tab("🎬  工作台"):
+                # ══ 顶部工作台记录管理区 ══
+                with gr.Group(elem_classes="panel", elem_id="workspace-record-panel"):
+                    gr.HTML(
+                        '<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">'
+                        '<div style="width:42px;height:42px;border-radius:12px;flex-shrink:0;'
+                        'display:flex;align-items:center;justify-content:center;font-size:20px;'
+                        'background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#ec4899 100%);'
+                        'box-shadow:0 4px 16px rgba(99,102,241,.35);position:relative;">'
+                        '<span style="position:absolute;inset:0;border-radius:12px;'
+                        'background:linear-gradient(135deg,rgba(255,255,255,.2),transparent);"></span>'
+                        '💾</div>'
+                        '<div style="flex:1;">'
+                        '<div style="font-size:17px;font-weight:800;color:#0f172a;margin-bottom:3px;'
+                        'letter-spacing:-.3px;">智能工作台记录</div>'
+                        '<div style="font-size:12px;color:#64748b;font-weight:500;">每次合成自动保存，一键恢复工作状态</div>'
+                        '</div>'
+                        '<div style="display:flex;align-items:center;gap:6px;padding:6px 12px;'
+                        'border-radius:20px;background:linear-gradient(135deg,#f0f9ff,#e0f2fe);'
+                        'border:1.5px solid #bae6fd;flex-shrink:0;">'
+                        '<span style="width:6px;height:6px;border-radius:50%;background:#0ea5e9;'
+                        'animation:pulse 2s infinite;"></span>'
+                        '<span style="font-size:11px;font-weight:700;color:#0369a1;">实时保存</span>'
+                        '</div>'
+                        '</div>'
+                        '<style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}</style>'
+                    )
+                    with gr.Row():
+                        workspace_record_dropdown = gr.Dropdown(
+                            label="🔍 选择历史记录恢复",
+                            choices=[],
+                            value=None,
+                            interactive=True,
+                            scale=5)
+                        workspace_restore_btn = gr.Button("🔄 恢复", variant="primary", scale=1, size="sm")
+                        workspace_refresh_btn = gr.Button("⟳", variant="secondary", scale=0, size="sm", min_width=42)
+                    workspace_record_hint = gr.HTML(value="")
+                
                 with gr.Row(elem_classes="workspace"):
 
                     # ═══ 列 1：音频准备 ═══════════════════════════
@@ -1668,6 +1826,25 @@ def build_ui():
                             sub_hint = gr.HTML(value="")
                             sub_video = gr.Video(label="🎬 字幕版视频", height=280,
                                                  interactive=False, visible=False)
+                            
+                            # 抖音发布区域
+                            with gr.Group(visible=False) as douyin_group:
+                                gr.HTML('<div style="padding:12px 0;border-top:1px solid #e5e7eb;margin-top:12px;">'
+                                        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:8px;">📱 发布到抖音</div>'
+                                        '</div>')
+                                with gr.Row():
+                                    douyin_title = gr.Textbox(
+                                        label="视频标题",
+                                        placeholder="自动使用语音文字前30字，也可手动修改...",
+                                        max_lines=2,
+                                        scale=3)
+                                    douyin_topics = gr.Textbox(
+                                        label="话题标签（逗号分隔）",
+                                        placeholder="如：美食,探店,推荐",
+                                        max_lines=1,
+                                        scale=2)
+                                douyin_btn = gr.Button("🚀 发布到抖音", variant="primary", size="lg")
+                                douyin_hint = gr.HTML(value="")
 
             # ── Tab 2：合成历史 ──────────────────────────────
             with gr.Tab("📁  合成历史", elem_classes="hist-tab"):
@@ -2126,6 +2303,172 @@ def build_ui():
             return (f'<div style="font-size:12px;color:#475569;padding:8px 0">'
                     f'共 <b>{total}</b> 条，<span style="color:#16a34a">✅ {ok} 个有效</span></div>')
 
+        # ══════════════════════════════════════════════════════════════
+        #  工作台记录保存与恢复
+        # ══════════════════════════════════════════════════════════════
+        def _load_workspace_records():
+            """加载所有工作台记录"""
+            if not os.path.exists(WORKSPACE_RECORDS_FILE):
+                return []
+            try:
+                with open(WORKSPACE_RECORDS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                return []
+
+        def _save_workspace_record(record):
+            """保存一条工作台记录"""
+            try:
+                records = _load_workspace_records()
+                records.insert(0, record)
+                records = records[:100]  # 最多保留100条
+                with open(WORKSPACE_RECORDS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(records, f, ensure_ascii=False, indent=2)
+                return True
+            except Exception as e:
+                print(f"[ERROR] 保存工作台记录失败: {e}")
+                return False
+
+        def _get_workspace_record_choices():
+            """获取工作台记录下拉选项"""
+            records = _load_workspace_records()
+            if not records:
+                return []
+            choices = []
+            for i, rec in enumerate(records):
+                # 使用记录名称（前10个字或时间）
+                record_name = rec.get("record_name", "")
+                if not record_name:
+                    # 兼容旧记录：如果没有record_name，则生成一个
+                    text = rec.get("input_text", "")
+                    if text and text.strip():
+                        record_name = text[:10]
+                    else:
+                        record_name = rec.get("time", "未知时间")
+                
+                time_str = rec.get("time", "")
+                label = f"{record_name} ({time_str})"
+                choices.append((label, i))
+            return choices
+
+        def _auto_save_workspace(input_text, prompt_audio, voice_select_val, audio_mode_val,
+                                direct_audio, avatar_select_val, audio_for_ls_val,
+                                output_audio_val, output_video_val,
+                                sub_text_val, sub_video_val,
+                                # 字幕参数
+                                sub_font_val, sub_size_val, sub_pos_val,
+                                sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
+                                sub_bg_color_val, sub_bg_opacity_val,
+                                sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val):
+            """自动保存当前工作台状态"""
+            try:
+                # 生成记录名称：使用文本前10个字，如果没有则使用时间
+                text = (input_text or "").strip()
+                if text:
+                    record_name = text[:10]
+                else:
+                    record_name = time.strftime("%H:%M:%S")
+                
+                record = {
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "record_name": record_name,
+                    "input_text": input_text or "",
+                    "prompt_audio": prompt_audio or "",
+                    "voice_select": voice_select_val or "",
+                    "audio_mode": audio_mode_val or "文字转语音",
+                    "direct_audio": direct_audio or "",
+                    "avatar_select": avatar_select_val or "",
+                    "audio_for_ls": audio_for_ls_val or "",
+                    "output_audio": output_audio_val or "",
+                    "output_video": output_video_val or "",
+                    "sub_text": sub_text_val or "",
+                    "sub_video": sub_video_val or "",
+                    # 字幕参数
+                    "sub_font": sub_font_val or "",
+                    "sub_size": sub_size_val or 32,
+                    "sub_pos": sub_pos_val or "下",
+                    "sub_color": sub_color_val or "#FFFFFF",
+                    "sub_hi_color": sub_hi_val or "#FFD700",
+                    "sub_outline_color": sub_outline_val or "#000000",
+                    "sub_outline_size": sub_outline_size_val or 6,
+                    "sub_bg_color": sub_bg_color_val or "#000000",
+                    "sub_bg_opacity": sub_bg_opacity_val or 0,
+                    "sub_kw_enable": sub_kw_enable_val or False,
+                    "sub_hi_scale": sub_hi_scale_val or 1.5,
+                    "sub_kw_text": sub_kw_text_val or "",
+                }
+                _save_workspace_record(record)
+                return _hint_html("ok", f"✅ 已保存：{record_name}"), gr.update(choices=_get_workspace_record_choices())
+            except Exception as e:
+                return _hint_html("error", f"保存失败: {str(e)}"), gr.update()
+
+        def _restore_workspace(record_idx):
+            """恢复选中的工作台记录"""
+            if record_idx is None:
+                return [gr.update()] * 24 + [_hint_html("warning", "请先选择要恢复的记录")]
+            
+            records = _load_workspace_records()
+            if record_idx < 0 or record_idx >= len(records):
+                return [gr.update()] * 24 + [_hint_html("error", "记录不存在")]
+            
+            rec = records[record_idx]
+            
+            # 辅助函数：安全获取文件路径值
+            def safe_file_value(path):
+                """只有当路径存在且是文件时才返回，否则返回 None"""
+                if not path or not isinstance(path, str):
+                    return None
+                path = path.strip()
+                if not path:
+                    return None
+                # 检查文件是否存在
+                if os.path.exists(path) and os.path.isfile(path):
+                    return path
+                return None
+            
+            # 辅助函数：安全获取下拉框选择值
+            def safe_dropdown_value(value, choices_func):
+                """检查值是否在选项列表中，如果不在则返回 None"""
+                if not value:
+                    return None
+                try:
+                    choices = choices_func() if callable(choices_func) else []
+                    if value in choices:
+                        return value
+                except Exception:
+                    pass
+                return None
+            
+            # 返回所有需要更新的组件值
+            return [
+                gr.update(value=rec.get("input_text", "")),           # input_text
+                gr.update(value=safe_file_value(rec.get("prompt_audio"))),  # prompt_audio
+                gr.update(value=safe_dropdown_value(rec.get("voice_select"), lambda: _vc.get_choices() if _LIBS_OK else [])),  # voice_select
+                gr.update(value=rec.get("audio_mode", "文字转语音")), # audio_mode
+                gr.update(value=safe_file_value(rec.get("direct_audio"))),  # direct_audio
+                gr.update(value=safe_dropdown_value(rec.get("avatar_select"), lambda: _av.get_choices() if _LIBS_OK else [])),  # avatar_select
+                gr.update(value=safe_file_value(rec.get("audio_for_ls"))),  # audio_for_ls
+                gr.update(value=safe_file_value(rec.get("output_audio"))),  # output_audio
+                gr.update(value=safe_file_value(rec.get("output_video"))),  # output_video
+                gr.update(value=rec.get("sub_text", "")),             # sub_text
+                gr.update(value=safe_file_value(rec.get("sub_video"))),     # sub_video
+                # 字幕参数
+                gr.update(value=rec.get("sub_font", "")),             # sub_font
+                gr.update(value=rec.get("sub_size", 32)),             # sub_size
+                gr.update(value=rec.get("sub_pos", "下")),            # sub_pos
+                gr.update(value=rec.get("sub_color", "#FFFFFF")),     # sub_color_txt
+                gr.update(value=rec.get("sub_hi_color", "#FFD700")),  # sub_hi_txt
+                gr.update(value=rec.get("sub_outline_color", "#000000")), # sub_outline_txt
+                gr.update(value=rec.get("sub_outline_size", 6)),      # sub_outline_size
+                gr.update(value=rec.get("sub_bg_color", "#000000")),  # sub_bg_color
+                gr.update(value=rec.get("sub_bg_opacity", 0)),        # sub_bg_opacity
+                gr.update(value=rec.get("sub_kw_enable", False)),     # sub_kw_enable
+                gr.update(value=rec.get("sub_hi_scale", 1.5)),        # sub_hi_scale
+                gr.update(value=rec.get("sub_kw_text", "")),          # sub_kw_text
+                gr.update(value=None),                                 # 清空下拉选择
+                _hint_html("ok", f"✅ 已恢复记录：{rec.get('record_name', rec.get('time', '未知'))}")
+            ]
+
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, spd, tp, tk, temp, nb, rp, mmt,
                      emo_m, emo_a, emo_w, emo_t,
@@ -2196,6 +2539,20 @@ def build_ui():
                     emo_mode, emo_audio, emo_weight, emo_text,
                     vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8],
             outputs=[output_audio, op_log_html, audio_for_ls])
+
+        # TTS 完成后自动保存工作台状态
+        gen_btn.click(
+            _auto_save_workspace,
+            inputs=[
+                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                avatar_select, audio_for_ls, output_audio, output_video,
+                sub_text, sub_video,
+                sub_font, sub_size, sub_pos,
+                sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                sub_bg_color, sub_bg_opacity,
+                sub_kw_enable, sub_hi_scale, sub_kw_text
+            ],
+            outputs=[workspace_record_hint, workspace_record_dropdown])
 
         # TTS 完成后把合成文本同步到字幕文本框（Whisper fallback）
         def _sync_tts_text(txt): return txt
@@ -2423,12 +2780,16 @@ def build_ui():
                 )
                 return (gr.update(value=out, visible=True, show_download_button=True),
                         _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)),
-                        _make_log(True, "字幕完成 — " + os.path.basename(out)))
+                        _make_log(True, "字幕完成 — " + os.path.basename(out)),
+                        gr.update(visible=True),  # 显示抖音发布区域
+                        text[:30] if text else "")  # 自动填充标题
             except Exception as e:
                 traceback.print_exc()
                 return (gr.update(visible=False),
                         _hint_html("error", f"字幕生成失败: {str(e)[:300]}"),
-                        _make_log(False, f"字幕失败: {e}"))
+                        _make_log(False, f"字幕失败: {e}"),
+                        gr.update(visible=False),  # 隐藏抖音发布区域
+                        "")
 
         sub_btn.click(_do_subtitle,
             inputs=[output_video, audio_for_ls,
@@ -2436,7 +2797,108 @@ def build_ui():
                     sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_kw_text, sub_hi_scale],
-            outputs=[sub_video, sub_hint, op_log_html])
+            outputs=[sub_video, sub_hint, op_log_html, douyin_group, douyin_title])
+        
+        # 字幕生成完成后自动保存工作台状态
+        sub_btn.click(
+            _auto_save_workspace,
+            inputs=[
+                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                avatar_select, audio_for_ls, output_audio, output_video,
+                sub_text, sub_video,
+                sub_font, sub_size, sub_pos,
+                sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                sub_bg_color, sub_bg_opacity,
+                sub_kw_enable, sub_hi_scale, sub_kw_text
+            ],
+            outputs=[workspace_record_hint, workspace_record_dropdown])
+        
+        # 抖音发布
+        def _do_douyin_publish(video, title_text, topics_text, progress=gr.Progress()):
+            """发布视频到抖音"""
+            try:
+                # 检查依赖是否安装
+                missing_deps = []
+                try:
+                    import selenium
+                except ImportError:
+                    missing_deps.append("selenium")
+                
+                try:
+                    import requests
+                except ImportError:
+                    missing_deps.append("requests")
+                
+                if missing_deps:
+                    deps_str = "、".join(missing_deps)
+                    return (_hint_html("error", 
+                            f"❌ 缺少依赖：{deps_str}<br><br>"
+                            "请运行以下命令安装：<br>"
+                            "1. 双击运行「安装抖音发布依赖.bat」<br>"
+                            "或<br>"
+                            f"2. 手动运行：pip install {' '.join(missing_deps)}"),
+                            _make_log(False, f"缺少依赖: {deps_str}"))
+                
+                # 导入抖音发布模块
+                import lib_douyin_publish as douyin_pub
+                
+                # 解析视频路径
+                if isinstance(video, dict):
+                    video_path = (video.get("video") or {}).get("path") or video.get("path") or ""
+                else:
+                    video_path = str(video) if video else ""
+                
+                if not video_path or not os.path.exists(video_path):
+                    return (_hint_html("warning", "请先生成字幕视频"),
+                            _make_log(False, "无视频文件"))
+                
+                # 解析话题
+                topics = []
+                if topics_text:
+                    topics = [t.strip() for t in re.split(r'[,，、\s]+', topics_text.strip()) if t.strip()]
+                
+                # 创建发布器
+                publisher = douyin_pub.DouyinPublisher()
+                
+                # 进度回调
+                def progress_cb(pct, msg):
+                    progress(pct / 100, desc=msg)
+                
+                # 发布
+                success, message = publisher.publish(
+                    video_path,
+                    title_text or "精彩视频",
+                    topics,
+                    progress_callback=progress_cb
+                )
+                
+                if success:
+                    return (_hint_html("ok", f"✅ {message}"),
+                            _make_log(True, f"抖音发布成功 — {os.path.basename(video_path)}"))
+                else:
+                    return (_hint_html("error", f"❌ {message}"),
+                            _make_log(False, f"抖音发布失败: {message}"))
+                    
+            except Exception as e:
+                traceback.print_exc()
+                error_msg = str(e)
+                
+                # 友好的错误提示
+                if "chromedriver" in error_msg.lower() or "chrome" in error_msg.lower():
+                    return (_hint_html("error", 
+                            "❌ Chrome 浏览器驱动问题<br><br>"
+                            "请尝试：<br>"
+                            "1. 双击运行「安装抖音发布依赖.bat」<br>"
+                            "2. 确保已安装 Chrome 浏览器<br>"
+                            "3. 重启程序"),
+                            _make_log(False, f"ChromeDriver 错误: {error_msg}"))
+                else:
+                    return (_hint_html("error", f"❌ 发布失败: {error_msg[:300]}"),
+                            _make_log(False, f"抖音发布失败: {e}"))
+        
+        douyin_btn.click(_do_douyin_publish,
+            inputs=[sub_video, douyin_title, douyin_topics],
+            outputs=[douyin_hint, op_log_html])
 
         # 视频合成
         def ls_wrap(avatar_name, auto_a, progress=gr.Progress()):
@@ -2501,16 +2963,25 @@ def build_ui():
         ls_btn.click(ls_wrap,
             inputs=[avatar_select, audio_for_ls],
             outputs=[output_video, op_log_html, ls_detail_html])
+        
+        # 视频合成完成后自动保存工作台状态
+        ls_btn.click(
+            _auto_save_workspace,
+            inputs=[
+                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                avatar_select, audio_for_ls, output_audio, output_video,
+                sub_text, sub_video,
+                sub_font, sub_size, sub_pos,
+                sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                sub_bg_color, sub_bg_opacity,
+                sub_kw_enable, sub_hi_scale, sub_kw_text
+            ],
+            outputs=[workspace_record_hint, workspace_record_dropdown])
 
         # 历史操作
         def _do_refresh():
             return gr.update(choices=_hist_choices(), value=None), _hist_info_html(), _make_log(True, "历史记录已刷新")
         refresh_hist_btn.click(_do_refresh, outputs=[hist_dropdown, hist_info, op_log_html])
-
-        # 初始化时自动刷新历史列表
-        def _auto_refresh():
-            return gr.update(choices=_hist_choices(), value=None), _hist_info_html()
-        app.load(_auto_refresh, outputs=[hist_dropdown, hist_info])
 
         open_folder_btn.click(
             lambda: (
@@ -2611,6 +3082,40 @@ def build_ui():
             info = f'<div style="font-size:12px;color:#16a34a;padding:4px 0">✅ {os.path.basename(p)} ({sz} MB)</div>'
             return gr.update(value=p, show_download_button=True), info
         hist_dropdown.change(_load_hist, inputs=[hist_dropdown], outputs=[hist_video, hist_info])
+
+        # ══════════════════════════════════════════════════════════════
+        #  工作台记录事件绑定
+        # ══════════════════════════════════════════════════════════════
+        
+        # 刷新工作台记录列表
+        workspace_refresh_btn.click(
+            lambda: gr.update(choices=_get_workspace_record_choices(), value=None),
+            outputs=[workspace_record_dropdown])
+        
+        # 恢复工作台记录
+        workspace_restore_btn.click(
+            _restore_workspace,
+            inputs=[workspace_record_dropdown],
+            outputs=[
+                input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                avatar_select, audio_for_ls, output_audio, output_video,
+                sub_text, sub_video,
+                sub_font, sub_size, sub_pos,
+                sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                sub_bg_color, sub_bg_opacity,
+                sub_kw_enable, sub_hi_scale, sub_kw_text,
+                workspace_record_dropdown, workspace_record_hint
+            ])
+        
+        # 页面加载时自动刷新工作台记录列表和历史记录
+        def _init_load():
+            return (
+                gr.update(choices=_get_workspace_record_choices()),
+                gr.update(choices=_hist_choices(), value=None),
+                _hist_info_html()
+            )
+        
+        app.load(_init_load, outputs=[workspace_record_dropdown, hist_dropdown, hist_info])
 
         return app
 
