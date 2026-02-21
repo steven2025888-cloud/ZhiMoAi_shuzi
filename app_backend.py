@@ -618,7 +618,7 @@ if __name__ == "__main__":
                 pass
 
             # 居中
-            w, h = 520, 620  # 增加窗口高度
+            w, h = 560, 750  # 再次增加窗口高度
             sx = (root.winfo_screenwidth() - w) // 2
             sy = (root.winfo_screenheight() - h) // 2
             root.geometry(f"{w}x{h}+{sx}+{sy}")
@@ -627,34 +627,53 @@ if __name__ == "__main__":
             canvas = tk.Canvas(root, width=w, height=h, highlightthickness=0)
             canvas.pack(fill="both", expand=True)
             
-            # 绘制渐变背景（从深蓝到紫色）
+            # 绘制精致的渐变背景（从深蓝紫到浅紫）
             for i in range(h):
                 ratio = i / h
-                r = int(15 + (99 - 15) * ratio)
-                g = int(23 + (102 - 23) * ratio)
-                b = int(42 + (241 - 42) * ratio)
+                # 从 #1e1b4b 到 #6366f1 的渐变
+                r = int(30 + (99 - 30) * ratio)
+                g = int(27 + (102 - 27) * ratio)
+                b = int(75 + (241 - 75) * ratio)
                 color = f'#{r:02x}{g:02x}{b:02x}'
                 canvas.create_line(0, i, w, i, fill=color)
             
-            # 顶部装饰圆点
-            for i in range(8):
-                x = 60 + i * 60
-                y = 40 + (i % 2) * 10
-                canvas.create_oval(x-3, y-3, x+3, y+3, 
-                                   fill="#ffffff", outline="", 
-                                   stipple="gray50")
+            # 添加装饰性几何图案
+            # 左上角圆形
+            canvas.create_oval(-80, -80, 120, 120, fill="", outline="#8b5cf6", width=2, dash=(10, 5))
+            canvas.create_oval(-60, -60, 100, 100, fill="", outline="#a78bfa", width=1, dash=(5, 3))
+            
+            # 右下角圆形
+            canvas.create_oval(w-120, h-120, w+80, h+80, fill="", outline="#8b5cf6", width=2, dash=(10, 5))
+            canvas.create_oval(w-100, h-100, w+60, h+60, fill="", outline="#a78bfa", width=1, dash=(5, 3))
+            
+            # 顶部装饰线条
+            for i in range(5):
+                x1 = 80 + i * 100
+                y1 = 50 + (i % 2) * 15
+                x2 = x1 + 60
+                y2 = y1
+                canvas.create_line(x1, y1, x2, y2, fill="#c4b5fd", width=2, capstyle="round")
 
-            # Logo 区域
-            logo_y = 80
+            # Logo 区域（带光晕效果）
+            logo_y = 110
+            
+            # 外层光晕
+            for r in range(70, 50, -5):
+                alpha = int(255 * (70 - r) / 20)
+                canvas.create_oval(w//2-r, logo_y-r, w//2+r, logo_y+r,
+                                   fill="", outline="#c4b5fd", width=1, stipple="gray12")
+            
             try:
                 logo_path = os.path.join(BASE_DIR, "logo.jpg")
                 if os.path.exists(logo_path):
-                    from PIL import Image, ImageTk, ImageDraw
+                    from PIL import Image, ImageTk, ImageDraw, ImageFilter
                     img = Image.open(logo_path).convert("RGBA")
                     
                     # 创建圆形遮罩
-                    size = (100, 100)
+                    size = (110, 110)
                     img = img.resize(size, Image.Resampling.LANCZOS)
+                    
+                    # 创建遮罩
                     mask = Image.new('L', size, 0)
                     draw = ImageDraw.Draw(mask)
                     draw.ellipse((0, 0) + size, fill=255)
@@ -666,112 +685,215 @@ if __name__ == "__main__":
                     
                     photo = ImageTk.PhotoImage(output)
                     canvas.create_image(w//2, logo_y, image=photo)
-                    canvas.image = photo  # 保持引用
+                    canvas.image = photo
                     
-                    # Logo 外圈光晕
-                    canvas.create_oval(w//2-55, logo_y-55, w//2+55, logo_y+55,
-                                       outline="#ffffff", width=2, stipple="gray25")
+                    # Logo 边框
+                    canvas.create_oval(w//2-58, logo_y-58, w//2+58, logo_y+58,
+                                       outline="#ffffff", width=3)
+                    canvas.create_oval(w//2-62, logo_y-62, w//2+62, logo_y+62,
+                                       outline="#c4b5fd", width=1)
                 else:
                     raise Exception("Logo not found")
             except Exception:
-                # 使用渐变圆形作为 Logo
+                # 使用精美的渐变圆形作为 Logo
+                canvas.create_oval(w//2-55, logo_y-55, w//2+55, logo_y+55,
+                                   fill="#6366f1", outline="")
                 canvas.create_oval(w//2-50, logo_y-50, w//2+50, logo_y+50,
-                                   fill="#6366f1", outline="#8b5cf6", width=3)
-                canvas.create_text(w//2, logo_y, text="🌟", 
-                                   font=("Segoe UI Emoji", 40), fill="#ffffff")
+                                   fill="#7c3aed", outline="")
+                canvas.create_text(w//2, logo_y, text="✨", 
+                                   font=("Segoe UI Emoji", 48), fill="#ffffff")
+                # Logo 边框
+                canvas.create_oval(w//2-58, logo_y-58, w//2+58, logo_y+58,
+                                   outline="#ffffff", width=3)
 
-            # 标题
-            canvas.create_text(w//2, 200, text="织梦AI大模型", 
-                               font=("Microsoft YaHei", 26, "bold"),
+            # 标题区域
+            canvas.create_text(w//2, 210, text="织梦AI大模型", 
+                               font=("Microsoft YaHei", 28, "bold"),
                                fill="#ffffff")
-            canvas.create_text(w//2, 235, 
+            
+            # 副标题背景
+            canvas.create_rectangle(w//2-160, 245, w//2+160, 270,
+                                    fill="#5b21b6", outline="", stipple="gray25")
+            canvas.create_text(w//2, 257, 
                                text="AI语音克隆 · 智能视频合成 · 专业级解决方案", 
                                font=("Microsoft YaHei", 10),
-                               fill="#e0e7ff")
+                               fill="#e9d5ff")
 
-            # 卡密输入区域（白色卡片）
-            card_y = 280
-            card_h = 260  # 增加高度以容纳所有内容
-            # 卡片阴影
+            # 卡密输入区域（玻璃态卡片）
+            card_y = 300
+            card_h = 360  # 再次增加高度
+            
+            # 卡片多层阴影效果
+            canvas.create_rectangle(44, card_y+6, w-44, card_y+card_h+6,
+                                    fill="#1e1b4b", outline="", stipple="gray25")
             canvas.create_rectangle(42, card_y+4, w-42, card_y+card_h+4,
-                                    fill="#1e293b", outline="")
-            # 卡片主体
+                                    fill="#312e81", outline="")
+            
+            # 卡片主体（白色带透明感）
             canvas.create_rectangle(40, card_y, w-40, card_y+card_h,
-                                    fill="#ffffff", outline="", width=0)
+                                    fill="#ffffff", outline="")
+            
+            # 卡片顶部装饰条
+            canvas.create_rectangle(40, card_y, w-40, card_y+4,
+                                    fill="#6366f1", outline="")
             
             # 卡片内容容器
             card_frame = tk.Frame(root, bg="#ffffff")
-            card_frame.place(x=60, y=card_y+20, width=w-120, height=card_h-40)
+            card_frame.place(x=70, y=card_y+25, width=w-140, height=card_h-50)
 
-            # 卡密标签
-            tk.Label(card_frame, text="🔐  卡密激活", 
-                     font=("Microsoft YaHei", 11, "bold"),
-                     bg="#ffffff", fg="#1e293b", anchor="w").pack(fill="x", pady=(0, 12))
+            # 卡密标签（带图标）
+            label_frame = tk.Frame(card_frame, bg="#ffffff")
+            label_frame.pack(fill="x", pady=(0, 16))
             
-            # 卡密输入框
-            entry_frame = tk.Frame(card_frame, bg="#f1f5f9", 
-                                   highlightbackground="#e2e8f0", 
-                                   highlightthickness=1)
-            entry_frame.pack(fill="x", pady=(0, 8))
+            tk.Label(label_frame, text="🔐", 
+                     font=("Segoe UI Emoji", 16),
+                     bg="#ffffff", fg="#6366f1").pack(side="left", padx=(0, 8))
+            tk.Label(label_frame, text="卡密激活", 
+                     font=("Microsoft YaHei", 13, "bold"),
+                     bg="#ffffff", fg="#1e293b").pack(side="left")
+            
+            # 装饰线
+            canvas.create_line(70, card_y+60, w-70, card_y+60,
+                               fill="#e5e7eb", width=1)
+            
+            # 卡密输入框（现代风格）
+            entry_container = tk.Frame(card_frame, bg="#ffffff")
+            entry_container.pack(fill="x", pady=(0, 12))
+            
+            tk.Label(entry_container, text="请输入您的卡密", 
+                     font=("Microsoft YaHei", 9),
+                     bg="#ffffff", fg="#64748b").pack(anchor="w", pady=(0, 6))
+            
+            entry_frame = tk.Frame(entry_container, bg="#f8fafc", 
+                                   highlightbackground="#cbd5e1", 
+                                   highlightthickness=2)
+            entry_frame.pack(fill="x")
             
             key_entry = tk.Entry(entry_frame, 
-                                 font=("Consolas", 11), 
+                                 font=("Consolas", 12), 
                                  relief="flat",
-                                 bg="#f1f5f9", 
+                                 bg="#f8fafc", 
                                  fg="#1e293b",
                                  insertbackground="#6366f1",
                                  bd=0)
-            key_entry.pack(fill="x", padx=14, pady=11)
+            key_entry.pack(fill="x", padx=16, pady=12)
+            
+            # 输入框获得焦点时的效果
+            def on_focus_in(e):
+                entry_frame.config(highlightbackground="#6366f1", highlightthickness=2)
+            def on_focus_out(e):
+                entry_frame.config(highlightbackground="#cbd5e1", highlightthickness=2)
+            key_entry.bind("<FocusIn>", on_focus_in)
+            key_entry.bind("<FocusOut>", on_focus_out)
             
             # 如果有保存的卡密，预填
             if status == "valid" and info.get("license_key"):
                 key_entry.insert(0, info["license_key"])
             
-            # 状态提示
-            status_frame = tk.Frame(card_frame, bg="#ffffff")
-            status_frame.pack(fill="x", pady=(0, 12))
+            # 状态提示（精美卡片）
+            status_container = tk.Frame(card_frame, bg="#ffffff")
+            status_container.pack(fill="x", pady=(0, 12))
             
             if status == "valid":
                 expire_time = info.get("expire_time", "")
+                status_bg = "#ecfdf5"
+                status_border = "#6ee7b7"
                 status_icon = "✓"
-                status_color = "#22c55e"
+                status_icon_color = "#10b981"
                 if expire_time:
                     status_text = f"已保存的卡密 · 有效期至 {expire_time}"
                 else:
                     status_text = "已保存的卡密 · 永久有效"
+                status_text_color = "#065f46"
             elif status == "expired":
+                status_bg = "#fef3c7"
+                status_border = "#fcd34d"
                 status_icon = "⚠"
-                status_color = "#f59e0b"
+                status_icon_color = "#f59e0b"
                 status_text = "卡密已过期，请重新输入"
+                status_text_color = "#92400e"
             else:
+                status_bg = "#eff6ff"
+                status_border = "#93c5fd"
                 status_icon = "ℹ"
-                status_color = "#6366f1"
+                status_icon_color = "#3b82f6"
                 status_text = "首次使用请输入卡密激活"
+                status_text_color = "#1e40af"
             
-            tk.Label(status_frame, text=status_icon, 
-                     font=("Segoe UI Emoji", 10),
-                     bg="#ffffff", fg=status_color).pack(side="left")
-            tk.Label(status_frame, text=status_text, 
+            status_frame = tk.Frame(status_container, bg=status_bg,
+                                    highlightbackground=status_border,
+                                    highlightthickness=1)
+            status_frame.pack(fill="x", padx=2, pady=2)
+            
+            status_inner = tk.Frame(status_frame, bg=status_bg)
+            status_inner.pack(fill="x", padx=12, pady=8)
+            
+            tk.Label(status_inner, text=status_icon, 
+                     font=("Segoe UI Emoji", 12),
+                     bg=status_bg, fg=status_icon_color).pack(side="left", padx=(0, 8))
+            tk.Label(status_inner, text=status_text, 
                      font=("Microsoft YaHei", 9),
-                     bg="#ffffff", fg="#64748b").pack(side="left", padx=(4, 0))
+                     bg=status_bg, fg=status_text_color).pack(side="left")
 
-            # 消息提示
+            # 消息提示区域
             msg_label = tk.Label(card_frame, text="", 
                                  font=("Microsoft YaHei", 9),
                                  bg="#ffffff", fg="#ef4444",
-                                 wraplength=360, justify="center",
+                                 wraplength=380, justify="center",
                                  height=2)
             msg_label.pack(fill="x", pady=(0, 16))
 
-            # 登录按钮
+            # 登录按钮（使用 Canvas 绘制圆角按钮）
+            btn_height = 52
+            btn_canvas = tk.Canvas(card_frame, height=btn_height, bg="#ffffff", 
+                                   highlightthickness=0)
+            btn_canvas.pack(fill="x")
+            
+            # 按钮状态
+            btn_state = {"enabled": True, "bg": "#6366f1"}
+            
+            def draw_button(bg_color, text, text_color="#ffffff"):
+                """绘制圆角按钮"""
+                btn_canvas.delete("all")
+                w = btn_canvas.winfo_width() if btn_canvas.winfo_width() > 1 else 400
+                h = btn_height
+                radius = 12  # 圆角半径
+                
+                # 绘制圆角矩形（使用多个图形组合）
+                # 主体矩形
+                btn_canvas.create_rectangle(radius, 0, w-radius, h, 
+                                            fill=bg_color, outline="")
+                btn_canvas.create_rectangle(0, radius, w, h-radius, 
+                                            fill=bg_color, outline="")
+                
+                # 四个圆角
+                btn_canvas.create_oval(0, 0, radius*2, radius*2, 
+                                       fill=bg_color, outline="")
+                btn_canvas.create_oval(w-radius*2, 0, w, radius*2, 
+                                       fill=bg_color, outline="")
+                btn_canvas.create_oval(0, h-radius*2, radius*2, h, 
+                                       fill=bg_color, outline="")
+                btn_canvas.create_oval(w-radius*2, h-radius*2, w, h, 
+                                       fill=bg_color, outline="")
+                
+                # 按钮文字
+                btn_canvas.create_text(w//2, h//2, text=text, 
+                                       font=("Microsoft YaHei", 14, "bold"),
+                                       fill=text_color, tags="btn_text")
+            
             def _do_login():
+                if not btn_state["enabled"]:
+                    return
+                    
                 key = key_entry.get().strip()
                 if not key:
                     msg_label.config(text="⚠ 请输入卡密", fg="#f59e0b")
                     return
                 
                 # 禁用按钮和输入框
-                login_btn.config(state="disabled", text="⏳ 验证中...", bg="#94a3b8")
+                btn_state["enabled"] = False
+                btn_state["bg"] = "#94a3b8"
+                draw_button("#94a3b8", "⏳ 验证中...")
                 key_entry.config(state="disabled")
                 msg_label.config(text="🔄 正在验证卡密，请稍候...", fg="#6366f1")
                 root.update()
@@ -780,47 +902,52 @@ if __name__ == "__main__":
                 ok, msg = lic.validate_online(key)
                 if ok:
                     msg_label.config(text="✓ 激活成功！正在启动程序...", fg="#22c55e")
-                    login_btn.config(text="✓ 启动中...", bg="#22c55e")
+                    draw_button("#10b981", "✓ 启动中...")
                     result["passed"] = True
                     root.after(1200, root.destroy)
                 else:
                     msg_label.config(text=f"✗ {msg}", fg="#ef4444")
-                    login_btn.config(state="normal", text="🚀 登录启动", bg="#6366f1")
+                    btn_state["enabled"] = True
+                    btn_state["bg"] = "#6366f1"
+                    draw_button("#6366f1", "🚀 登录启动")
                     key_entry.config(state="normal")
-
-            login_btn = tk.Button(card_frame, 
-                                  text="🚀 登录启动", 
-                                  font=("Microsoft YaHei", 12, "bold"),
-                                  bg="#6366f1", 
-                                  fg="white", 
-                                  relief="flat", 
-                                  cursor="hand2",
-                                  activebackground="#4f46e5", 
-                                  activeforeground="white",
-                                  bd=0,
-                                  command=_do_login)
-            login_btn.pack(fill="x", ipady=12)
             
-            # 按钮悬停效果
-            def on_enter(e):
-                if login_btn['state'] != 'disabled':
-                    login_btn.config(bg="#4f46e5")
-                    
-            def on_leave(e):
-                if login_btn['state'] != 'disabled':
-                    login_btn.config(bg="#6366f1")
-
-            login_btn.bind("<Enter>", on_enter)
-            login_btn.bind("<Leave>", on_leave)
+            # 鼠标事件
+            def on_btn_enter(e):
+                if btn_state["enabled"]:
+                    draw_button("#4f46e5", "🚀 登录启动")
+                    btn_canvas.config(cursor="hand2")
+            
+            def on_btn_leave(e):
+                if btn_state["enabled"]:
+                    draw_button("#6366f1", "🚀 登录启动")
+                    btn_canvas.config(cursor="")
+            
+            def on_btn_click(e):
+                if btn_state["enabled"]:
+                    _do_login()
+            
+            # 绑定事件
+            btn_canvas.bind("<Enter>", on_btn_enter)
+            btn_canvas.bind("<Leave>", on_btn_leave)
+            btn_canvas.bind("<Button-1>", on_btn_click)
+            
+            # 初始绘制
+            root.update()
+            draw_button("#6366f1", "🚀 登录启动")
 
             key_entry.bind("<Return>", lambda e: _do_login())
             key_entry.focus_set()
 
-            # 底部信息
-            canvas.create_text(w//2, h-30, 
-                               text="© 2024 织梦AI · 专业版 · 保留所有权利", 
+            # 底部信息（精致样式）
+            canvas.create_text(w//2, h-35, 
+                               text="© 2024 织梦AI", 
+                               font=("Microsoft YaHei", 9, "bold"),
+                               fill="#e9d5ff")
+            canvas.create_text(w//2, h-18, 
+                               text="专业版 · 保留所有权利", 
                                font=("Microsoft YaHei", 8),
-                               fill="#cbd5e1")
+                               fill="#c4b5fd")
 
             def _on_close():
                 result["passed"] = False
