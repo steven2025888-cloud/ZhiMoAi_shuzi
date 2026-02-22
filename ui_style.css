@@ -480,6 +480,13 @@ input[type=color]:hover{
   padding: 16px!important;
   border-radius: 12px!important;
   transition: box-shadow .2s!important;
+  pointer-events: auto!important;
+  position: relative!important;
+  z-index: 5!important;
+}
+
+#workspace-record-panel * {
+  pointer-events: auto!important;
 }
 
 #workspace-record-panel:hover {
@@ -955,7 +962,7 @@ div.svelte-1nguped,
 #output-video-col,
 #component-148,
 #component-111,
-#component-143,
+#component-144,
 #sub-video-panel {
   background: #fff!important;
   border-radius: 12px!important;

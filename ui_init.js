@@ -580,11 +580,14 @@
                 '.pending button.primary, .generating button.primary, ' +
                 '.progress-bar:not([style*="display: none"]):not([style*="display:none"])'
             );
-            /* 找到所有主按钮 */
-            var allBtns = document.querySelectorAll('button.primary');
+            /* 找到所有主按钮，排除工作台记录面板的按钮 */
+            var allBtns = document.querySelectorAll('button.primary:not(#workspace-record-panel button)');
             if (allBtns.length === 0) return;
             
             allBtns.forEach(function(b) {
+                /* 跳过工作台记录面板内的按钮 */
+                if (b.closest('#workspace-record-panel')) return;
+                
                 var isSelf = b.classList.contains('loading') || b.disabled;
                 if (anyBusy && !isSelf) {
                     if (!b.dataset.zdLock) {
