@@ -9,7 +9,7 @@ echo.
 echo 正在启动服务器...
 echo.
 
-start /B IndexTTS2-SonicVale\installer_files\env\python.exe unified_app.py
+start /B _internal_tts\installer_files\env\python.exe unified_app.py
 
 echo 等待服务器启动...
 timeout /t 5 /nobreak >nul

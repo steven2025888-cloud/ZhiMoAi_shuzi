@@ -187,13 +187,6 @@ input[type=range]{accent-color:#7c3aed!important;}
   padding:10px 14px!important;
 }
 
-/* 工作台记录下拉框排除全局样式 */
-#workspace-record-dropdown select,
-#workspace-record-dropdown .wrap-inner,
-#workspace-record-dropdown .wrap {
-  all: revert!important;
-}
-
 /* ── 音频 / 视频组件 ── */
 .gr-audio{border-radius:12px!important;border:1.5px solid #f1f5f9!important;}
 .gr-video{border-radius:12px!important;overflow:hidden!important;}
@@ -494,9 +487,20 @@ input[type=color]:hover{
   border-radius: 12px!important;
 }
 
-/* 工作台记录下拉框 - 完全不干预，使用Gradio默认样式 */
-#workspace-record-dropdown {
-  /* 不添加任何样式，让Gradio自己处理 */
+/* 工作台记录下拉框 - 只给输入框加边框 */
+#workspace-record-dropdown .wrap,
+#workspace-record-dropdown .wrap-inner {
+  border: 2px solid #7c3aed!important;
+  border-radius: 12px!important;
+  background: linear-gradient(135deg, #faf5ff, #f3e8ff)!important;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2)!important;
+  transition: all 0.3s!important;
+}
+
+#workspace-record-dropdown .wrap:hover,
+#workspace-record-dropdown .wrap-inner:hover {
+  border-color: #6d28d9!important;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3)!important;
 }
 
 /* 工作台记录按钮容器 */
@@ -944,3 +948,70 @@ div.svelte-1nguped,
 }
 
 
+
+
+/* ── 字体下拉框样式预览 ── */
+/* 为每个字体选项添加对应的字体样式 */
+@font-face {
+  font-family: '云峰飞云体';
+  src: url('fonts/云峰飞云体.ttf') format('truetype');
+}
+@font-face {
+  font-family: '小米Sans';
+  src: url('fonts/小米Sans.ttf') format('truetype');
+}
+@font-face {
+  font-family: '思源黑体';
+  src: url('fonts/思源黑体.otf') format('opentype');
+}
+@font-face {
+  font-family: '抖音美好体';
+  src: url('fonts/抖音美好体.otf') format('opentype');
+}
+@font-face {
+  font-family: '玄宗体';
+  src: url('fonts/玄宗体.otf') format('opentype');
+}
+@font-face {
+  font-family: '阿里巴巴普惠体';
+  src: url('fonts/阿里巴巴普惠体.ttf') format('truetype');
+}
+@font-face {
+  font-family: '霞鹜文楷';
+  src: url('fonts/霞鹜文楷.ttf') format('truetype');
+}
+
+/* 字体下拉框选项样式 */
+.font-dropdown-option {
+  padding: 8px 12px !important;
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+}
+
+/* 系统字体 */
+.font-dropdown-option[data-font="系统字体"] {
+  font-family: 'Microsoft YaHei', system-ui, sans-serif !important;
+}
+
+/* 自定义字体 */
+.font-dropdown-option[data-font="云峰飞云体"] {
+  font-family: '云峰飞云体', 'Microsoft YaHei', sans-serif !important;
+}
+.font-dropdown-option[data-font="小米Sans"] {
+  font-family: '小米Sans', 'Microsoft YaHei', sans-serif !important;
+}
+.font-dropdown-option[data-font="思源黑体"] {
+  font-family: '思源黑体', 'Microsoft YaHei', sans-serif !important;
+}
+.font-dropdown-option[data-font="抖音美好体"] {
+  font-family: '抖音美好体', 'Microsoft YaHei', sans-serif !important;
+}
+.font-dropdown-option[data-font="玄宗体"] {
+  font-family: '玄宗体', 'Microsoft YaHei', sans-serif !important;
+}
+.font-dropdown-option[data-font="阿里巴巴普惠体"] {
+  font-family: '阿里巴巴普惠体', 'Microsoft YaHei', sans-serif !important;
+}
+.font-dropdown-option[data-font="霞鹜文楷"] {
+  font-family: '霞鹜文楷', 'Microsoft YaHei', sans-serif !important;
+}

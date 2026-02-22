@@ -10,7 +10,7 @@
 import os, sys, time, socket, threading, subprocess, signal, traceback
 
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
-INDEXTTS_DIR = os.path.join(BASE_DIR, "IndexTTS2-SonicVale")
+INDEXTTS_DIR = os.path.join(BASE_DIR, "_internal_tts")
 PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
 LEGACY_PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")
@@ -374,15 +374,22 @@ def cleanup():
 def start_gradio():
     global gradio_process
     python_path = os.path.join(INDEXTTS_DIR, "installer_files", "env", "python.exe")
+    
+    # 优先查找.py文件（开发模式），如果不存在则查找.pyc（打包模式）
     candidates = [
+        # 开发模式 - .py文件
         os.path.join(BASE_DIR, "app_ui_optimized_with_agreement_file.py"),
         os.path.join(BASE_DIR, "unified_app.py"),
+        # 打包模式 - .pyc文件
+        os.path.join(BASE_DIR, "app_ui_optimized_with_agreement_file.pyc"),
+        os.path.join(BASE_DIR, "unified_app.pyc"),
     ]
     script_path = next((p for p in candidates if os.path.exists(p)), None)
+    
     if not os.path.exists(python_path):
         _notify_error("Python 解释器未找到", f"路径不存在：\n{python_path}"); return
     if not script_path:
-        _notify_error("主程序未找到", "未找到可启动的主程序文件（app_ui_optimized_with_agreement_file.py / unified_app.py）"); return
+        _notify_error("主程序未找到", "未找到可启动的主程序文件（unified_app.py / .pyc）"); return
 
     flags = 0
     if sys.platform == "win32":

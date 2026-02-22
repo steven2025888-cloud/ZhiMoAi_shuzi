@@ -7,7 +7,7 @@ BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 FONTS_DIR = os.path.join(BASE_DIR, "fonts")
 os.makedirs(FONTS_DIR, exist_ok=True)
 
-LATENTSYNC_DIR = os.path.join(BASE_DIR, "LatentSync")
+LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
 _FFMPEG_DIR = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
 _FFMPEG  = os.path.join(_FFMPEG_DIR, "ffmpeg.exe")
 _FFPROBE = os.path.join(_FFMPEG_DIR, "ffprobe.exe")
@@ -26,6 +26,7 @@ _NWIN = subprocess.CREATE_NO_WINDOW if _WIN else 0
 # 字体工具
 # ═══════════════════════════════════════════════
 def get_font_choices():
+    """获取字体选择列表，第一项为系统字体"""
     exts = {".ttf", ".otf", ".TTF", ".OTF"}
     try:
         names = [os.path.splitext(f)[0]
@@ -33,7 +34,12 @@ def get_font_choices():
                  if os.path.splitext(f)[1] in exts]
     except Exception:
         names = []
-    return names if names else ["默认字体"]
+    
+    # 第一项始终是系统字体
+    result = ["系统字体"]
+    if names:
+        result.extend(names)
+    return result
 
 
 # ═══════════════════════════════════════════════
@@ -118,7 +124,9 @@ def build_ass(words, font_name, font_size,
               text_color, hi_color, outline_color, outline_size,
               position,
               kw_enable=False, keywords=None, hi_scale=1.5,
-              bg_color="#000000", bg_opacity=0):
+              bg_color="#000000", bg_opacity=0,
+              title_text="", title_duration=5, title_color="#FFFFFF",
+              title_outline_color="#000000", title_margin_top=30):
     """
     words      : [{"word":str, "start":float, "end":float}, ...]
     position   : "上"|"中"|"下"  →  水平居中（Alignment 8/5/2）
@@ -127,6 +135,11 @@ def build_ass(words, font_name, font_size,
     hi_scale   : 关键词字号倍数（相对于 font_size）
     bg_color   : 背景颜色 #RRGGBB
     bg_opacity : 背景透明度 0=全透明 100=不透明
+    title_text : 标题文本（空则不显示标题）
+    title_duration : 标题显示时长（秒）
+    title_color : 标题字幕颜色 #RRGGBB
+    title_outline_color : 标题描边颜色 #RRGGBB
+    title_margin_top : 标题距顶部距离 px
     """
     align_map   = {"上": 8, "中": 5, "下": 2, "⬆上": 8, "⬛中": 5, "⬇下": 2}
     marginv_map = {"上": 50, "中": 0,  "下": 30, "⬆上": 50, "⬛中": 0, "⬇下": 30}
@@ -165,6 +178,25 @@ def build_ass(words, font_name, font_size,
             f"{align},20,20,{marginv},1\n"
         )
 
+    # ── 标题样式 ──
+    title_style_line = ""
+    title_event = ""
+    if title_text and title_text.strip():
+        t_tc  = _hex2ass(normalize_color(title_color, "#FFFFFF"))
+        t_oc  = _hex2ass(normalize_color(title_outline_color, "#000000"))
+        t_fs  = max(fs + 8, int(fs * 1.3))  # 标题字号比正文大
+        t_mv  = max(0, int(title_margin_top or 30))
+        t_dur = max(1, int(title_duration or 5))
+        title_style_line = (
+            f"Style: Title,{fn},{t_fs},"
+            f"{t_tc},&H000000FF&,{t_oc},&H00000000&,"
+            f"1,0,0,0,100,100,0,0,{border_style},{osz},0,"
+            f"8,20,20,{t_mv},1\n"  # Alignment=8 顶部居中
+        )
+        t_ts = _ass_time(0)
+        t_te = _ass_time(t_dur)
+        title_event = f"Dialogue: 2,{t_ts},{t_te},Title,,0,0,0,,{title_text.strip()}\n"
+
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
@@ -178,6 +210,7 @@ def build_ass(words, font_name, font_size,
         f"{tc},&H000000FF&,{oc},&H00000000&,"
         f"0,0,0,0,100,100,0,0,{border_style},{osz},{shadow_size},"
         f"{align},20,20,{marginv},1\n"
+        f"{title_style_line}"
         f"{bg_style_line}\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -271,7 +304,7 @@ def build_ass(words, font_name, font_size,
 
         events += f"Dialogue: 1,{ts},{te},Default,,0,0,0,,{line_text}\n"
 
-    return header + events
+    return header + title_event + events
 
 
 # ═══════════════════════════════════════════════
@@ -353,6 +386,8 @@ def burn_subtitles(video_path, audio_path, text_hint,
                    position,
                    kw_enable=False, kw_str="", hi_scale=1.5,
                    bg_color="#000000", bg_opacity=0,
+                   title_text="", title_duration=5, title_color="#FFFFFF",
+                   title_outline_color="#000000", title_margin_top=30,
                    progress_cb=None):
     def _prog(pct, msg):
         if progress_cb:
@@ -380,6 +415,11 @@ def burn_subtitles(video_path, audio_path, text_hint,
 
     _prog(0.4, "📝 生成字幕文件...")
     keywords = parse_keywords(kw_str) if kw_enable else []
+
+    # 规范化标题颜色
+    title_color         = normalize_color(title_color,         "#FFFFFF")
+    title_outline_color = normalize_color(title_outline_color, "#000000")
+
     ass_content = build_ass(
         words,
         font_name, font_size,
@@ -390,6 +430,11 @@ def burn_subtitles(video_path, audio_path, text_hint,
         hi_scale=float(hi_scale or 1.5),
         bg_color=bg_color,
         bg_opacity=int(bg_opacity or 0),
+        title_text=title_text or "",
+        title_duration=int(title_duration or 5),
+        title_color=title_color,
+        title_outline_color=title_outline_color,
+        title_margin_top=int(title_margin_top or 30),
     )
 
     ts       = int(time.time())

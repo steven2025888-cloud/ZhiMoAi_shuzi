@@ -3,8 +3,8 @@ build/
 .git/
 __pycache__/
 decrypted/
-LatentSync/
-IndexTTS2-SonicVale/
+_internal_sync/
+_internal_tts/
 unified_outputs/
 voices/
 avatars/

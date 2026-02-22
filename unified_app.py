@@ -46,8 +46,8 @@ BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
 LEGACY_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")  # 兼容旧版本
-INDEXTTS_DIR   = os.path.join(BASE_DIR, "IndexTTS2-SonicVale")
-LATENTSYNC_DIR = os.path.join(BASE_DIR, "LatentSync")
+INDEXTTS_DIR   = os.path.join(BASE_DIR, "_internal_tts")
+LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
 HISTORY_FILE   = os.path.join(OUTPUT_DIR, "history.json")
 WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
@@ -163,17 +163,17 @@ def auto_load_model():
     finally:
         os.chdir(original_cwd)
 
-    # ── 后台预热 LatentSync 引擎 ──
+    # ── 后台预热 _internal_sync 引擎 ──
     def _warmup_latentsync():
         try:
             if not os.path.exists(LATENTSYNC_PYTHON):
-                safe_print("[WARMUP] LatentSync Python 未找到，跳过预热")
+                safe_print("[WARMUP] _internal_sync Python 未找到，跳过预热")
                 return
             if not os.path.exists(LATENTSYNC_CKPT):
-                safe_print("[WARMUP] LatentSync 模型文件未找到，跳过预热")
+                safe_print("[WARMUP] _internal_sync 模型文件未找到，跳过预热")
                 return
 
-            safe_print("[WARMUP] 正在预热 LatentSync 引擎...")
+            safe_print("[WARMUP] 正在预热 _internal_sync 引擎...")
             env = os.environ.copy()
             ls_env = os.path.join(LATENTSYNC_DIR, "latents_env")
             fb = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
@@ -191,7 +191,7 @@ def auto_load_model():
                 "from omegaconf import OmegaConf; "
                 "print('[WARMUP] OmegaConf loaded'); "
                 "from latentsync.utils.util import load_model; "
-                "print('[WARMUP] LatentSync modules loaded'); "
+                "print('[WARMUP] _internal_sync modules loaded'); "
                 "print('[WARMUP] Engine warmup complete')"
             )
             flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -202,15 +202,15 @@ def auto_load_model():
                 creationflags=flags
             )
             if proc.returncode == 0:
-                safe_print("[WARMUP] LatentSync 引擎预热完成")
+                safe_print("[WARMUP] _internal_sync 引擎预热完成")
             else:
-                safe_print(f"[WARMUP] LatentSync 预热返回非零码: {proc.returncode}")
+                safe_print(f"[WARMUP] _internal_sync 预热返回非零码: {proc.returncode}")
                 if proc.stderr:
                     safe_print(f"[WARMUP] stderr: {proc.stderr[-300:]}")
         except subprocess.TimeoutExpired:
-            safe_print("[WARMUP] LatentSync 预热超时，跳过")
+            safe_print("[WARMUP] _internal_sync 预热超时，跳过")
         except Exception as e:
-            safe_print(f"[WARMUP] LatentSync 预热失败: {e}")
+            safe_print(f"[WARMUP] _internal_sync 预热失败: {e}")
 
     threading.Thread(target=_warmup_latentsync, daemon=True).start()
 
@@ -914,8 +914,8 @@ def build_ui():
                                 placeholder="在此输入或粘贴文案内容，或使用上方提取功能...",
                                 lines=6)
                             
-                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">使用AI智能改写文案，让内容更生动</div>')
-                            rewrite_btn = gr.Button("✨ AI改写", variant="secondary", size="sm")
+                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">AI智能改写文案，同时生成标题和话题标签（节省算力）</div>')
+                            rewrite_btn = gr.Button("✨ AI改写 + 标题标签", variant="secondary", size="sm")
 
                     # ═══ 步骤 2：音频合成 ═══════════════════════════
                     with gr.Column(scale=1):
@@ -1082,8 +1082,8 @@ def build_ui():
                                 with gr.Row():
                                     sub_font = gr.Dropdown(
                                         label="字体",
-                                        choices=_sub.get_font_choices() if _LIBS_OK else ["默认字体"],
-                                        value=(_sub.get_font_choices()[0] if (_LIBS_OK and _sub.get_font_choices()) else "默认字体"),
+                                        choices=_sub.get_font_choices() if _LIBS_OK else ["系统字体"],
+                                        value="系统字体",
                                         interactive=True, scale=3)
                                     sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
                                                          value=32, step=2, scale=3)
@@ -1123,7 +1123,25 @@ def build_ui():
                                         label="关键词（逗号分隔）",
                                         placeholder="如：便宜,优质,推荐,限时  — 多个词用逗号隔开",
                                         max_lines=1, scale=1)
-                                # 行4：字幕文本
+                                # 行4：标题设置
+                                gr.HTML('<div style="font-size:12px;font-weight:700;color:#475569;margin:10px 0 6px;">📌 标题设置（显示在视频顶部）</div>')
+                                sub_title_text = gr.Textbox(
+                                    label="标题内容",
+                                    placeholder="输入标题文字，留空则不显示标题",
+                                    max_lines=1)
+                                with gr.Row():
+                                    sub_title_duration = gr.Slider(
+                                        label="显示时长(秒)", minimum=1, maximum=30,
+                                        value=5, step=1, scale=2)
+                                    sub_title_margin_top = gr.Slider(
+                                        label="距顶部距离 px", minimum=0, maximum=200,
+                                        value=30, step=5, scale=2)
+                                with gr.Row():
+                                    sub_title_color = gr.ColorPicker(
+                                        label="标题颜色", value="#FFFFFF", scale=1)
+                                    sub_title_outline_color = gr.ColorPicker(
+                                        label="标题描边颜色", value="#000000", scale=1)
+                                # 行5：字幕文本
                                 sub_text = gr.Textbox(
                                     label="字幕内容（语音合成后自动填入）",
                                     placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
@@ -1946,7 +1964,7 @@ def build_ui():
                      progress=gr.Progress()):
             # 参数验证
             if not text or not text.strip():
-                raise gr.Error("请输入文本")
+                raise gr.Error("请在文案内容中输入文本")
             if pa is None:
                 raise gr.Error("请先选择音色或上传参考音频")
             try:
@@ -2259,6 +2277,9 @@ def build_ui():
                          color_txt, hi_txt, outline_txt, outline_size,
                          bg_color, bg_opacity,
                          kw_enable, kw_str, hi_scale,
+                         title_text="", title_duration=5,
+                         title_color="#FFFFFF", title_outline_color="#000000",
+                         title_margin_top=30,
                          progress=gr.Progress()):
             if not _LIBS_OK:
                 return gr.update(visible=False), _hint_html("error","扩展模块未加载")
@@ -2285,6 +2306,11 @@ def build_ui():
                     hi_scale=float(hi_scale or 1.5),
                     bg_color=bg_color or "#000000",
                     bg_opacity=int(bg_opacity or 0),
+                    title_text=title_text or "",
+                    title_duration=int(title_duration or 5),
+                    title_color=title_color or "#FFFFFF",
+                    title_outline_color=title_outline_color or "#000000",
+                    title_margin_top=int(title_margin_top or 30),
                     progress_cb=_cb
                 )
                 return (out,
@@ -2298,6 +2324,8 @@ def build_ui():
         def subtitle_and_save(out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
                              sub_col, sub_hi, sub_out, sub_out_sz,
                              sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
+                             # 标题参数
+                             title_txt, title_dur, title_col, title_out_col, title_mt,
                              # 保存需要的其他参数
                              inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                              avatar_sel, out_aud,
@@ -2308,6 +2336,11 @@ def build_ui():
                 out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
+                title_text=title_txt or "",
+                title_duration=int(title_dur or 5),
+                title_color=title_col or "#FFFFFF",
+                title_outline_color=title_out_col or "#000000",
+                title_margin_top=int(title_mt or 30),
                 progress=progress
             )
             
@@ -2339,6 +2372,9 @@ def build_ui():
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_kw_text, sub_hi_scale,
+                # 标题参数
+                sub_title_text, sub_title_duration, sub_title_color,
+                sub_title_outline_color, sub_title_margin_top,
                 # 保存需要的参数
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 avatar_select, output_audio
@@ -2418,31 +2454,66 @@ def build_ui():
                 return None, f"❌ API调用失败: {str(e)}"
         
         def _rewrite_text_with_deepseek(original_text):
-            """使用DeepSeek AI改写文案"""
+            """使用DeepSeek AI改写文案，同时优化标题和生成话题标签（单次API调用节省算力）"""
             if not original_text or not original_text.strip():
-                return original_text, _hint_html("warning", "⚠️ 请先输入文本内容")
+                return original_text, "", "", _hint_html("warning", "⚠️ 请先输入文本内容")
             
-            prompt = f"""请将以下文案改写得更加生动、吸引人，保持原意但提升表达效果。
-要求：
-1. 保持原文的核心信息和长度
-2. 使用更生动的词汇和表达方式
-3. 让文案更有感染力和吸引力
-4. 直接输出改写后的文案，不要添加任何解释
+            prompt = f"""请完成以下三个任务：
+
+任务一：将以下文案改写得更加生动、吸引人，保持原意但提升表达效果。
+要求：保持原文的核心信息和长度，使用更生动的词汇和表达方式，让文案更有感染力和吸引力。
+
+任务二：根据文案内容，生成一个吸引人的短视频标题（不超过30字，吸引眼球、引发好奇）。
+
+任务三：根据文案内容，生成5个相关的热门话题标签，用逗号分隔。
 
 原文案：
 {original_text}
 
-改写后的文案："""
+请严格按照以下格式输出，不要添加其他内容：
+文案：[改写后的完整文案]
+标题：[你的标题]
+话题：[话题1,话题2,话题3,话题4,话题5]"""
             
             result, error = _call_deepseek_api(prompt)
             
             if error:
-                return original_text, _hint_html("error", error)
+                return original_text, "", "", _hint_html("error", error)
             
             if result:
-                return result, _hint_html("ok", "✅ AI改写完成！")
+                # 解析返回结果
+                lines = result.strip().split('\n')
+                new_text = original_text
+                new_title = ""
+                new_topics = ""
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("文案：") or line.startswith("文案:"):
+                        new_text = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif line.startswith("标题：") or line.startswith("标题:"):
+                        new_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif line.startswith("话题：") or line.startswith("话题:"):
+                        new_topics = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                
+                # 如果没解析到文案（可能AI没严格按格式），用整个结果作为改写文案
+                if new_text == original_text and not any(
+                    line.strip().startswith(("文案：", "文案:")) for line in lines
+                ):
+                    # 尝试把标题/话题之前的内容作为文案
+                    text_parts = []
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith(("标题：", "标题:", "话题：", "话题:")):
+                            break
+                        if line:
+                            text_parts.append(line)
+                    if text_parts:
+                        new_text = "\n".join(text_parts)
+                
+                return new_text, new_title, new_topics, _hint_html("ok", "✅ AI改写完成！已同时生成标题和话题标签")
             else:
-                return original_text, _hint_html("error", "❌ AI改写失败，未返回内容")
+                return original_text, "", "", _hint_html("error", "❌ AI改写失败，未返回内容")
         
         def _optimize_title_with_deepseek(current_title, current_topics, video_text):
             """使用DeepSeek AI优化标题并生成话题标签"""
@@ -2485,11 +2556,11 @@ def build_ui():
             else:
                 return current_title, current_topics, _hint_html("error", "❌ AI优化失败，未返回内容")
         
-        # 绑定AI改写按钮
+        # 绑定AI改写按钮（一次API调用同时改写文案+生成标题+生成标签）
         rewrite_btn.click(
             _rewrite_text_with_deepseek,
             inputs=[input_text],
-            outputs=[input_text, tts_hint])
+            outputs=[input_text, douyin_title, douyin_topics, tts_hint])
         
         # 清空提示
         input_text.change(lambda: "", outputs=[tts_hint])
