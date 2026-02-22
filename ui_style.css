@@ -486,40 +486,47 @@ input[type=color]:hover{
   box-shadow: 0 2px 8px rgba(0,0,0,.08)!important;
 }
 
-/* Gradio 下拉框容器背景色 */
-#workspace-record-panel div.svelte-1nguped {
-  background: transparent!important;
-  border: none!important;
+/* 工作台记录下拉框 - 确保可点击 */
+#workspace-record-dropdown {
+  pointer-events: auto!important;
+  position: relative!important;
+  z-index: 10!important;
 }
 
-/* 工作台记录下拉框样式 */
-#workspace-record-panel .gr-dropdown,
-#workspace-record-dropdown,
+#workspace-record-dropdown *,
+#workspace-record-dropdown input,
+#workspace-record-dropdown button,
+#workspace-record-dropdown ul,
+#workspace-record-dropdown li {
+  pointer-events: auto!important;
+}
+
 #workspace-record-dropdown .wrap,
-#workspace-record-dropdown .wrap-inner,
-#workspace-record-dropdown select,
-#workspace-record-panel select,
-#workspace-record-panel .wrap {
+#workspace-record-dropdown .wrap-inner {
   border: 1.5px solid #e5e7eb!important;
-  border-radius: 6px!important;
+  border-radius: 8px!important;
   background: #fff!important;
   transition: all .2s!important;
   font-size: 13px!important;
+  cursor: pointer!important;
 }
 
-#workspace-record-panel .gr-dropdown:hover,
-#workspace-record-panel .gr-dropdown:focus-within,
-#workspace-record-dropdown:hover,
-#workspace-record-dropdown:focus-within {
+#workspace-record-dropdown:hover .wrap,
+#workspace-record-dropdown:focus-within .wrap {
   border-color: #7c3aed!important;
   box-shadow: 0 0 0 3px rgba(124,58,237,.12)!important;
-  background: #fff!important;
 }
 
 /* 工作台记录按钮容器 */
 #workspace-record-buttons {
   gap: 8px!important;
   min-width: 0!important;
+  pointer-events: auto!important;
+}
+
+#workspace-record-buttons button {
+  pointer-events: auto!important;
+  cursor: pointer!important;
 }
 
 #workspace-record-buttons > .gr-row {
