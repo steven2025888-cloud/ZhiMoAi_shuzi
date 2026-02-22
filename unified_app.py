@@ -1543,29 +1543,7 @@ def build_ui():
                     outputs=[bt_progress_html, bt_task_list_html, bt_tasks_state])
 
 
-                        # ── 日志数据源（Gradio 渲染到 DOM，CSS 视觉隐藏）────
-        op_log_html = gr.HTML(
-            value='<div id="zdai-log-inner">'
-                  '<div class="log-entry">'
-                  '<span class="log-ok">●</span>'
-                  '<span class="log-time">--:--:--</span>'
-                  '系统就绪，等待操作...</div></div>',
-            elem_id="zdai-log-src",
-        )
-
         # ════════════════════ 事件绑定 ════════════════════
-        _log = []
-
-        def _make_log(ok: bool, msg: str) -> str:
-            _log.append({"ok": ok, "t": time.strftime("%H:%M:%S"), "msg": msg})
-            recent  = _log[-25:]
-            entries = ""
-            for item in recent:
-                ic = '<span class="log-ok">✓</span>' if item["ok"] else '<span class="log-err">✗</span>'
-                entries += (f'<div class="log-entry">'
-                            f'{ic}<span class="log-time">{item["t"]}</span>'
-                            f'{item["msg"]}</div>')
-            return f'<div id="zdai-log-inner">{entries}</div>'
 
         def _hint_html(kind, msg):
             cfg = {
@@ -2020,7 +1998,7 @@ def build_ui():
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception:
                     pass
-                return out_path, _make_log(True, "语音合成完成 — " + os.path.basename(out_path)), out_path
+                return out_path, out_path
             except gr.Error:
                 raise
             except Exception as e:
@@ -2040,7 +2018,7 @@ def build_ui():
                         progress=gr.Progress()):
             """TTS合成并自动保存工作台状态"""
             # 先执行TTS
-            audio_path, log_msg, audio_for_ls_path = tts_wrap(
+            audio_path, audio_for_ls_path = tts_wrap(
                 text, pa, spd, tp, tk, temp, nb, rp, mmt,
                 emo_m, emo_a, emo_w, emo_t,
                 v1, v2, v3, v4, v5, v6, v7, v8,
@@ -2069,7 +2047,7 @@ def build_ui():
                 f.write(f"  audio_for_ls_path: {audio_for_ls_path}\n")
                 f.write(f"  sub_text_val: {sub_text_val}\n")
             
-            return audio_path, log_msg, audio_for_ls_path, sub_text_val, hint_msg, dropdown_update
+            return audio_path, audio_for_ls_path, sub_text_val, hint_msg, dropdown_update
         
         gen_btn.click(
             tts_and_save,
@@ -2086,7 +2064,7 @@ def build_ui():
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text
             ],
-            outputs=[output_audio, op_log_html, audio_for_ls, sub_text, 
+            outputs=[output_audio, audio_for_ls, sub_text,
                     workspace_record_hint, workspace_record_dropdown])
 
         # ── 音频模式切换 ──
@@ -2284,7 +2262,7 @@ def build_ui():
                          kw_enable, kw_str, hi_scale,
                          progress=gr.Progress()):
             if not _LIBS_OK:
-                return gr.update(visible=False), _hint_html("error","扩展模块未加载"), _make_log(False,"字幕模块未加载")
+                return gr.update(visible=False), _hint_html("error","扩展模块未加载")
 
             # 解析视频路径（gr.Video 在不同 Gradio 版本返回格式不同）
             if isinstance(vid, dict):
@@ -2292,7 +2270,7 @@ def build_ui():
             else:
                 vid_path = str(vid) if vid else ""
             if not vid_path or not os.path.exists(vid_path):
-                return gr.update(visible=False), _hint_html("warning","请先完成视频合成再添加字幕"), _make_log(False,"无视频")
+                return gr.update(visible=False), _hint_html("warning","请先完成视频合成再添加字幕")
 
             aud_path = str(aud) if (aud and isinstance(aud, str)) else None
 
@@ -2310,15 +2288,12 @@ def build_ui():
                     bg_opacity=int(bg_opacity or 0),
                     progress_cb=_cb
                 )
-                # 返回：字幕视频路径（字符串）、提示、日志
                 return (out,
-                        _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)),
-                        _make_log(True, "字幕完成 — " + os.path.basename(out)))
+                        _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)))
             except Exception as e:
                 traceback.print_exc()
                 return ("",
-                        _hint_html("error", f"字幕生成失败: {str(e)[:300]}"),
-                        _make_log(False, f"字幕失败: {e}"))
+                        _hint_html("error", f"字幕生成失败: {str(e)[:300]}"))
 
         # 字幕按钮点击 - 直接在完成后保存
         def subtitle_and_save(out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
@@ -2330,7 +2305,7 @@ def build_ui():
                              progress=gr.Progress()):
             """生成字幕并自动保存工作台状态"""
             # 先生成字幕
-            sub_vid_path, sub_hnt, log_msg = _do_subtitle(
+            sub_vid_path, sub_hnt = _do_subtitle(
                 out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
@@ -2355,7 +2330,7 @@ def build_ui():
             else:
                 sub_vid_update = gr.update(visible=False)
             
-            return sub_vid_update, sub_hnt, log_msg, hint_msg, dropdown_update
+            return sub_vid_update, sub_hnt, hint_msg, dropdown_update
         
         sub_btn.click(
             subtitle_and_save,
@@ -2369,7 +2344,7 @@ def build_ui():
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 avatar_select, output_audio
             ],
-            outputs=[sub_video, sub_hint, op_log_html,
+            outputs=[sub_video, sub_hint,
                     workspace_record_hint, workspace_record_dropdown]
         ).then(
             lambda v: gr.update(visible=True) if v else gr.update(visible=False),
@@ -2544,13 +2519,12 @@ def build_ui():
                 
                 if missing_deps:
                     deps_str = "、".join(missing_deps)
-                    return (_hint_html("error", 
+                    return _hint_html("error", 
                             f"❌ 缺少依赖：{deps_str}<br><br>"
                             "请运行以下命令安装：<br>"
                             "1. 双击运行「安装抖音发布依赖.bat」<br>"
                             "或<br>"
-                            f"2. 手动运行：pip install {' '.join(missing_deps)}"),
-                            _make_log(False, f"缺少依赖: {deps_str}"))
+                            f"2. 手动运行：pip install {' '.join(missing_deps)}")
                 
                 # 导入抖音发布模块
                 import lib_douyin_publish as douyin_pub
@@ -2582,8 +2556,7 @@ def build_ui():
                         video_type = "合成视频"
                 
                 if not video_to_use:
-                    return (_hint_html("warning", "⚠️ 请先生成视频（可以是最终合成视频或字幕视频）"),
-                            _make_log(False, "无视频文件"))
+                    return _hint_html("warning", "⚠️ 请先生成视频（可以是最终合成视频或字幕视频）")
                 
                 # 解析话题
                 topics = []
@@ -2606,11 +2579,9 @@ def build_ui():
                 )
                 
                 if success:
-                    return (_hint_html("ok", f"✅ {message}<br>发布的视频：{video_type}"),
-                            _make_log(True, f"抖音发布成功 — {video_type}: {os.path.basename(video_to_use)}"))
+                    return _hint_html("ok", f"✅ {message}<br>发布的视频：{video_type}")
                 else:
-                    return (_hint_html("error", f"❌ {message}"),
-                            _make_log(False, f"抖音发布失败: {message}"))
+                    return _hint_html("error", f"❌ {message}")
                     
             except Exception as e:
                 traceback.print_exc()
@@ -2618,20 +2589,18 @@ def build_ui():
                 
                 # 友好的错误提示
                 if "chromedriver" in error_msg.lower() or "chrome" in error_msg.lower():
-                    return (_hint_html("error", 
+                    return _hint_html("error", 
                             "❌ Chrome 浏览器驱动问题<br><br>"
                             "请尝试：<br>"
                             "1. 双击运行「安装抖音发布依赖.bat」<br>"
                             "2. 确保已安装 Chrome 浏览器<br>"
-                            "3. 重启程序"),
-                            _make_log(False, f"ChromeDriver 错误: {error_msg}"))
+                            "3. 重启程序")
                 else:
-                    return (_hint_html("error", f"❌ 发布失败: {error_msg[:300]}"),
-                            _make_log(False, f"抖音发布失败: {e}"))
+                    return _hint_html("error", f"❌ 发布失败: {error_msg[:300]}")
         
         douyin_btn.click(_do_douyin_publish,
             inputs=[sub_video, output_video, douyin_title, douyin_topics],
-            outputs=[douyin_hint, op_log_html])
+            outputs=[douyin_hint])
 
         # 视频合成
         def ls_wrap(avatar_name, auto_a, input_txt, progress=gr.Progress()):
@@ -2658,7 +2627,7 @@ def build_ui():
             threading.Thread(target=_run, daemon=True).start()
 
             # 简洁的状态提示（不用大块HTML，直接进度条推进）
-            yield gr.update(), gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True)
+            yield gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True)
 
             while True:
                 try:
@@ -2666,12 +2635,12 @@ def build_ui():
                     if item[0] == "done":
                         break
                     elif item[0] == "detail":
-                        yield gr.update(), gr.update(), gr.update(value=item[1], visible=True)
+                        yield gr.update(), gr.update(value=item[1], visible=True)
                 except _queue.Empty:
-                    yield gr.update(), gr.update(), gr.update()
+                    yield gr.update(), gr.update()
 
             if result["err"]:
-                yield gr.update(), _make_log(False, f"视频合成失败: {result['err']}"), gr.update(visible=False)
+                yield gr.update(), gr.update(visible=False)
                 raise gr.Error(str(result["err"]))
 
             out      = result["out"]
@@ -2683,7 +2652,6 @@ def build_ui():
                 f.write(f"  out type: {type(out)}\n")
                 f.write(f"  out value: {out}\n")
             
-            log_html = _make_log(True, "视频合成完成 — " + os.path.basename(out) if out else "视频合成完成")
             try:
                 ps = (
                     "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
@@ -2700,9 +2668,9 @@ def build_ui():
             except Exception:
                 pass
             # 视频合成完成后显示抖音发布区域，并自动填充标题
-            # 返回：视频路径（字符串）、日志、详情
+            # 返回：视频路径（字符串）、详情
             # 注意：第一个返回值是视频路径字符串，不是 gr.update 对象
-            yield out, log_html, gr.update(visible=False)
+            yield out, gr.update(visible=False)
 
         # 视频合成按钮点击 - 直接在完成后保存
         def video_and_save(avatar_sel, aud_for_ls, inp_txt,
@@ -2719,13 +2687,13 @@ def build_ui():
             final_result = None
             for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, progress=progress):
                 # 在视频合成过程中，传递中间结果，但不保存工作台
-                # 返回 5 个值：前 3 个来自 ls_wrap，后 2 个是空的工作台更新
+                # 返回 4 个值：前 2 个来自 ls_wrap，后 2 个是空的工作台更新
                 yield result + (gr.update(), gr.update())
                 final_result = result
             
             # 视频合成完成后，保存工作台状态
             if final_result:
-                video_path, log_msg, ls_detail = final_result
+                video_path, ls_detail = final_result
                 
                 # 现在 video_path 直接就是视频路径字符串
                 # 不需要从 gr.update 对象中提取
@@ -2751,7 +2719,7 @@ def build_ui():
                 
                 # 最后一次 yield，包含保存结果
                 # 注意：第一个值需要是视频路径，Gradio 会自动处理
-                yield video_path, log_msg, ls_detail, hint_msg, dropdown_update
+                yield video_path, ls_detail, hint_msg, dropdown_update
         
         ls_btn.click(
             video_and_save,
@@ -2765,22 +2733,21 @@ def build_ui():
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text
             ],
-            outputs=[output_video, op_log_html, ls_detail_html,
+            outputs=[output_video, ls_detail_html,
                     workspace_record_hint, workspace_record_dropdown])
 
         # 历史操作
         def _do_refresh():
-            return gr.update(choices=_hist_choices(), value=None), _hist_info_html(), _make_log(True, "历史记录已刷新")
-        refresh_hist_btn.click(_do_refresh, outputs=[hist_dropdown, hist_info, op_log_html])
+            return gr.update(choices=_hist_choices(), value=None), _hist_info_html()
+        refresh_hist_btn.click(_do_refresh, outputs=[hist_dropdown, hist_info])
 
         open_folder_btn.click(
             lambda: (
                 subprocess.Popen(["explorer", OUTPUT_DIR],
                     creationflags=subprocess.CREATE_NO_WINDOW)
-                if sys.platform == "win32" else None,
-                _make_log(True, "已打开输出文件夹")
-            )[1],
-            outputs=[op_log_html])
+                if sys.platform == "win32" else None
+            ),
+            outputs=[])
 
         # 清空历史：显示确认弹窗
         clear_hist_btn.click(
@@ -2801,12 +2768,11 @@ def build_ui():
                 pass
             return (gr.update(visible=False),
                     gr.update(choices=[], value=None),
-                    '<div style="font-size:12px;color:#94a3b8;padding:8px 0">记录已清空，视频文件仍保留在磁盘上。</div>',
-                    _make_log(True, "历史记录条目已清空（文件保留）"))
+                    '<div style="font-size:12px;color:#94a3b8;padding:8px 0">记录已清空，视频文件仍保留在磁盘上。</div>')
 
         clear_records_btn.click(
             _clear_records_only,
-            outputs=[clear_confirm_group, hist_dropdown, hist_info, op_log_html])
+            outputs=[clear_confirm_group, hist_dropdown, hist_info])
 
         # 彻底删除（连同文件）
         def _clear_all_with_files():
@@ -2857,12 +2823,11 @@ def build_ui():
             return (gr.update(visible=False),
                     gr.update(choices=[], value=None),
                     info_msg,
-                    None,
-                    _make_log(True, f"历史记录及 {deleted} 个文件已彻底删除"))
+                    None)
 
         clear_all_files_btn.click(
             _clear_all_with_files,
-            outputs=[clear_confirm_group, hist_dropdown, hist_info, hist_video, op_log_html])
+            outputs=[clear_confirm_group, hist_dropdown, hist_info, hist_video])
 
         def _load_hist(p):
             if not p: return gr.update(value=None), ""

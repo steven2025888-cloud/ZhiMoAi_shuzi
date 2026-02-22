@@ -130,101 +130,13 @@
         </div>
       </div>
 
-      <!-- ── 底部日志面板（默认收起，仅显示最新一条）── -->
-      <div id="zdai-log-bar" style="
-          position:fixed;bottom:0;left:0;right:0;z-index:9000;
-          background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%);
-          border-top:2px solid #6366f1;
-          box-shadow:0 -4px 32px rgba(0,0,0,.4);
-          font-family:'Microsoft YaHei',system-ui,sans-serif;
-          transition:height .2s cubic-bezier(.4,0,.2,1);
-          height:44px;overflow:hidden;">
+    `);
 
-        <!-- 标题栏（始终可见）-->
-        <div id="zdai-log-hd" onclick="window._zdaiLogToggle()" style="
-            height:44px;display:flex;align-items:center;gap:10px;
-            padding:0 18px;cursor:pointer;user-select:none;">
-          <span style="width:22px;height:22px;border-radius:6px;flex-shrink:0;
-              background:linear-gradient(135deg,#6366f1,#8b5cf6);
-              display:inline-flex;align-items:center;justify-content:center;
-              font-size:12px;">📋</span>
-          <span style="font-size:13px;font-weight:700;color:#e2e8f0;flex-shrink:0;">操作日志</span>
-          <span id="zdai-log-badge" style="
-              background:#6366f1;color:#fff;border-radius:20px;
-              padding:0 8px;font-size:11px;font-weight:700;
-              min-width:20px;text-align:center;line-height:18px;height:18px;
-              display:inline-flex;align-items:center;flex-shrink:0;">0</span>
-          <!-- 最新一条日志预览 -->
-          <span id="zdai-log-preview" style="
-              font-size:12px;color:#94a3b8;flex:1;
-              overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-          <span id="zdai-log-arrow" style="color:#6366f1;font-size:12px;
-              transition:transform .2s;flex-shrink:0;margin-left:4px;">▲</span>
-          <span id="zdai-log-btn" style="
-              color:#6366f1;font-size:11px;font-weight:600;
-              padding:3px 10px;border:1px solid #6366f1;border-radius:20px;
-              flex-shrink:0;margin-left:2px;letter-spacing:.3px;">展开</span>
-        </div>
-
-        <!-- 日志内容区 -->
-        <div id="zdai-log-body" style="
-            height:180px;overflow-y:auto;padding:8px 16px 12px;
-            border-top:1px solid rgba(99,102,241,.25);"></div>
-      </div>`);
-
-    /* ── 4. 折叠逻辑 ── */
-    var _logOpen = false;   /* 默认收起 */
-    window._zdaiLogToggle = function() {
-        _logOpen = !_logOpen;
-        var bar   = document.getElementById('zdai-log-bar');
-        var arrow = document.getElementById('zdai-log-arrow');
-        var btn   = document.getElementById('zdai-log-btn');
-        if (bar)   bar.style.height       = _logOpen ? '224px' : '44px';
-        if (arrow) arrow.style.transform  = _logOpen ? 'rotate(180deg)' : '';
-        if (btn)   btn.textContent        = _logOpen ? '收起' : '展开';
-    };
-
-    /* ── 5. 日志同步：轮询 Gradio 渲染的隐藏元素 #zdai-log-src ── */
-    var _lastLogHtml = '';
-    function _syncLog() {
-        var src = document.getElementById('zdai-log-src');
-        if (src) {
-            var inner = src.querySelector('#zdai-log-inner');
-            var html  = inner ? inner.innerHTML : src.innerHTML;
-            if (html && html !== _lastLogHtml) {
-                _lastLogHtml = html;
-                var body    = document.getElementById('zdai-log-body');
-                var badge   = document.getElementById('zdai-log-badge');
-                var preview = document.getElementById('zdai-log-preview');
-                if (body) {
-                    body.innerHTML = html;
-                    body.scrollTop = body.scrollHeight;
-                }
-                if (badge) {
-                    var cnt = (html.match(/class="log-entry"/g) || []).length;
-                    badge.textContent = cnt;
-                }
-                /* 最新一条预览（取最后一个 log-entry 的文本） */
-                if (preview && inner) {
-                    var entries = inner.querySelectorAll('.log-entry');
-                    if (entries.length > 0) {
-                        var last = entries[entries.length - 1];
-                        var txt  = last.textContent || last.innerText || '';
-                        preview.textContent = txt.trim();
-                    }
-                }
-                /* 有新日志时若已展开则保持，若收起不自动展开（用户可看预览）*/
-            }
-        }
-        setTimeout(_syncLog, 600);
-    }
-    setTimeout(_syncLog, 1800);
-
-    /* ── 6. 进度浮层（视频合成期间显示生成进度）── */
+    /* ── 4. 进度浮层（视频合成期间显示生成进度）── */
     document.body.insertAdjacentHTML('beforeend', `
       <div id="zdai-prog" style="
           display:none;position:fixed;
-          bottom:54px;right:20px;z-index:8900;
+          bottom:20px;right:20px;z-index:8900;
           background:linear-gradient(135deg,#1e293b,#0f172a);
           border:1.5px solid #6366f1;border-radius:14px;
           padding:14px 18px;min-width:260px;
@@ -265,12 +177,12 @@
         if (dtEl)  dtEl.textContent   = detail || '';
     };
 
-    /* ── 7. 系统通知 ── */
+    /* ── 5. 系统通知 ── */
     window._zdaiNotify = (t, b) => {
         try { if (window.pywebview?.api) window.pywebview.api.send_notification(t, b); } catch(_){}
     };
 
-    /* ── 8. 删除确认对话框（自定义UI）── */
+    /* ── 6. 删除确认对话框（自定义UI）── */
     document.body.insertAdjacentHTML('beforeend', `
       <div id="zdai-del-modal" style="display:none;position:fixed;inset:0;z-index:99998;align-items:center;justify-content:center;">
         <div style="position:absolute;inset:0;background:rgba(15,23,42,.7);backdrop-filter:blur(8px)" onclick="window._zdaiDelModal.hide()"></div>
@@ -317,7 +229,7 @@
         }
     };
 
-    /* ── 9. 删除触发辅助函数（数字人/音色库删除按钮用）── */
+    /* ── 7. 删除触发辅助函数（数字人/音色库删除按钮用）── */
     window._zdaiTriggerDel = function(elemId, name, type) {
         var typeText = type === 'avatar' ? '数字人' : '音色';
         window._zdaiDelModal.show(

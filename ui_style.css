@@ -399,13 +399,6 @@ input[type=color]:hover{
 .hint-warn{background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:8px 12px;font-size:12px;color:#c2410c;font-weight:600;}
 .hint-err{background:#fff1f2;border:1.5px solid #fecdd3;border-radius:10px;padding:8px 12px;font-size:12px;color:#be123c;font-weight:600;}
 
-/* ── 日志 ── */
-#zdai-log-src{position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;}
-.log-entry{font-size:12px;color:#cbd5e1;line-height:1.7;padding:3px 0;border-bottom:1px solid rgba(100,116,139,.1);display:flex;align-items:baseline;gap:5px;}
-.log-entry:last-child{border-bottom:none;}
-.log-ok{color:#4ade80;font-weight:700;flex-shrink:0;}
-.log-err{color:#f87171;font-weight:700;flex-shrink:0;}
-.log-time{color:#64748b;font-size:11px;margin-right:3px;flex-shrink:0;}
 
 /* ── 进度 ── */
 .progress-description,[class*="progress"] p,.progress-text,tqdm{white-space:pre-wrap!important;}
