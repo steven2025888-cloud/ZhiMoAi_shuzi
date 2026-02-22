@@ -35,3 +35,15 @@ torch.Size([1, 23296])
 [MODEL] 引擎预热完成，首次合成将直接输出
 [MODEL] OK
 [WARMUP] 正在预热 LatentSync 引擎...
+[WARMUP] LatentSync 预热返回非零码: 1
+[WARMUP] stderr: Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'load_model' from 'latentsync.utils.util' (D:\ZhiMoAi_shuzi\LatentSync\latentsync\utils\util.py)
+
+[TextExtractor] 后台线程已启动
+[TextExtractor] WebSocket 连接已在后台初始化
+[TextExtractor] 正在连接 wss://api.zhimengai.xyz/dsp
+[TextExtractor] WebSocket 连接成功
+[TextExtractor] 已发送注册消息
+[TextExtractor] 收到注册响应: {"type":"connected","fd":18}
+[TextExtractor] 收到消息: {"type":"registered","key":"2RFH-MOFU-XVTZ-N79P"}
