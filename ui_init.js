@@ -27,6 +27,94 @@
     _rm();
     new MutationObserver(_rm).observe(document.documentElement, {childList:true, subtree:true});
 
+    /* ── 2.5. 添加顶部标题栏 ── */
+    setTimeout(() => {
+        const container = document.querySelector('.gradio-container');
+        if (container && !document.querySelector('.app-header')) {
+            const header = document.createElement('div');
+            header.className = 'app-header';
+            header.innerHTML = `
+                <h1>IP打造智能体</h1>
+            `;
+            container.insertBefore(header, container.firstChild);
+        }
+    }, 100);
+
+    /* ── 2.8. 立即定义关闭/最小化逻辑（必须在对话框HTML之前）── */
+    window._zm = {
+        show() {
+            console.log('[织梦AI] _zm.show() 被调用');
+            console.log('[织梦AI] 当前 window._zm 对象:', window._zm);
+            const dialog = document.getElementById('zdai-cm');
+            console.log('[织梦AI] 查找对话框元素 #zdai-cm:', dialog);
+            if (dialog) {
+                dialog.style.display = 'flex';
+                console.log('[织梦AI] ✓ 关闭对话框已显示');
+            } else {
+                console.error('[织梦AI] ✗ 错误：关闭对话框元素不存在！');
+                console.log('[织梦AI] DOM 状态:', document.readyState);
+                console.log('[织梦AI] body 子元素数量:', document.body ? document.body.children.length : 'body不存在');
+                // 如果对话框不存在，使用浏览器原生确认框
+                if (confirm('确定要关闭程序吗？\n\n点击"确定"退出，点击"取消"返回')) {
+                    this.exit();
+                }
+            }
+        },
+        hide() { 
+            console.log('[织梦AI] _zm.hide() 被调用');
+            const dialog = document.getElementById('zdai-cm');
+            if (dialog) {
+                dialog.style.display = 'none';
+            }
+        },
+        minimize() {
+            console.log('[织梦AI] _zm.minimize() 被调用');
+            this.hide();
+            setTimeout(() => {
+                const api = window.pywebview?.api;
+                if (api && typeof api.minimize_to_tray === 'function') {
+                    Promise.resolve(api.minimize_to_tray())
+                        .then(() => console.log('[织梦AI] 最小化完成'))
+                        .catch(e => console.error('[织梦AI] 最小化失败:', e));
+                } else {
+                    console.warn('[织梦AI] pywebview.api 不可用，等待重试...');
+                    setTimeout(() => {
+                        if (window.pywebview?.api?.minimize_to_tray)
+                            window.pywebview.api.minimize_to_tray();
+                    }, 1000);
+                }
+            }, 200);
+        },
+        exit() {
+            console.log('[织梦AI] _zm.exit() 被调用');
+            this.hide();
+            document.body.insertAdjacentHTML('beforeend',
+                '<div style="position:fixed;inset:0;background:rgba(15,23,42,.95);z-index:999999;' +
+                'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;' +
+                'color:#fff;font-family:Microsoft YaHei,sans-serif;">' +
+                '<div style="font-size:32px;">🌙</div>' +
+                '<div style="font-size:16px;font-weight:700;">正在退出织梦AI...</div>' +
+                '<div style="font-size:12px;color:#64748b;">正在保存数据并关闭服务</div></div>');
+            setTimeout(() => {
+                const api = window.pywebview?.api;
+                if (api && typeof api.close_app === 'function') {
+                    Promise.resolve(api.close_app())
+                        .then(() => console.log('[织梦AI] 退出完成'))
+                        .catch(e => console.error('[织梦AI] 退出失败:', e));
+                } else {
+                    console.warn('[织梦AI] pywebview.api.close_app 不可用');
+                }
+            }, 500);
+        }
+    };
+    
+    console.log('[织梦AI] window._zm 对象已初始化:', window._zm);
+    
+    // 测试：5秒后检查_zm对象是否还存在
+    setTimeout(() => {
+        console.log('[织梦AI] 5秒后检查 window._zm:', window._zm);
+    }, 5000);
+
     /* ── 3. 关闭确认对话框 ── */
     document.body.insertAdjacentHTML('beforeend', `
       <div id="zdai-cm" style="display:none;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;">
@@ -480,46 +568,8 @@
         );
     };
 
-    /* ── 10. 关闭/最小化逻辑 ── */
-    window._zm = {
-        show() {
-            document.getElementById('zdai-cm').style.display = 'flex';
-        },
-        hide() { document.getElementById('zdai-cm').style.display = 'none'; },
-        minimize() {
-            this.hide();
-            setTimeout(() => {
-                const api = window.pywebview?.api;
-                if (api && typeof api.minimize_to_tray === 'function') {
-                    Promise.resolve(api.minimize_to_tray())
-                        .then(() => console.log('[织梦AI] 最小化完成'))
-                        .catch(e => console.error('[织梦AI] 最小化失败:', e));
-                } else {
-                    console.warn('[织梦AI] pywebview.api 不可用，等待重试...');
-                    setTimeout(() => {
-                        if (window.pywebview?.api?.minimize_to_tray)
-                            window.pywebview.api.minimize_to_tray();
-                    }, 1000);
-                }
-            }, 200);
-        },
-        exit() {
-            this.hide();
-            document.body.insertAdjacentHTML('beforeend',
-                '<div style="position:fixed;inset:0;background:rgba(15,23,42,.95);z-index:999999;' +
-                'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;' +
-                'color:#fff;font-family:Microsoft YaHei,sans-serif;">' +
-                '<div style="font-size:32px;">🌙</div>' +
-                '<div style="font-size:16px;font-weight:700;">正在退出织梦AI...</div>' +
-                '<div style="font-size:12px;color:#64748b;">正在保存数据并关闭服务</div></div>');
-            setTimeout(() => {
-                const api = window.pywebview?.api;
-                if (api && typeof api.close_app === 'function') {
-                    Promise.resolve(api.close_app()).catch(() => {});
-                }
-            }, 100);
-        }
-    };
+    /* ── 10. 关闭/最小化逻辑已在前面定义 ── */
+    // window._zm 对象已在文件开头定义，此处不再重复
 
     /* ── 11. 合成按钮互锁（任一合成按钮执行时禁止所有合成按钮）── */
     (function() {

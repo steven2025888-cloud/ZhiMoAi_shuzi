@@ -872,22 +872,15 @@ def build_ui():
                 
                 with gr.Row(elem_classes="workspace"):
 
-                    # ═══ 列 1：音频准备 ═══════════════════════════
-                    with gr.Column(scale=1, elem_classes="panel"):
+                    # ═══ 步骤 1：文案提取 ═══════════════════════════
+                    with gr.Column(scale=1):
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">1</div>'
-                            '<span class="step-title">音频准备</span>'
+                            '<span class="step-title">文案提取</span>'
                             '</div>'
                         )
-                        audio_mode = gr.Radio(
-                            label="选择音频来源",
-                            choices=["文字转语音", "直接上传音频"],
-                            value="文字转语音",
-                            elem_classes="audio-mode-radio")
-
-                        # ── 模式A: 文字转语音 ──
-                        with gr.Group(visible=True) as tts_mode_group:
+                        with gr.Column(elem_classes="panel"):
                             # ── 文案提取功能区 ──
                             with gr.Group(elem_classes="extract-panel"):
                                 gr.HTML(
@@ -903,255 +896,280 @@ def build_ui():
                                     lines=2,
                                     elem_classes="extract-input"
                                 )
-                                with gr.Row():
-                                    extract_btn = gr.Button(
-                                        "✨ 提取文案",
-                                        variant="primary",
-                                        size="sm",
-                                        scale=1,
-                                        elem_classes="extract-btn"
-                                    )
-                                    gr.HTML(
-                                        '<div class="extract-tip">'
-                                        '支持主流平台链接，一键提取文案内容'
-                                        '</div>'
-                                    )
+                                gr.HTML(
+                                    '<div class="extract-tip">'
+                                    '支持主流平台链接，一键提取文案内容'
+                                    '</div>'
+                                )
+                                extract_btn = gr.Button(
+                                    "✨ 提取文案",
+                                    variant="primary",
+                                    size="sm",
+                                    elem_classes="extract-btn"
+                                )
                                 extract_hint = gr.HTML(value="", elem_classes="extract-hint")
                             
                             input_text = gr.TextArea(
-                                label="合成文本",
-                                placeholder="在此输入或粘贴需要克隆语音的文字内容...",
-                                lines=5)
+                                label="文案内容",
+                                placeholder="在此输入或粘贴文案内容，或使用上方提取功能...",
+                                lines=6)
                             
-                            with gr.Row():
-                                rewrite_btn = gr.Button("✨ AI改写", variant="secondary", size="sm", scale=1)
-                                gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用AI智能改写文案，让内容更生动</div>')
+                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">使用AI智能改写文案，让内容更生动</div>')
+                            rewrite_btn = gr.Button("✨ AI改写", variant="secondary", size="sm")
 
-                            gr.HTML('<div class="section-label">🎙 音色选择</div>')
-                            with gr.Row():
-                                voice_select = gr.Dropdown(
-                                    label="从音色库选择",
-                                    choices=_vc.get_choices() if _LIBS_OK else [],
-                                    value=None, interactive=True, scale=4)
-                                voice_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
-                                                              variant="secondary")
-                            voice_preview = gr.Audio(label="🔊 试听所选音色", interactive=False,
-                                                     visible=False)
-                            
-                            # 隐藏的 prompt_audio 组件（用于内部逻辑，不显示给用户）
-                            prompt_audio = gr.Audio(visible=False, type="filepath")
-
-                            # ── 语音风格预设 ──
-                            voice_style = gr.Radio(
-                                label="语音风格",
-                                choices=["标准", "稳定播报", "活泼生动", "慢速朗读", "专业模式"],
-                                value="标准",
-                                elem_classes="voice-style-radio")
-                            voice_speed = gr.Slider(
-                                label="语速调节",
-                                info="← 慢  |  快 →",
-                                minimum=0.5, maximum=1.5, value=1.0, step=0.05)
-
-                            with gr.Group(visible=False) as pro_mode_group:
-                                with gr.Row():
-                                    top_p = gr.Slider(label="词语多样性", info="越高越随机 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
-                                    top_k = gr.Slider(label="候选词数量", info="越小越保守 20~50", minimum=1, maximum=100, value=30, step=1)
-                                with gr.Row():
-                                    temperature = gr.Slider(label="语气活跃度", info="越高越有变化", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
-                                    num_beams   = gr.Slider(label="搜索精度", info="越高越慢但更准", minimum=1, maximum=10, value=1, step=1)
-                                with gr.Row():
-                                    repetition_penalty = gr.Slider(label="避免重复", info="越高越不重复", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
-                                    max_mel_tokens     = gr.Slider(label="最大长度", info="长文本需加大", minimum=500, maximum=3000, value=1500, step=100)
-                                gr.HTML('<div class="divider"></div>')
-                                gr.Markdown("### 🎭 情感控制")
-                                emo_mode = gr.Radio(
-                                    label="情感控制模式",
-                                    choices=["与音色参考音频相同","使用情感参考音频","使用情感向量控制","使用情感描述文本控制"],
-                                    value="与音色参考音频相同")
-                                with gr.Group(visible=False) as emo_audio_group:
-                                    emo_audio  = gr.Audio(label="情感参考音频", sources=["upload"], type="filepath")
-                                    emo_weight = gr.Slider(label="情感强度", info="0=不混合情感，1=完全使用情感参考", minimum=0.0, maximum=1.0, value=0.6, step=0.1)
-                                with gr.Group(visible=False) as emo_vec_group:
-                                    gr.Markdown("调整8个情感向量维度（-1.0 到 1.0）")
-                                    with gr.Row():
-                                        vec1 = gr.Slider(label="向量1", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                        vec2 = gr.Slider(label="向量2", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    with gr.Row():
-                                        vec3 = gr.Slider(label="向量3", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                        vec4 = gr.Slider(label="向量4", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    with gr.Row():
-                                        vec5 = gr.Slider(label="向量5", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                        vec6 = gr.Slider(label="向量6", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    with gr.Row():
-                                        vec7 = gr.Slider(label="向量7", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                        vec8 = gr.Slider(label="向量8", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                with gr.Group(visible=False) as emo_text_group:
-                                    emo_text = gr.Textbox(
-                                        label="情感描述文本",
-                                        placeholder="例如：开心、悲伤、愤怒...",
-                                        lines=2)
-                                def update_emo_visibility(mode):
-                                    return (
-                                        gr.update(visible=(mode=="使用情感参考音频")),
-                                        gr.update(visible=(mode=="使用情感向量控制")),
-                                        gr.update(visible=(mode=="使用情感描述文本控制")))
-                                emo_mode.change(update_emo_visibility,
-                                                inputs=[emo_mode],
-                                                outputs=[emo_audio_group, emo_vec_group, emo_text_group])
-                            gen_btn      = gr.Button("🎵  开始语音合成", variant="primary", size="lg")
-                            tts_hint = gr.HTML(value="")
-                            output_audio = gr.Audio(label="合成结果", interactive=False)
-
-                        # ── 模式B: 直接上传音频 ──
-                        with gr.Group(visible=False) as upload_mode_group:
-                            gr.HTML(
-                                '<div style="background:#f0f9ff;border:1.5px solid #bae6fd;'
-                                'border-radius:12px;padding:12px 14px;margin-bottom:12px;">'
-                                '<div style="font-size:13px;font-weight:700;color:#0c4a6e;margin-bottom:4px;">📁 直接上传音频文件</div>'
-                                '<div style="font-size:11px;color:#0369a1;line-height:1.6;">'
-                                '上传已有的音频文件，跳过语音合成步骤，直接用于视频合成。<br>'
-                                '支持 WAV、MP3 等常见格式。</div></div>'
-                            )
-                            direct_audio_upload = gr.Audio(
-                                label="上传音频文件（WAV / MP3）",
-                                sources=["upload"], type="filepath")
-
-                    # ═══ 列 2：视频合成 ═══════════════════════════
-                    with gr.Column(scale=1, elem_classes="panel"):
+                    # ═══ 步骤 2：音频合成 ═══════════════════════════
+                    with gr.Column(scale=1):
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">2</div>'
-                            '<span class="step-title">视频合成</span>'
+                            '<span class="step-title">音频合成</span>'
                             '</div>'
                         )
-                        # ── 数字人选择 ──
-                        gr.HTML('<div class="section-label">🎭 数字人选择</div>')
-                        with gr.Row():
-                            avatar_select = gr.Dropdown(
-                                label="从数字人库选择",
-                                choices=_av.get_choices() if _LIBS_OK else [],
-                                value=None, interactive=True, scale=4)
-                            avatar_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
-                                                           variant="secondary")
-                        avatar_preview = gr.Video(
-                            label="预览", height=190, interactive=False, visible=False)
-                        avatar_preview_title = gr.HTML(value="", visible=False)
+                        with gr.Column(elem_classes="panel"):
+                            audio_mode = gr.Radio(
+                                label="选择音频来源",
+                                choices=["文字转语音", "直接上传音频"],
+                                value="文字转语音",
+                                elem_classes="audio-mode-radio")
 
-                        # ── 合成音频 ──
-                        gr.HTML('<div class="section-label">🔊 音频（自动引用步骤1的结果，也可手动上传）</div>')
-                        audio_for_ls = gr.Audio(
-                            label="用于视频合成的音频",
-                            type="filepath", interactive=True)
+                            # ── 模式A: 文字转语音 ──
+                            with gr.Group(visible=True) as tts_mode_group:
+                                gr.HTML('<div class="section-label">🎙 音色选择</div>')
+                                with gr.Row():
+                                    voice_select = gr.Dropdown(
+                                        label="从音色库选择",
+                                        choices=_vc.get_choices() if _LIBS_OK else [],
+                                        value=None, interactive=True, scale=4)
+                                    voice_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
+                                                                  variant="secondary")
+                                voice_preview = gr.Audio(label="🔊 试听所选音色", interactive=False,
+                                                         visible=False)
+                                
+                                # 隐藏的 prompt_audio 组件（用于内部逻辑，不显示给用户）
+                                prompt_audio = gr.Audio(visible=False, type="filepath")
 
-                        ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
+                                # ── 语音风格预设 ──
+                                voice_style = gr.Radio(
+                                    label="语音风格",
+                                    choices=["标准", "稳定播报", "活泼生动", "慢速朗读", "专业模式"],
+                                    value="标准",
+                                    elem_classes="voice-style-radio")
+                                voice_speed = gr.Slider(
+                                    label="语速调节",
+                                    info="← 慢  |  快 →",
+                                    minimum=0.5, maximum=1.5, value=1.0, step=0.05)
 
-                    # ═══ 列 3：生成结果 ═══════════════════════════
-                    with gr.Column(scale=2, elem_classes="panel", elem_id="output-video-col"):
+                                with gr.Group(visible=False) as pro_mode_group:
+                                    with gr.Row():
+                                        top_p = gr.Slider(label="词语多样性", info="越高越随机 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
+                                        top_k = gr.Slider(label="候选词数量", info="越小越保守 20~50", minimum=1, maximum=100, value=30, step=1)
+                                    with gr.Row():
+                                        temperature = gr.Slider(label="语气活跃度", info="越高越有变化", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
+                                        num_beams   = gr.Slider(label="搜索精度", info="越高越慢但更准", minimum=1, maximum=10, value=1, step=1)
+                                    with gr.Row():
+                                        repetition_penalty = gr.Slider(label="避免重复", info="越高越不重复", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
+                                        max_mel_tokens     = gr.Slider(label="最大长度", info="长文本需加大", minimum=500, maximum=3000, value=1500, step=100)
+                                    gr.HTML('<div class="divider"></div>')
+                                    gr.Markdown("### 🎭 情感控制")
+                                    emo_mode = gr.Radio(
+                                        label="情感控制模式",
+                                        choices=["与音色参考音频相同","使用情感参考音频","使用情感向量控制","使用情感描述文本控制"],
+                                        value="与音色参考音频相同")
+                                    with gr.Group(visible=False) as emo_audio_group:
+                                        emo_audio  = gr.Audio(label="情感参考音频", sources=["upload"], type="filepath")
+                                        emo_weight = gr.Slider(label="情感强度", info="0=不混合情感，1=完全使用情感参考", minimum=0.0, maximum=1.0, value=0.6, step=0.1)
+                                    with gr.Group(visible=False) as emo_vec_group:
+                                        gr.Markdown("调整8个情感向量维度（-1.0 到 1.0）")
+                                        with gr.Row():
+                                            vec1 = gr.Slider(label="向量1", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                            vec2 = gr.Slider(label="向量2", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                        with gr.Row():
+                                            vec3 = gr.Slider(label="向量3", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                            vec4 = gr.Slider(label="向量4", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                        with gr.Row():
+                                            vec5 = gr.Slider(label="向量5", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                            vec6 = gr.Slider(label="向量6", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                        with gr.Row():
+                                            vec7 = gr.Slider(label="向量7", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                            vec8 = gr.Slider(label="向量8", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
+                                    with gr.Group(visible=False) as emo_text_group:
+                                        emo_text = gr.Textbox(
+                                            label="情感描述文本",
+                                            placeholder="例如：开心、悲伤、愤怒...",
+                                            lines=2)
+                                    def update_emo_visibility(mode):
+                                        return (
+                                            gr.update(visible=(mode=="使用情感参考音频")),
+                                            gr.update(visible=(mode=="使用情感向量控制")),
+                                            gr.update(visible=(mode=="使用情感描述文本控制")))
+                                    emo_mode.change(update_emo_visibility,
+                                                    inputs=[emo_mode],
+                                                    outputs=[emo_audio_group, emo_vec_group, emo_text_group])
+                                gen_btn      = gr.Button("🎵  开始语音合成", variant="primary", size="lg")
+                                tts_hint = gr.HTML(value="")
+                                output_audio = gr.Audio(label="合成结果", interactive=False)
+
+                            # ── 模式B: 直接上传音频 ──
+                            with gr.Group(visible=False) as upload_mode_group:
+                                gr.HTML(
+                                    '<div style="background:#f0f9ff;border:1.5px solid #bae6fd;'
+                                    'border-radius:12px;padding:12px 14px;margin-bottom:12px;">'
+                                    '<div style="font-size:13px;font-weight:700;color:#0c4a6e;margin-bottom:4px;">📁 直接上传音频文件</div>'
+                                    '<div style="font-size:11px;color:#0369a1;line-height:1.6;">'
+                                    '上传已有的音频文件，跳过语音合成步骤，直接用于视频合成。<br>'
+                                    '支持 WAV、MP3 等常见格式。</div></div>'
+                                )
+                                direct_audio_upload = gr.Audio(
+                                    label="上传音频文件（WAV / MP3）",
+                                    sources=["upload"], type="filepath")
+
+                    # ═══ 步骤 3：视频合成 ═══════════════════════════
+                    with gr.Column(scale=1):
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">3</div>'
-                            '<span class="step-title">生成结果</span>'
+                            '<span class="step-title">视频合成</span>'
                             '</div>'
                         )
-                        ls_detail_html = gr.HTML(value="", visible=False, elem_id="ls-detail-box")
-                        output_video = gr.Video(
-                            label="✨ 最终合成视频",
-                            height=400, elem_id="output-video", interactive=False)
+                        with gr.Column(elem_classes="panel"):
+                            # ── 数字人选择 ──
+                            gr.HTML('<div class="section-label">🎭 数字人选择</div>')
+                            with gr.Row():
+                                avatar_select = gr.Dropdown(
+                                    label="从数字人库选择",
+                                    choices=_av.get_choices() if _LIBS_OK else [],
+                                    value=None, interactive=True, scale=4)
+                                avatar_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
+                                                               variant="secondary")
+                            avatar_preview = gr.Video(
+                                label="预览", height=190, interactive=False, visible=False)
+                            avatar_preview_title = gr.HTML(value="", visible=False)
 
-                        # ══ 字幕面板 ══════════════════════════════
-                        with gr.Group(elem_classes="subtitle-panel"):
-                            gr.HTML(
-                                '<div class="subtitle-panel-head">'
-                                '<div class="subtitle-panel-icon">✏️</div>'
-                                '<span class="subtitle-panel-title">智能字幕</span>'
-                                '<span class="subtitle-panel-tip">✨ 支持关键词高亮</span>'
-                                '</div>'
-                            )
-                            # 行1：字体 字号 位置
-                            with gr.Row():
-                                sub_font = gr.Dropdown(
-                                    label="字体",
-                                    choices=_sub.get_font_choices() if _LIBS_OK else ["默认字体"],
-                                    value=(_sub.get_font_choices()[0] if (_LIBS_OK and _sub.get_font_choices()) else "默认字体"),
-                                    interactive=True, scale=3)
-                                sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
-                                                     value=32, step=2, scale=3)
-                                sub_pos = gr.Radio(label="位置", choices=["上","中","下"],
-                                                   value="下", scale=2,
-                                                   elem_classes="sub-pos-radio")
-                            # 行2：颜色 — 每行2个确保显示完整
-                            with gr.Row():
-                                sub_color_txt = gr.ColorPicker(
-                                    label="字幕颜色", value="#FFFFFF", scale=1)
-                                sub_hi_txt = gr.ColorPicker(
-                                    label="高亮颜色", value="#FFD700", scale=1)
-                            with gr.Row():
-                                sub_outline_txt = gr.ColorPicker(
-                                    label="描边颜色", value="#000000", scale=1,
-                                    elem_id="sub-outline-color")
-                                sub_outline_size = gr.Slider(
-                                    label="描边宽度 px", minimum=0, maximum=10,
-                                    value=6, step=1, scale=1)
-                            with gr.Row():
-                                sub_bg_color = gr.ColorPicker(
-                                    label="背景颜色", value="#000000", scale=1)
-                                sub_bg_opacity = gr.Slider(
-                                    label="背景透明度", minimum=0, maximum=100,
-                                    value=0, step=5, scale=1,
-                                    info="0=全透明 100=不透明")
-                            # 行3：关键词高亮
-                            with gr.Row():
-                                sub_kw_enable = gr.Checkbox(
-                                    label="🌟 启用关键词放大高亮", value=False,
-                                    scale=2, elem_classes="kw-checkbox")
-                                sub_hi_scale = gr.Slider(
-                                    label="放大倍数", minimum=1.1, maximum=2.5,
-                                    value=1.5, step=0.1, scale=2, visible=False)
-                            with gr.Row(visible=False) as sub_kw_row:
-                                sub_kw_text = gr.Textbox(
-                                    label="关键词（逗号分隔）",
-                                    placeholder="如：便宜,优质,推荐,限时  — 多个词用逗号隔开",
-                                    max_lines=1, scale=1)
-                            # 行4：字幕文本
-                            sub_text = gr.Textbox(
-                                label="字幕内容（语音合成后自动填入）",
-                                placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
-                                lines=2)
-                            sub_btn = gr.Button("✨  生成带字幕视频", variant="primary", size="lg")
-                            sub_hint = gr.HTML(value="")
-                            sub_video = gr.Video(label="🎬 字幕版视频", height=280,
-                                                 interactive=False, visible=False)
-                    
-                    # ═══ 列 4：发布抖音 ═══════════════════════════
-                    with gr.Column(scale=1, elem_classes="panel"):
+                            # ── 合成音频 ──
+                            gr.HTML('<div class="section-label">🔊 音频（自动引用步骤1的结果，也可手动上传）</div>')
+                            audio_for_ls = gr.Audio(
+                                label="用于视频合成的音频",
+                                type="filepath", interactive=True)
+
+                            ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
+
+                    # ═══ 步骤 4+5：字幕合成 + 发布平台（右侧纵向排列）═══════════════════════════
+                    with gr.Column(scale=2):
+                        # 步骤4：字幕合成（上方）
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">4</div>'
-                            '<span class="step-title">发布抖音</span>'
+                            '<span class="step-title">字幕合成</span>'
                             '</div>'
                         )
+                        with gr.Column(elem_classes="panel"):
+                            # ══ 字幕面板 ══════════════════════════════
+                            with gr.Group(elem_classes="subtitle-panel"):
+                                gr.HTML(
+                                    '<div class="subtitle-panel-head">'
+                                    '<div class="subtitle-panel-icon">✏️</div>'
+                                    '<span class="subtitle-panel-title">智能字幕</span>'
+                                    '<span class="subtitle-panel-tip">✨ 支持关键词高亮</span>'
+                                    '</div>'
+                                )
+                                # 行1：字体 字号 位置
+                                with gr.Row():
+                                    sub_font = gr.Dropdown(
+                                        label="字体",
+                                        choices=_sub.get_font_choices() if _LIBS_OK else ["默认字体"],
+                                        value=(_sub.get_font_choices()[0] if (_LIBS_OK and _sub.get_font_choices()) else "默认字体"),
+                                        interactive=True, scale=3)
+                                    sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
+                                                         value=32, step=2, scale=3)
+                                    sub_pos = gr.Radio(label="位置", choices=["上","中","下"],
+                                                       value="下", scale=2,
+                                                       elem_classes="sub-pos-radio")
+                                # 行2：颜色 — 每行2个确保显示完整
+                                with gr.Row():
+                                    sub_color_txt = gr.ColorPicker(
+                                        label="字幕颜色", value="#FFFFFF", scale=1)
+                                    sub_hi_txt = gr.ColorPicker(
+                                        label="高亮颜色", value="#FFD700", scale=1)
+                                with gr.Row():
+                                    sub_outline_txt = gr.ColorPicker(
+                                        label="描边颜色", value="#000000", scale=1,
+                                        elem_id="sub-outline-color")
+                                    sub_outline_size = gr.Slider(
+                                        label="描边宽度 px", minimum=0, maximum=10,
+                                        value=6, step=1, scale=1)
+                                with gr.Row():
+                                    sub_bg_color = gr.ColorPicker(
+                                        label="背景颜色", value="#000000", scale=1)
+                                    sub_bg_opacity = gr.Slider(
+                                        label="背景透明度", minimum=0, maximum=100,
+                                        value=0, step=5, scale=1,
+                                        info="0=全透明 100=不透明")
+                                # 行3：关键词高亮
+                                with gr.Row():
+                                    sub_kw_enable = gr.Checkbox(
+                                        label="🌟 启用关键词放大高亮", value=False,
+                                        scale=2, elem_classes="kw-checkbox")
+                                    sub_hi_scale = gr.Slider(
+                                        label="放大倍数", minimum=1.1, maximum=2.5,
+                                        value=1.5, step=0.1, scale=2, visible=False)
+                                with gr.Row(visible=False) as sub_kw_row:
+                                    sub_kw_text = gr.Textbox(
+                                        label="关键词（逗号分隔）",
+                                        placeholder="如：便宜,优质,推荐,限时  — 多个词用逗号隔开",
+                                        max_lines=1, scale=1)
+                                # 行4：字幕文本
+                                sub_text = gr.Textbox(
+                                    label="字幕内容（语音合成后自动填入）",
+                                    placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
+                                    lines=2)
+                                sub_btn = gr.Button("✨  生成带字幕视频", variant="primary", size="lg")
+                                sub_hint = gr.HTML(value="")
                         
-                        gr.HTML('<div style="font-size:13px;color:#64748b;margin-bottom:12px;">优先发布字幕视频，如无字幕则发布合成视频</div>')
+                        # 字幕视频显示区（独立的panel，紧跟在字幕面板后面）
+                        with gr.Column(elem_classes="panel", visible=False, elem_id="sub-video-panel") as sub_video_panel:
+                            sub_video = gr.Video(label="🎬 字幕版视频", height=280,
+                                                 interactive=False)
                         
-                        with gr.Row():
+                        # 步骤5：发布平台（下方）
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num">5</div>'
+                            '<span class="step-title">发布平台</span>'
+                            '</div>'
+                        )
+                        with gr.Column(elem_classes="panel"):
+                            gr.HTML('<div style="font-size:13px;color:#64748b;margin-bottom:12px;">优先发布字幕视频，如无字幕则发布合成视频</div>')
+                            
+                            publish_platforms = gr.CheckboxGroup(
+                                label="选择发布平台",
+                                choices=["抖音", "视频号", "哔哩哔哩", "小红书", "快手"],
+                                value=["抖音"],
+                                elem_classes="publish-platform-checkbox"
+                            )
+                            
                             douyin_title = gr.Textbox(
                                 label="视频标题",
                                 placeholder="自动使用语音文字前30字，也可手动修改...",
                                 max_lines=2)
-                        
-                        with gr.Row():
+                            
                             douyin_topics = gr.Textbox(
                                 label="话题标签（逗号分隔）",
                                 placeholder="如：美食,探店,推荐",
                                 max_lines=1)
+                            
+                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">使用AI智能优化标题并生成5个话题标签</div>')
+                            optimize_btn = gr.Button("✨ AI优化", variant="secondary", size="sm")
+                            
+                            douyin_btn = gr.Button("🚀 发布到选中平台", variant="primary", size="lg")
+                            douyin_hint = gr.HTML(value="")
                         
-                        with gr.Row():
-                            optimize_btn = gr.Button("✨ AI优化", variant="secondary", size="sm", scale=1)
-                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用AI智能优化标题并生成5个话题标签</div>')
-                        
-                        douyin_btn = gr.Button("🚀 发布到抖音", variant="primary", size="lg")
-                        douyin_hint = gr.HTML(value="")
-
+                        # 合成视频显示区（移到最下方）
+                        with gr.Column(elem_classes="panel", elem_id="output-video-col"):
+                            ls_detail_html = gr.HTML(value="", visible=False, elem_id="ls-detail-box")
+                            output_video = gr.Video(
+                                label="✨ 合成视频",
+                                height=400, elem_id="output-video", interactive=False)
+                    
             # ── Tab 2：合成历史 ──────────────────────────────
             with gr.Tab("📁  合成历史", elem_classes="hist-tab"):
                 with gr.Row(elem_classes="workspace"):
@@ -2352,7 +2370,12 @@ def build_ui():
                 avatar_select, output_audio
             ],
             outputs=[sub_video, sub_hint, op_log_html,
-                    workspace_record_hint, workspace_record_dropdown])
+                    workspace_record_hint, workspace_record_dropdown]
+        ).then(
+            lambda v: gr.update(visible=True) if v else gr.update(visible=False),
+            inputs=[sub_video],
+            outputs=[sub_video_panel]
+        )
         
         # ═══════════════════════════════════════════════════════════
         # DeepSeek API 集成
