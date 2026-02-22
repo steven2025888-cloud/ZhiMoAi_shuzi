@@ -971,7 +971,9 @@ div.svelte-1nguped,
 
 /* 排除工作台记录下拉框，避免样式冲突 */
 #workspace-record-dropdown,
-#workspace-record-panel > * {
+#workspace-record-dropdown *,
+#workspace-record-panel .gr-dropdown,
+#workspace-record-panel .gr-dropdown * {
   background: transparent!important;
   border: none!important;
   padding: 0!important;
@@ -980,8 +982,20 @@ div.svelte-1nguped,
 /* 恢复工作台记录下拉框的正确样式 */
 #workspace-record-dropdown .wrap,
 #workspace-record-dropdown .wrap-inner,
-#workspace-record-dropdown select {
+#workspace-record-dropdown select,
+#workspace-record-panel .gr-dropdown .wrap,
+#workspace-record-panel .gr-dropdown select {
   background: #fff!important;
   border: 1.5px solid #e5e7eb!important;
   padding: 8px 12px!important;
+  pointer-events: auto!important;
+  cursor: pointer!important;
+}
+
+/* 确保下拉框可以交互 */
+#workspace-record-dropdown,
+#workspace-record-dropdown *,
+#workspace-record-panel .gr-dropdown,
+#workspace-record-panel .gr-dropdown * {
+  pointer-events: auto!important;
 }
