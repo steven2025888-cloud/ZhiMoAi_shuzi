@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
 import os, sys, time, subprocess, traceback, shutil, re, json, queue as _queue, threading
+import asyncio
+
+# ── WebSocket 模块（用于提取文案功能）──
+try:
+    import websockets
+    _WS_OK = True
+except ImportError:
+    _WS_OK = False
+    print("[WARN] websockets 模块未安装，提取文案功能将不可用")
 
 # ── 新功能模块（数字人 / 音色 / 字幕）──
 try:
@@ -34,6 +43,9 @@ os.environ['no_proxy'] = '127.0.0.1,localhost'
 os.environ['NO_PROXY'] = '127.0.0.1,localhost'
 
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
+PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
+LEGACY_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
+DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")  # 兼容旧版本
 INDEXTTS_DIR   = os.path.join(BASE_DIR, "IndexTTS2-SonicVale")
 LATENTSYNC_DIR = os.path.join(BASE_DIR, "LatentSync")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
@@ -447,6 +459,107 @@ INIT_JS = r"""
             input.dispatchEvent(new Event('input', {bubbles:true}));
             input.dispatchEvent(new Event('change', {bubbles:true}));
         }
+    };
+    
+    /* ── 9d. 抖音发布免责声明（登录时显示）── */
+    window._platformAiAgreementAccepted = false;
+    
+    window._showDouyinLoginAgreement = function(callback) {
+        // 如果已经同意过，直接执行回调
+        if (window._platformAiAgreementAccepted) {
+            if (callback) callback(true);
+            return;
+        }
+        
+        // 显示协议弹窗
+        var modal = document.getElementById('zdai-platform-ai-agreement-modal');
+        if (!modal) {
+            // 创建弹窗
+            document.body.insertAdjacentHTML('beforeend', `
+              <div id="zdai-platform-ai-agreement-modal" style="display:flex;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;">
+                <div style="position:absolute;inset:0;background:rgba(15,23,42,.85);backdrop-filter:blur(8px)"></div>
+                <div style="position:relative;background:#fff;border-radius:20px;padding:32px 28px;width:90%;max-width:680px;max-height:85vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.3)">
+                  <div style="text-align:center;margin-bottom:24px;">
+                    <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;box-shadow:0 8px 24px rgba(245,158,11,.3)">⚠️</div>
+                    <div style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:8px">平台与AI功能使用协议</div>
+                    <div style="font-size:13px;color:#64748b;">首次登录前必须阅读并同意以下条款</div>
+                  </div>
+                  
+                  <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:14px;padding:20px 24px;margin-bottom:24px;max-height:400px;overflow-y:auto;font-size:13px;line-height:1.9;color:#475569;">
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:0 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">一、免责声明</h3>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>1.1 服务性质</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">本软件提供的平台发布与AI处理功能仅为技术工具，用于辅助用户在多个平台进行内容处理与发布。本软件不对发布内容的合法性、真实性、准确性承担任何责任。</p>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>1.2 内容责任</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">用户对其发布的所有内容（包括但不限于视频、文字、图片、音频等）承担全部法律责任。用户保证其发布的内容：</p>
+                    <ul style="margin:0 0 16px 0;padding-left:36px;">
+                      <li>不侵犯任何第三方的知识产权、肖像权、隐私权等合法权益</li>
+                      <li>不包含违法、违规、淫秽、暴力、恐怖、诽谤等不良信息</li>
+                      <li>符合国家法律法规及相关平台规则</li>
+                      <li>不用于任何商业欺诈、虚假宣传等违法违规行为</li>
+                    </ul>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>1.3 账号安全</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">用户需妥善保管自己的抖音账号信息。因用户账号泄露、被盗用等原因导致的任何损失，本软件不承担责任。</p>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>1.4 平台规则</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">抖音平台可能随时调整其服务条款、发布规则、审核标准等。因平台规则变化导致的发布失败、内容被删除、账号被封禁等情况，本软件不承担任何责任。</p>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>1.5 技术限制</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">本软件依赖第三方技术和服务，可能因技术故障、网络中断、平台更新等原因导致功能异常。本软件不保证服务的持续性、稳定性和准确性。</p>
+                    
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:24px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">二、用户协议</h3>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>2.1 合法使用</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">用户承诺仅将本软件用于合法目的，不得用于任何违法违规活动。</p>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>2.2 自担风险</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">用户理解并同意，使用本软件发布内容可能面临的风险（包括但不限于内容被删除、账号被封禁、法律纠纷等）由用户自行承担。</p>
+                    
+                    <p style="margin:0 0 12px 0;"><strong>2.3 数据隐私</strong></p>
+                    <p style="margin:0 0 16px 0;padding-left:16px;">本软件会在本地保存用户的登录状态，用于保持登录便利性。本软件不会收集、上传或泄露用户的个人信息和账号数据。</p>
+                    
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:24px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">三、特别提示</h3>
+                    
+                    <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+                      <p style="margin:0 0 8px 0;font-weight:700;color:#dc2626;">⚠️ 重要提醒</p>
+                      <ul style="margin:0;padding-left:20px;color:#991b1b;">
+                        <li>请确保发布内容符合法律法规和平台规定</li>
+                        <li>请勿发布侵权、违规、不良信息</li>
+                        <li>账号安全由用户自行负责</li>
+                        <li>因违规使用导致的一切后果由用户承担</li>
+                      </ul>
+                    </div>
+                    
+                    <p style="margin:0;font-size:12px;color:#64748b;text-align:center;padding-top:12px;border-top:1px solid #e2e8f0;">
+                      最后更新日期：2026年2月22日
+                    </p>
+                  </div>
+                  
+                  <div style="display:flex;gap:12px;">
+                    <button id="zdai-platform-ai-agreement-cancel" style="flex:1;padding:14px;border-radius:12px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;color:#475569;transition:all .15s">取消</button>
+                    <button id="zdai-platform-ai-agreement-accept" style="flex:2;padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;box-shadow:0 4px 12px rgba(99,102,241,.3)">我已阅读并同意</button>
+                  </div>
+                </div>
+              </div>
+            `);
+            modal = document.getElementById('zdai-platform-ai-agreement-modal');
+        } else {
+            modal.style.display = 'flex';
+        }
+        
+        // 绑定按钮事件
+        document.getElementById('zdai-platform-ai-agreement-cancel').onclick = function() {
+            modal.style.display = 'none';
+            if (callback) callback(false);
+        };
+        
+        document.getElementById('zdai-platform-ai-agreement-accept').onclick = function() {
+            window._platformAiAgreementAccepted = true; window._douyinAgreementAccepted = true;
+            modal.style.display = 'none';
+            if (callback) callback(true);
+        };
     };
     
     window._deleteWorkspaceRecord = function(index, name) {
@@ -1184,6 +1297,158 @@ button[class*="dialog-button"] {
   border:1.5px solid #e2e8f0!important;
   border-radius:8px!important;
 }
+
+/* ── AI功能按钮样式 ── */
+button:has-text("✨ AI改写"),
+button:has-text("✨ AI优化"),
+button[value*="AI改写"],
+button[value*="AI优化"] {
+  background:linear-gradient(135deg,#f0f9ff,#e0f2fe)!important;
+  border:1.5px solid #7dd3fc!important;
+  color:#0369a1!important;
+  font-weight:700!important;
+  transition:all .2s!important;
+}
+
+button:has-text("✨ AI改写"):hover,
+button:has-text("✨ AI优化"):hover,
+button[value*="AI改写"]:hover,
+button[value*="AI优化"]:hover {
+  background:linear-gradient(135deg,#e0f2fe,#bae6fd)!important;
+  border-color:#38bdf8!important;
+  transform:translateY(-1px)!important;
+  box-shadow:0 4px 12px rgba(14,165,233,.25)!important;
+}
+
+/* ══════════════════════════════════════
+   文案提取面板样式
+   ══════════════════════════════════════ */
+.extract-panel {
+  background: linear-gradient(135deg, #fdf4ff 0%, #fae8ff 50%, #f5d0fe 100%)!important;
+  border: 2px solid #e879f9!important;
+  border-radius: 14px!important;
+  padding: 14px 16px!important;
+  margin-bottom: 14px!important;
+  box-shadow: 0 2px 12px rgba(217, 70, 239, 0.12)!important;
+  transition: all 0.3s ease!important;
+}
+
+.extract-panel:hover {
+  box-shadow: 0 4px 20px rgba(217, 70, 239, 0.2)!important;
+  border-color: #d946ef!important;
+}
+
+.extract-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1.5px solid rgba(217, 70, 239, 0.2);
+}
+
+.extract-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 2px 4px rgba(217, 70, 239, 0.3));
+}
+
+.extract-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #86198f;
+  letter-spacing: 0.3px;
+}
+
+.extract-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #d946ef, #a855f7);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(168, 85, 247, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.extract-input textarea {
+  background: #fff!important;
+  border: 1.5px solid #e9d5ff!important;
+  border-radius: 10px!important;
+  font-size: 13px!important;
+  transition: all 0.2s!important;
+}
+
+.extract-input textarea:focus {
+  border-color: #d946ef!important;
+  box-shadow: 0 0 0 3px rgba(217, 70, 239, 0.15)!important;
+}
+
+.extract-btn {
+  background: linear-gradient(135deg, #d946ef, #a855f7)!important;
+  border: none!important;
+  color: #fff!important;
+  font-weight: 700!important;
+  border-radius: 10px!important;
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.35)!important;
+  transition: all 0.2s!important;
+  min-width: 120px!important;
+}
+
+.extract-btn:hover {
+  transform: translateY(-2px)!important;
+  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.45)!important;
+}
+
+.extract-btn:active {
+  transform: translateY(0)!important;
+}
+
+.extract-tip {
+  font-size: 11px;
+  color: #a855f7;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+}
+
+.extract-hint .hint-ok {
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5)!important;
+  border: 1.5px solid #34d399!important;
+  color: #065f46!important;
+  padding: 8px 12px!important;
+  border-radius: 8px!important;
+  font-size: 12px!important;
+  margin-top: 8px!important;
+}
+
+.extract-hint .hint-err {
+  background: linear-gradient(135deg, #fef2f2, #fee2e2)!important;
+  border: 1.5px solid #f87171!important;
+  color: #991b1b!important;
+  padding: 8px 12px!important;
+  border-radius: 8px!important;
+  font-size: 12px!important;
+  margin-top: 8px!important;
+}
+
+.extract-hint .hint-loading {
+  background: linear-gradient(135deg, #fdf4ff, #fae8ff)!important;
+  border: 1.5px solid #e879f9!important;
+  color: #86198f!important;
+  padding: 8px 12px!important;
+  border-radius: 8px!important;
+  font-size: 12px!important;
+  margin-top: 8px!important;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
 """
 
 
@@ -1682,6 +1947,206 @@ def _render_batch_prog(done, total, cur_name, status, msg, out_folder=""):
     folder_hint = f'<div style="font-size:11px;color:#64748b;margin-top:8px;">' + '\U0001f4c1' + f' 输出目录：{out_folder}</div>' if out_folder else ""
     return f'<div style="background:linear-gradient(135deg,#1e293b,#0f172a);border:1.5px solid #6366f1;border-radius:12px;padding:14px 16px;font-family:Microsoft YaHei,sans-serif;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span style="width:10px;height:10px;border-radius:50%;background:{sc};flex-shrink:0;"></span><span style="font-size:13px;font-weight:700;color:#e2e8f0;">{status}</span><span style="margin-left:auto;font-size:13px;font-weight:800;color:#6366f1;">{done}/{total}</span></div><div style="background:rgba(99,102,241,.15);border-radius:6px;height:8px;overflow:hidden;margin-bottom:8px;"><div style="height:100%;width:{pct}%;background:linear-gradient(90deg,#6366f1,#8b5cf6);border-radius:6px;"></div></div><div style="font-size:12px;color:#94a3b8;">{msg}</div>{folder_hint}</div>'
 
+
+# ══════════════════════════════════════════════════════════════
+#  WebSocket 文案提取器（全局单例，保持长连接）
+# ══════════════════════════════════════════════════════════════
+class TextExtractor:
+    """WebSocket 文案提取器，保持长连接"""
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+        self._ws = None
+        self._connected = False
+        self._registered = False
+        self._loop = None
+        self._thread = None
+        self._response_queue = _queue.Queue()
+        self._ws_url = "wss://api.zhimengai.xyz/dsp"
+        
+    def _get_license_key(self):
+        """从本地获取卡密"""
+        license_file = os.path.join(BASE_DIR, ".license")
+        if os.path.exists(license_file):
+            try:
+                with open(license_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data.get("license_key", "")
+            except Exception:
+                pass
+        return ""
+    
+    async def _connect_and_register(self):
+        """连接WebSocket并注册"""
+        if not _WS_OK:
+            safe_print("[TextExtractor] websockets 模块未安装")
+            return False
+        
+        try:
+            license_key = self._get_license_key()
+            if not license_key:
+                safe_print("[TextExtractor] 未找到卡密")
+                return False
+            
+            safe_print(f"[TextExtractor] 正在连接 {self._ws_url}")
+            self._ws = await websockets.connect(
+                self._ws_url,
+                ping_interval=30,
+                ping_timeout=10,
+                close_timeout=5
+            )
+            self._connected = True
+            safe_print("[TextExtractor] WebSocket 连接成功")
+            
+            # 发送注册消息
+            register_msg = json.dumps({"type": "register", "key": license_key})
+            await self._ws.send(register_msg)
+            safe_print(f"[TextExtractor] 已发送注册消息")
+            
+            # 等待注册响应
+            try:
+                response = await asyncio.wait_for(self._ws.recv(), timeout=10)
+                safe_print(f"[TextExtractor] 收到注册响应: {response}")
+                self._registered = True
+            except asyncio.TimeoutError:
+                safe_print("[TextExtractor] 注册响应超时，继续运行")
+                self._registered = True  # 即使超时也继续
+            
+            return True
+        except Exception as e:
+            safe_print(f"[TextExtractor] 连接失败: {e}")
+            self._connected = False
+            self._registered = False
+            return False
+    
+    async def _listen_loop(self):
+        """监听WebSocket消息"""
+        while self._connected and self._ws:
+            try:
+                message = await self._ws.recv()
+                safe_print(f"[TextExtractor] 收到消息: {message[:200]}..." if len(message) > 200 else f"[TextExtractor] 收到消息: {message}")
+                self._response_queue.put(message)
+            except websockets.exceptions.ConnectionClosed:
+                safe_print("[TextExtractor] 连接已关闭，尝试重连...")
+                self._connected = False
+                # 尝试重连
+                await asyncio.sleep(2)
+                await self._connect_and_register()
+            except Exception as e:
+                safe_print(f"[TextExtractor] 监听错误: {e}")
+                break
+    
+    def _run_event_loop(self):
+        """在后台线程运行事件循环"""
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        
+        # 连接并注册
+        self._loop.run_until_complete(self._connect_and_register())
+        
+        # 开始监听
+        if self._connected:
+            try:
+                self._loop.run_until_complete(self._listen_loop())
+            except Exception as e:
+                safe_print(f"[TextExtractor] 事件循环错误: {e}")
+    
+    def start(self):
+        """启动WebSocket连接（后台线程）"""
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._run_event_loop, daemon=True)
+            self._thread.start()
+            safe_print("[TextExtractor] 后台线程已启动")
+    
+    def extract_text(self, url_or_content: str, timeout: float = 30.0) -> tuple:
+        """
+        提取文案
+        :param url_or_content: URL或内容
+        :param timeout: 超时时间（秒）
+        :return: (success, content_or_error)
+        """
+        if not _WS_OK:
+            return False, "websockets 模块未安装，请运行: pip install websockets"
+        
+        if not self._connected or not self._ws:
+            # 尝试启动连接
+            self.start()
+            time.sleep(2)  # 等待连接建立
+            
+        if not self._connected:
+            return False, "WebSocket 未连接，请检查网络"
+        
+        # 清空队列中的旧消息
+        while not self._response_queue.empty():
+            try:
+                self._response_queue.get_nowait()
+            except _queue.Empty:
+                break
+        
+        # 发送提取请求
+        try:
+            extract_msg = json.dumps({"type": "url", "url": url_or_content})
+            
+            # 在事件循环中发送消息
+            async def send_msg():
+                await self._ws.send(extract_msg)
+            
+            if self._loop and self._loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(send_msg(), self._loop)
+                future.result(timeout=5)
+            else:
+                return False, "事件循环未运行"
+            
+            safe_print(f"[TextExtractor] 已发送提取请求: {url_or_content[:50]}...")
+            
+            # 等待响应
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    response = self._response_queue.get(timeout=1)
+                    data = json.loads(response)
+                    
+                    if data.get("type") == "result":
+                        content = data.get("content", "")
+                        if content:
+                            return True, content
+                        else:
+                            return False, "返回内容为空"
+                    elif data.get("type") == "error":
+                        return False, data.get("message", "提取失败")
+                except _queue.Empty:
+                    continue
+                except json.JSONDecodeError:
+                    continue
+            
+            return False, "请求超时，请重试"
+            
+        except Exception as e:
+            return False, f"发送请求失败: {e}"
+
+
+# 全局文案提取器实例
+_text_extractor = None
+
+def get_text_extractor():
+    """获取全局文案提取器实例"""
+    global _text_extractor
+    if _text_extractor is None:
+        _text_extractor = TextExtractor()
+    return _text_extractor
+
 # ══════════════════════════════════════════════════════════════
 #  构建 UI
 # ══════════════════════════════════════════════════════════════
@@ -1754,10 +2219,44 @@ def build_ui():
 
                         # ── 模式A: 文字转语音 ──
                         with gr.Group(visible=True) as tts_mode_group:
+                            # ── 文案提取功能区 ──
+                            with gr.Group(elem_classes="extract-panel"):
+                                gr.HTML(
+                                    '<div class="extract-header">'
+                                    '<span class="extract-icon">🔗</span>'
+                                    '<span class="extract-title">智能文案提取</span>'
+                                    '<span class="extract-badge">AI</span>'
+                                    '</div>'
+                                )
+                                extract_input = gr.Textbox(
+                                    label="",
+                                    placeholder="粘贴抖音/小红书/公众号等链接，或直接输入内容...",
+                                    lines=2,
+                                    elem_classes="extract-input"
+                                )
+                                with gr.Row():
+                                    extract_btn = gr.Button(
+                                        "✨ 提取文案",
+                                        variant="primary",
+                                        size="sm",
+                                        scale=1,
+                                        elem_classes="extract-btn"
+                                    )
+                                    gr.HTML(
+                                        '<div class="extract-tip">'
+                                        '支持主流平台链接，一键提取文案内容'
+                                        '</div>'
+                                    )
+                                extract_hint = gr.HTML(value="", elem_classes="extract-hint")
+                            
                             input_text = gr.TextArea(
                                 label="合成文本",
                                 placeholder="在此输入或粘贴需要克隆语音的文字内容...",
                                 lines=5)
+                            
+                            with gr.Row():
+                                rewrite_btn = gr.Button("✨ AI改写", variant="secondary", size="sm", scale=1)
+                                gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用DeepSeek AI改写文案，让内容更生动</div>')
 
                             gr.HTML('<div class="section-label">🎙 音色选择</div>')
                             with gr.Row():
@@ -1831,6 +2330,7 @@ def build_ui():
                                                 inputs=[emo_mode],
                                                 outputs=[emo_audio_group, emo_vec_group, emo_text_group])
                             gen_btn      = gr.Button("🎵  开始语音合成", variant="primary", size="lg")
+                            tts_hint = gr.HTML(value="")
                             output_audio = gr.Audio(label="合成结果", interactive=False)
 
                         # ── 模式B: 直接上传音频 ──
@@ -1952,25 +2452,36 @@ def build_ui():
                             sub_hint = gr.HTML(value="")
                             sub_video = gr.Video(label="🎬 字幕版视频", height=280,
                                                  interactive=False, visible=False)
-                            
-                            # 抖音发布区域
-                            with gr.Group(visible=True) as douyin_group:
-                                gr.HTML('<div style="padding:12px 0;border-top:1px solid #e5e7eb;margin-top:12px;">'
-                                        '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:8px;">📱 发布到抖音</div>'
-                                        '</div>')
-                                with gr.Row():
-                                    douyin_title = gr.Textbox(
-                                        label="视频标题",
-                                        placeholder="自动使用语音文字前30字，也可手动修改...",
-                                        max_lines=2,
-                                        scale=3)
-                                    douyin_topics = gr.Textbox(
-                                        label="话题标签（逗号分隔）",
-                                        placeholder="如：美食,探店,推荐",
-                                        max_lines=1,
-                                        scale=2)
-                                douyin_btn = gr.Button("🚀 发布到抖音", variant="primary", size="lg")
-                                douyin_hint = gr.HTML(value="")
+                    
+                    # ═══ 列 4：发布抖音 ═══════════════════════════
+                    with gr.Column(scale=1, elem_classes="panel"):
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num">4</div>'
+                            '<span class="step-title">发布抖音</span>'
+                            '</div>'
+                        )
+                        
+                        gr.HTML('<div style="font-size:13px;color:#64748b;margin-bottom:12px;">优先发布字幕视频，如无字幕则发布合成视频</div>')
+                        
+                        with gr.Row():
+                            douyin_title = gr.Textbox(
+                                label="视频标题",
+                                placeholder="自动使用语音文字前30字，也可手动修改...",
+                                max_lines=2)
+                        
+                        with gr.Row():
+                            douyin_topics = gr.Textbox(
+                                label="话题标签（逗号分隔）",
+                                placeholder="如：美食,探店,推荐",
+                                max_lines=1)
+                        
+                        with gr.Row():
+                            optimize_btn = gr.Button("✨ AI优化", variant="secondary", size="sm", scale=1)
+                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用DeepSeek AI优化标题并生成5个话题标签</div>')
+                        
+                        douyin_btn = gr.Button("🚀 发布到抖音", variant="primary", size="lg")
+                        douyin_hint = gr.HTML(value="")
 
             # ── Tab 2：合成历史 ──────────────────────────────
             with gr.Tab("📁  合成历史", elem_classes="hist-tab"):
@@ -3112,19 +3623,15 @@ def build_ui():
                     bg_opacity=int(bg_opacity or 0),
                     progress_cb=_cb
                 )
-                # 返回：字幕视频路径（字符串）、提示、日志、抖音组（不再控制）、抖音标题
+                # 返回：字幕视频路径（字符串）、提示、日志
                 return (out,
                         _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)),
-                        _make_log(True, "字幕完成 — " + os.path.basename(out)),
-                        gr.update(),  # douyin_group 始终可见，不需要控制
-                        text[:30] if text else "")  # 自动填充标题
+                        _make_log(True, "字幕完成 — " + os.path.basename(out)))
             except Exception as e:
                 traceback.print_exc()
                 return ("",
                         _hint_html("error", f"字幕生成失败: {str(e)[:300]}"),
-                        _make_log(False, f"字幕失败: {e}"),
-                        gr.update(),  # douyin_group 始终可见
-                        "")
+                        _make_log(False, f"字幕失败: {e}"))
 
         # 字幕按钮点击 - 直接在完成后保存
         def subtitle_and_save(out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
@@ -3136,7 +3643,7 @@ def build_ui():
                              progress=gr.Progress()):
             """生成字幕并自动保存工作台状态"""
             # 先生成字幕
-            sub_vid_path, sub_hnt, log_msg, douyin_grp, douyin_ttl = _do_subtitle(
+            sub_vid_path, sub_hnt, log_msg = _do_subtitle(
                 out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
@@ -3161,7 +3668,7 @@ def build_ui():
             else:
                 sub_vid_update = gr.update(visible=False)
             
-            return sub_vid_update, sub_hnt, log_msg, douyin_grp, douyin_ttl, hint_msg, dropdown_update
+            return sub_vid_update, sub_hnt, log_msg, hint_msg, dropdown_update
         
         sub_btn.click(
             subtitle_and_save,
@@ -3175,8 +3682,157 @@ def build_ui():
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 avatar_select, output_audio
             ],
-            outputs=[sub_video, sub_hint, op_log_html, douyin_group, douyin_title,
+            outputs=[sub_video, sub_hint, op_log_html,
                     workspace_record_hint, workspace_record_dropdown])
+        
+        # ═══════════════════════════════════════════════════════════
+        # DeepSeek API 集成
+        # ═══════════════════════════════════════════════════════════
+        
+        def _call_deepseek_api(prompt, system_prompt="你是一个专业的文案创作助手。"):
+            """
+            调用DeepSeek API
+            :param prompt: 用户提示词
+            :param system_prompt: 系统提示词
+            :return: API返回的文本内容
+            """
+            try:
+                import requests
+                
+                # DeepSeek API配置
+                api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+                if not api_key:
+                    # 尝试从.env文件读取
+                    env_file = os.path.join(BASE_DIR, ".env")
+                    if os.path.exists(env_file):
+                        with open(env_file, "r", encoding="utf-8") as f:
+                            for line in f:
+                                if line.startswith("DEEPSEEK_API_KEY="):
+                                    api_key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                                    break
+                
+                if not api_key:
+                    return None, "❌ 未配置DeepSeek API密钥\n\n请在.env文件中添加：\nDEEPSEEK_API_KEY=your_api_key"
+                
+                # 调用API
+                url = "https://api.deepseek.com/v1/chat/completions"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}"
+                }
+                data = {
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 2000
+                }
+                
+                response = requests.post(url, headers=headers, json=data, timeout=30)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    return content.strip(), None
+                else:
+                    error_msg = f"API请求失败 (状态码: {response.status_code})"
+                    try:
+                        error_detail = response.json().get("error", {}).get("message", "")
+                        if error_detail:
+                            error_msg += f"\n{error_detail}"
+                    except:
+                        pass
+                    return None, error_msg
+                    
+            except requests.exceptions.Timeout:
+                return None, "❌ API请求超时，请检查网络连接"
+            except Exception as e:
+                return None, f"❌ API调用失败: {str(e)}"
+        
+        def _rewrite_text_with_deepseek(original_text):
+            """使用DeepSeek AI改写文案"""
+            if not original_text or not original_text.strip():
+                return original_text, _hint_html("warning", "⚠️ 请先输入文本内容")
+            
+            prompt = f"""请将以下文案改写得更加生动、吸引人，保持原意但提升表达效果。
+要求：
+1. 保持原文的核心信息和长度
+2. 使用更生动的词汇和表达方式
+3. 让文案更有感染力和吸引力
+4. 直接输出改写后的文案，不要添加任何解释
+
+原文案：
+{original_text}
+
+改写后的文案："""
+            
+            result, error = _call_deepseek_api(prompt)
+            
+            if error:
+                return original_text, _hint_html("error", error)
+            
+            if result:
+                return result, _hint_html("ok", "✅ AI改写完成！")
+            else:
+                return original_text, _hint_html("error", "❌ AI改写失败，未返回内容")
+        
+        def _optimize_title_with_deepseek(current_title, current_topics, video_text):
+            """使用DeepSeek AI优化标题并生成话题标签"""
+            if not video_text or not video_text.strip():
+                return current_title, current_topics, _hint_html("warning", "⚠️ 请先输入视频文本内容")
+            
+            prompt = f"""请根据以下视频文本内容，生成一个吸引人的抖音视频标题和5个相关话题标签。
+
+视频文本内容：
+{video_text[:200]}
+
+要求：
+1. 标题：不超过30字，要吸引眼球、引发好奇
+2. 话题标签：5个，用逗号分隔，要热门且相关
+3. 输出格式严格按照：
+标题：[你的标题]
+话题：[话题1,话题2,话题3,话题4,话题5]
+
+请直接输出，不要添加其他内容。"""
+            
+            result, error = _call_deepseek_api(prompt)
+            
+            if error:
+                return current_title, current_topics, _hint_html("error", error)
+            
+            if result:
+                # 解析返回结果
+                lines = result.strip().split('\n')
+                new_title = current_title
+                new_topics = current_topics
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("标题：") or line.startswith("标题:"):
+                        new_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif line.startswith("话题：") or line.startswith("话题:"):
+                        new_topics = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                
+                return new_title, new_topics, _hint_html("ok", "✅ AI优化完成！")
+            else:
+                return current_title, current_topics, _hint_html("error", "❌ AI优化失败，未返回内容")
+        
+        # 绑定AI改写按钮
+        rewrite_btn.click(
+            _rewrite_text_with_deepseek,
+            inputs=[input_text],
+            outputs=[input_text, tts_hint])
+        
+        # 清空提示
+        input_text.change(lambda: "", outputs=[tts_hint])
+        
+        # 绑定AI优化按钮
+        optimize_btn.click(
+            _optimize_title_with_deepseek,
+            inputs=[douyin_title, douyin_topics, input_text],
+            outputs=[douyin_title, douyin_topics, douyin_hint])
         
         # 抖音发布
         def _do_douyin_publish(sub_video, output_video, title_text, topics_text, progress=gr.Progress()):
@@ -3310,7 +3966,7 @@ def build_ui():
             threading.Thread(target=_run, daemon=True).start()
 
             # 简洁的状态提示（不用大块HTML，直接进度条推进）
-            yield gr.update(), gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True), gr.update(), gr.update()
+            yield gr.update(), gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True)
 
             while True:
                 try:
@@ -3318,12 +3974,12 @@ def build_ui():
                     if item[0] == "done":
                         break
                     elif item[0] == "detail":
-                        yield gr.update(), gr.update(), gr.update(value=item[1], visible=True), gr.update(), gr.update()
+                        yield gr.update(), gr.update(), gr.update(value=item[1], visible=True)
                 except _queue.Empty:
-                    yield gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+                    yield gr.update(), gr.update(), gr.update()
 
             if result["err"]:
-                yield gr.update(), _make_log(False, f"视频合成失败: {result['err']}"), gr.update(visible=False), gr.update(visible=False), ""
+                yield gr.update(), _make_log(False, f"视频合成失败: {result['err']}"), gr.update(visible=False)
                 raise gr.Error(str(result["err"]))
 
             out      = result["out"]
@@ -3352,10 +4008,9 @@ def build_ui():
             except Exception:
                 pass
             # 视频合成完成后显示抖音发布区域，并自动填充标题
-            douyin_title_text = input_txt[:30] if input_txt else ""
-            # 返回：视频路径（字符串）、日志、详情、抖音组（不再控制）、抖音标题
+            # 返回：视频路径（字符串）、日志、详情
             # 注意：第一个返回值是视频路径字符串，不是 gr.update 对象
-            yield out, log_html, gr.update(visible=False), gr.update(), douyin_title_text
+            yield out, log_html, gr.update(visible=False)
 
         # 视频合成按钮点击 - 直接在完成后保存
         def video_and_save(avatar_sel, aud_for_ls, inp_txt,
@@ -3372,13 +4027,13 @@ def build_ui():
             final_result = None
             for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, progress=progress):
                 # 在视频合成过程中，传递中间结果，但不保存工作台
-                # 返回 7 个值：前 5 个来自 ls_wrap，后 2 个是空的工作台更新
+                # 返回 5 个值：前 3 个来自 ls_wrap，后 2 个是空的工作台更新
                 yield result + (gr.update(), gr.update())
                 final_result = result
             
             # 视频合成完成后，保存工作台状态
             if final_result:
-                video_path, log_msg, ls_detail, douyin_grp, douyin_ttl = final_result
+                video_path, log_msg, ls_detail = final_result
                 
                 # 现在 video_path 直接就是视频路径字符串
                 # 不需要从 gr.update 对象中提取
@@ -3404,7 +4059,7 @@ def build_ui():
                 
                 # 最后一次 yield，包含保存结果
                 # 注意：第一个值需要是视频路径，Gradio 会自动处理
-                yield video_path, log_msg, ls_detail, douyin_grp, douyin_ttl, hint_msg, dropdown_update
+                yield video_path, log_msg, ls_detail, hint_msg, dropdown_update
         
         ls_btn.click(
             video_and_save,
@@ -3418,7 +4073,7 @@ def build_ui():
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text
             ],
-            outputs=[output_video, op_log_html, ls_detail_html, douyin_group, douyin_title,
+            outputs=[output_video, op_log_html, ls_detail_html,
                     workspace_record_hint, workspace_record_dropdown])
 
         # 历史操作
@@ -3561,8 +4216,53 @@ def build_ui():
             inputs=[workspace_record_dropdown],
             outputs=[workspace_record_dropdown, workspace_record_hint])
 
-        # 页面加载时自动刷新工作台记录列表和历史记录
+        # ════════════════════════════════════════════════════════════════
+        #  文案提取事件绑定
+        # ════════════════════════════════════════════════════════════════
+        
+        def _do_extract_text(url_or_content, progress=gr.Progress()):
+            """提取文案处理函数"""
+            if not url_or_content or not url_or_content.strip():
+                return gr.update(), _hint_html("warning", "请输入链接或内容")
+            
+            progress(0.2, desc="正在提取文案...")
+            
+            # 获取文案提取器实例
+            extractor = get_text_extractor()
+            
+            # 启动WebSocket连接（如果还没启动）
+            extractor.start()
+            
+            progress(0.4, desc="正在发送请求...")
+            
+            # 提取文案
+            success, result = extractor.extract_text(url_or_content.strip(), timeout=30)
+            
+            progress(1.0, desc="完成")
+            
+            if success:
+                # 提取成功，返回内容到合成文本框
+                return gr.update(value=result), '<div class="hint-ok">✅ 文案提取成功！</div>'
+            else:
+                # 提取失败
+                return gr.update(), f'<div class="hint-err">❌ {result}</div>'
+        
+        extract_btn.click(
+            _do_extract_text,
+            inputs=[extract_input],
+            outputs=[input_text, extract_hint]
+        )
+
+        # 页面加载时自动刷新工作台记录列表和历史记录，并初始化WebSocket连接
         def _init_load():
+            # 后台初始化文案提取器的WebSocket连接
+            try:
+                extractor = get_text_extractor()
+                extractor.start()
+                safe_print("[TextExtractor] WebSocket 连接已在后台初始化")
+            except Exception as e:
+                safe_print(f"[TextExtractor] 初始化失败: {e}")
+            
             return (
                 gr.update(choices=_get_workspace_record_choices()),
                 gr.update(choices=_hist_choices(), value=None),
@@ -3592,85 +4292,414 @@ def _license_gate():
             safe_print("[LICENSE] OK")
             return True
         safe_print(f"[LICENSE] online verify fail: {msg}")
-        # 在线验证失败 → 可能过期或被封，需重新登录
 
     # 2) 需要登录 — 弹出 tkinter 对话框
     try:
         import tkinter as tk
-        from tkinter import messagebox
     except ImportError:
         safe_print("[LICENSE] tkinter not available, skip")
         return True
 
-    machine_code = lic.get_machine_code()
     result = {"passed": False}
-
     root = tk.Tk()
     root.title("软件激活")
     root.resizable(False, False)
-    root.configure(bg="#f8fafc")
+    root.configure(bg="#eef2ff")
 
-    # 居中
-    w, h = 420, 260  # 减小高度，因为去掉了机器码显示
+    # 更大的窗口，避免任何控件挤压
+    w, h = 520, 560
     sx = (root.winfo_screenwidth() - w) // 2
     sy = (root.winfo_screenheight() - h) // 2
     root.geometry(f"{w}x{h}+{sx}+{sy}")
 
-    # 标题
-    tk.Label(root, text="软件激活", font=("Microsoft YaHei", 16, "bold"),
-             bg="#f8fafc", fg="#0f172a").pack(pady=(24, 4))
-    tk.Label(root, text="请输入卡密以激活使用", font=("Microsoft YaHei", 10),
-             bg="#f8fafc", fg="#94a3b8").pack(pady=(0, 16))
+    # 外层容器（模拟商业化卡片阴影效果）
+    page = tk.Frame(root, bg="#eef2ff")
+    page.pack(fill="both", expand=True, padx=18, pady=18)
 
-    # 卡密输入
-    frm = tk.Frame(root, bg="#f8fafc")
-    frm.pack(padx=32, fill="x")
+    card_shadow = tk.Frame(page, bg="#dbe4ff")
+    card_shadow.pack(fill="both", expand=True, padx=2, pady=2)
 
-    tk.Label(frm, text="卡密", font=("Microsoft YaHei", 9, "bold"),
-             bg="#f8fafc", fg="#374151", anchor="w").pack(fill="x")
-    key_entry = tk.Entry(frm, font=("Consolas", 11), relief="solid", bd=1)
-    key_entry.pack(fill="x", ipady=4, pady=(2, 10))
-    # 如果有过期的旧卡密，预填
+    card = tk.Frame(card_shadow, bg="#ffffff", relief="flat", bd=0)
+    card.pack(fill="both", expand=True, padx=(0, 2), pady=(0, 2))
+
+    # 顶部品牌区
+    top = tk.Frame(card, bg="#ffffff")
+    top.pack(fill="x", padx=20, pady=(18, 10))
+
+    badge = tk.Label(
+        top,
+        text="PRO",
+        font=("Segoe UI", 9, "bold"),
+        bg="#eef2ff",
+        fg="#4338ca",
+        padx=10,
+        pady=3
+    )
+    badge.pack(anchor="w")
+
+    tk.Label(
+        top,
+        text="软件激活登录",
+        font=("Microsoft YaHei", 18, "bold"),
+        bg="#ffffff",
+        fg="#0f172a"
+    ).pack(anchor="w", pady=(10, 4))
+
+    tk.Label(
+        top,
+        text="请输入有效卡密完成激活。首次使用前需阅读并勾选平台发布协议。",
+        font=("Microsoft YaHei", 9),
+        bg="#ffffff",
+        fg="#64748b",
+        justify="left"
+    ).pack(anchor="w")
+
+    # 分隔线
+    tk.Frame(card, bg="#e5e7eb", height=1).pack(fill="x", padx=20, pady=(4, 12))
+
+    body = tk.Frame(card, bg="#ffffff")
+    body.pack(fill="both", expand=True, padx=20, pady=(0, 14))
+
+    # 输入卡片
+    input_card = tk.Frame(body, bg="#f8fafc", relief="solid", bd=1)
+    input_card.pack(fill="x", pady=(0, 12))
+
+    tk.Label(input_card, text="激活卡密", font=("Microsoft YaHei", 10, "bold"),
+             bg="#f8fafc", fg="#1f2937").pack(anchor="w", padx=12, pady=(10, 6))
+    tk.Label(input_card, text="建议粘贴完整卡密，系统将进行在线校验。", font=("Microsoft YaHei", 8),
+             bg="#f8fafc", fg="#94a3b8").pack(anchor="w", padx=12, pady=(0, 8))
+
+    key_entry = tk.Entry(
+        input_card,
+        font=("Consolas", 12),
+        relief="solid",
+        bd=1,
+        highlightthickness=1,
+        highlightbackground="#d1d5db",
+        highlightcolor="#4f46e5",
+        bg="#ffffff",
+        fg="#111827",
+        insertbackground="#111827"
+    )
+    key_entry.pack(fill="x", padx=12, pady=(0, 12), ipady=10)
     if info.get("license_key"):
         key_entry.insert(0, info["license_key"])
 
-    # 机器码不再显示，但仍在后台使用
-    # tk.Label(frm, text="机器码（自动生成）", font=("Microsoft YaHei", 9, "bold"),
-    #          bg="#f8fafc", fg="#374151", anchor="w").pack(fill="x")
-    # mc_entry = tk.Entry(frm, font=("Consolas", 9), relief="solid", bd=1,
-    #                      fg="#64748b", state="readonly",
-    #                      readonlybackground="#f1f5f9")
-    # mc_entry.configure(state="normal")
-    # mc_entry.insert(0, machine_code)
-    # mc_entry.configure(state="readonly")
-    # mc_entry.pack(fill="x", ipady=3, pady=(2, 16))
+    # 协议区域（更规整）
+    agreement_var = tk.BooleanVar(value=False)
+    agreement_box = tk.Frame(body, bg="#fff7ed", relief="solid", bd=1)
+    agreement_box.pack(fill="x", pady=(0, 12))
 
-    msg_label = tk.Label(frm, text="", font=("Microsoft YaHei", 9),
-                          bg="#f8fafc", fg="#ef4444")
-    msg_label.pack(fill="x")
+    tk.Label(
+        agreement_box,
+        text="⚠ 使用平台功能与AI生成功能前，请先阅读并同意协议与风险提示",
+        font=("Microsoft YaHei", 9, "bold"),
+        bg="#fff7ed",
+        fg="#c2410c",
+        anchor="w"
+    ).pack(fill="x", padx=12, pady=(10, 6))
+
+    tk.Label(
+        agreement_box,
+        text="本软件仅提供技术辅助能力，不对内容合规、AI生成结果准确性、平台审核结果、账号状态及经营结果作任何保证。",
+        font=("Microsoft YaHei", 8),
+        bg="#fff7ed",
+        fg="#9a3412",
+        justify="left",
+        wraplength=450,
+        anchor="w"
+    ).pack(fill="x", padx=12, pady=(0, 8))
+
+    agree_row = tk.Frame(agreement_box, bg="#fff7ed")
+    agree_row.pack(fill="x", padx=10, pady=(0, 10))
+
+    # 自定义勾选框（避免系统默认样式过丑）
+    def _toggle_agreement(*_):
+        agreement_var.set(not bool(agreement_var.get()))
+
+    chk_wrap = tk.Frame(agree_row, bg="#fff7ed")
+    chk_wrap.pack(side="left", padx=(0, 8))
+
+    chk_canvas = tk.Canvas(chk_wrap, width=18, height=18, bg="#fff7ed", highlightthickness=0, bd=0, cursor="hand2")
+    chk_canvas.pack()
+
+    def _draw_custom_checkbox(*_):
+        chk_canvas.delete("all")
+        checked = bool(agreement_var.get())
+        border = "#4f46e5" if checked else "#cbd5e1"
+        fill = "#4f46e5" if checked else "#ffffff"
+        chk_canvas.create_rectangle(1, 1, 17, 17, outline=border, fill=fill, width=1)
+        if checked:
+            chk_canvas.create_line(4, 9, 8, 13, 14, 5, fill="#ffffff", width=2, capstyle="round", joinstyle="round")
+
+    chk_canvas.bind("<Button-1>", _toggle_agreement)
+
+    agree_text_label = tk.Label(agree_row, text="我已阅读并同意", font=("Microsoft YaHei", 9), bg="#fff7ed", fg="#374151", cursor="hand2")
+    agree_text_label.pack(side="left")
+    agree_text_label.bind("<Button-1>", _toggle_agreement)
+
+    def _load_agreement_text():
+        default_text = """平台与AI功能使用协议
+
+协议文件缺失：platform_ai_usage_agreement.txt（兼容旧文件名）
+
+请将协议文件放在程序同目录下。"""
+        try:
+            candidates = []
+            for _name in ("PLATFORM_AGREEMENT_FILE", "LEGACY_AGREEMENT_FILE", "DOUYIN_AGREEMENT_FILE"):
+                if _name in globals():
+                    candidates.append(globals().get(_name))
+            candidates.extend([
+                os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt"),
+                os.path.join(BASE_DIR, "platform_publish_agreement.txt"),
+                os.path.join(BASE_DIR, "douyin_publish_agreement.txt"),
+            ])
+            for p in candidates:
+                if p and os.path.exists(p):
+                    with open(p, "r", encoding="utf-8") as f:
+                        content = f.read().strip()
+                        if content:
+                            return content
+        except Exception as e:
+            return default_text + "\n\n读取错误：%s" % (e,)
+        return default_text
+
+    def show_agreement():
+        agreement_window = tk.Toplevel(root)
+        agreement_window.title("平台与AI功能使用协议")
+        agreement_window.geometry("860x700")
+        agreement_window.minsize(760, 620)
+        agreement_window.configure(bg="#f1f5f9")
+        agreement_window.transient(root)
+        agreement_window.grab_set()
+
+        try:
+            agreement_window.update_idletasks()
+            rw, rh = root.winfo_width(), root.winfo_height()
+            rx, ry = root.winfo_x(), root.winfo_y()
+            aw, ah = 860, 700
+            ax = rx + max((rw - aw) // 2, 0)
+            ay = ry + max((rh - ah) // 2, 0)
+            agreement_window.geometry(f"{aw}x{ah}+{ax}+{ay}")
+        except Exception:
+            pass
+
+        shell = tk.Frame(agreement_window, bg="#f1f5f9")
+        shell.pack(fill="both", expand=True, padx=16, pady=16)
+
+        header = tk.Frame(shell, bg="#ffffff", relief="solid", bd=1)
+        header.pack(fill="x")
+        tk.Label(header, text="平台与AI功能使用协议", font=("Microsoft YaHei", 13, "bold"), bg="#ffffff", fg="#0f172a").pack(anchor="w", padx=14, pady=(12, 2))
+        tk.Label(header, text="请完整阅读后勾选同意。建议由实际运营负责人阅读并确认。", font=("Microsoft YaHei", 9), bg="#ffffff", fg="#64748b").pack(anchor="w", padx=14, pady=(0, 12))
+
+        text_wrap = tk.Frame(shell, bg="#f1f5f9")
+        text_wrap.pack(fill="both", expand=True, pady=12)
+
+        text_border = tk.Frame(text_wrap, bg="#cbd5e1", padx=1, pady=1)
+        text_border.pack(fill="both", expand=True)
+
+        text_container = tk.Frame(text_border, bg="#ffffff")
+        text_container.pack(fill="both", expand=True)
+
+        scrollbar = tk.Scrollbar(text_container)
+        scrollbar.pack(side="right", fill="y")
+
+        text_widget = tk.Text(
+            text_container,
+            wrap="word",
+            yscrollcommand=scrollbar.set,
+            font=("Microsoft YaHei", 9),
+            padx=16,
+            pady=14,
+            relief="flat",
+            bd=0,
+            bg="#ffffff",
+            fg="#334155",
+            insertbackground="#334155",
+            spacing1=2,
+            spacing2=2,
+            spacing3=2
+        )
+        text_widget.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=text_widget.yview)
+        text_widget.insert("1.0", _load_agreement_text())
+        text_widget.config(state="disabled")
+
+        footer = tk.Frame(shell, bg="#f1f5f9")
+        footer.pack(fill="x")
+        tk.Label(footer, text="提示：勾选协议仅表示您已知悉并承诺合规使用，不代表平台审核通过或账号安全无风险。",
+                 font=("Microsoft YaHei", 8), bg="#f1f5f9", fg="#64748b", wraplength=760, justify="left").pack(anchor="w", pady=(0, 10))
+        tk.Button(
+            footer,
+            text="关闭",
+            command=agreement_window.destroy,
+            font=("Microsoft YaHei", 10, "bold"),
+            bg="#4f46e5",
+            fg="white",
+            activebackground="#4338ca",
+            activeforeground="white",
+            relief="flat",
+            cursor="hand2",
+            bd=0,
+            padx=20,
+            pady=8
+        ).pack(side="right")
+
+    link_label = tk.Label(
+        agree_row,
+        text="《平台与AI功能使用协议》",
+        font=("Microsoft YaHei", 9, "underline"),
+        bg="#fff7ed",
+        fg="#4338ca",
+        cursor="hand2"
+    )
+    link_label.pack(side="left")
+    link_label.bind("<Button-1>", lambda e: show_agreement())
+
+    # 状态提示区（固定高度容器，避免挤压主按钮）
+    msg_wrap = tk.Frame(body, bg="#ffffff", height=46)
+    msg_wrap.pack(fill="x")
+    msg_wrap.pack_propagate(False)
+    msg_label = tk.Label(
+        msg_wrap,
+        text="",
+        font=("Microsoft YaHei", 9),
+        bg="#ffffff",
+        fg="#ef4444",
+        anchor="w",
+        justify="left",
+        wraplength=460
+    )
+    msg_label.pack(fill="x", pady=(6, 0))
+
+    # 底部主操作区（按钮固定大高度）
+    action_box = tk.Frame(card, bg="#ffffff")
+    action_box.pack(fill="x", padx=20, pady=(0, 18))
+    tk.Frame(action_box, bg="#e5e7eb", height=1).pack(fill="x", pady=(0, 12))
+
+    # 自定义主按钮（固定高度 + Label 居中，彻底绕开系统按钮字体裁切）
+    btn_state = {"enabled": False}
+
+    btn_shell = tk.Frame(action_box, bg="#a5b4fc", height=80, cursor="arrow", relief="flat", bd=0)
+    btn_shell.pack(fill="x")
+    btn_shell.pack_propagate(False)
+
+    btn_inner = tk.Frame(btn_shell, bg="#a5b4fc", relief="flat", bd=0)
+    btn_inner.pack(fill="both", expand=True)
+
+    btn_label = tk.Label(
+        btn_inner,
+        text="登录启动",
+        font=("Microsoft YaHei", 16, "bold"),
+        bg="#a5b4fc",
+        fg="#eef2ff",
+        bd=0
+    )
+    btn_label.place(relx=0.5, rely=0.5, anchor="center")
+
+    def _btn_click(_e=None):
+        if btn_state["enabled"]:
+            _do_login()
+
+    for _w in (btn_shell, btn_inner, btn_label):
+        _w.bind("<Button-1>", _btn_click)
+
+    subline = tk.Label(
+        action_box,
+        text="激活即表示您理解：软件提供技术能力，不对平台规则变化、审核结果、封禁、经营损失等负责。",
+        font=("Microsoft YaHei", 8),
+        bg="#ffffff",
+        fg="#94a3b8",
+        wraplength=470,
+        justify="left"
+    )
+    subline.pack(anchor="w", pady=(8, 0))
+
+    def _paint_btn(bg: str, fg: str, cursor: str):
+        btn_shell.configure(bg=bg, cursor=cursor)
+        btn_inner.configure(bg=bg, cursor=cursor)
+        btn_label.configure(bg=bg, fg=fg, cursor=cursor)
+
+    def _set_btn_enabled(enabled: bool):
+        btn_state["enabled"] = bool(enabled)
+        if enabled:
+            _paint_btn("#4f46e5", "#ffffff", "hand2")
+        else:
+            _paint_btn("#a5b4fc", "#eef2ff", "arrow")
+
+    def _sync_login_btn(*_):
+        try:
+            _draw_custom_checkbox()
+        except Exception:
+            pass
+        _set_btn_enabled(bool(agreement_var.get()))
 
     def _do_login():
         key = key_entry.get().strip()
         if not key:
             msg_label.config(text="请输入卡密", fg="#ef4444")
             return
-        msg_label.config(text="正在验证...", fg="#6366f1")
-        root.update()
+        if not agreement_var.get():
+            msg_label.config(text="请先阅读并勾选《平台与AI功能使用协议》", fg="#ef4444")
+            return
+
+        msg_label.config(text="正在验证卡密，请稍候...", fg="#4f46e5")
+        root.update_idletasks()
         ok, msg = lic.validate_online(key)
         if ok:
-            msg_label.config(text="激活成功!", fg="#16a34a")
+            msg_label.config(text="激活成功，正在进入系统...", fg="#16a34a")
             result["passed"] = True
+            try:
+                agreement_flag_file = os.path.join(BASE_DIR, ".platform_ai_agreement")
+                with open(agreement_flag_file, "w", encoding="utf-8") as f:
+                    f.write("agreed")
+            except Exception:
+                pass
             root.after(600, root.destroy)
         else:
-            msg_label.config(text=msg, fg="#ef4444")
+            msg_label.config(text=str(msg), fg="#ef4444")
 
-    btn = tk.Button(frm, text="激活登录", font=("Microsoft YaHei", 11, "bold"),
-                     bg="#6366f1", fg="white", relief="flat", cursor="hand2",
-                     activebackground="#4f46e5", activeforeground="white",
-                     command=_do_login)
-    btn.pack(fill="x", ipady=6, pady=(4, 0))
+    def _btn_hover_in(e=None):
+        try:
+            if btn_state["enabled"]:
+                _paint_btn("#4338ca", "#ffffff", "hand2")
+        except Exception:
+            pass
 
-    key_entry.bind("<Return>", lambda e: _do_login())
+    def _btn_hover_out(e=None):
+        try:
+            if btn_state["enabled"]:
+                _paint_btn("#4f46e5", "#ffffff", "hand2")
+        except Exception:
+            pass
+
+    for _w in (btn_shell, btn_inner, btn_label):
+        _w.bind("<Enter>", _btn_hover_in)
+        _w.bind("<Leave>", _btn_hover_out)
+
+    def _entry_focus_in(e):
+        try:
+            key_entry.configure(highlightbackground="#4f46e5")
+        except Exception:
+            pass
+
+    def _entry_focus_out(e):
+        try:
+            key_entry.configure(highlightbackground="#d1d5db")
+        except Exception:
+            pass
+
+    key_entry.bind("<FocusIn>", _entry_focus_in)
+    key_entry.bind("<FocusOut>", _entry_focus_out)
+
+    try:
+        _draw_custom_checkbox()
+    except Exception:
+        pass
+    agreement_var.trace_add("write", _sync_login_btn)
+    _set_btn_enabled(False)
+
+    key_entry.bind("<Return>", lambda e: _do_login() if agreement_var.get() else msg_label.config(text="请先勾选并同意《平台与AI功能使用协议》", fg="#ef4444"))
 
     def _on_close():
         result["passed"] = False
@@ -3678,7 +4707,6 @@ def _license_gate():
 
     root.protocol("WM_DELETE_WINDOW", _on_close)
     root.mainloop()
-
     return result["passed"]
 
 

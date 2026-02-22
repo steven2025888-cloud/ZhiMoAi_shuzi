@@ -11,6 +11,9 @@ import os, sys, time, socket, threading, subprocess, signal, traceback
 
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 INDEXTTS_DIR = os.path.join(BASE_DIR, "IndexTTS2-SonicVale")
+PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
+LEGACY_PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
+LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")
 
 os.environ['PYTHONNOUSERSITE'] = '1'
 os.environ['http_proxy']  = ''
@@ -285,6 +288,36 @@ def load_env_config():
 ENV_CONFIG = load_env_config()
 
 
+
+def _load_platform_ai_agreement_text():
+    default_text = """平台与AI功能使用协议（摘要）
+
+1. 本软件为技术工具，用户对使用本软件生成、编辑、发布、分发的全部内容承担责任。
+2. 用户应确保内容合法合规，不侵犯第三方权益（著作权、商标权、肖像权、隐私权等）。
+3. AI生成内容可能存在偏差、错误或不适当输出，用户需自行审核后再使用/发布。
+4. 平台规则（抖音/快手/小红书/视频号/B站等）由用户自行遵守，违规后果由用户承担。
+5. 涉及商业用途时，用户应自行确认素材、配音、字体、模型、脚本的授权范围。
+6. 因网络、接口、第三方平台策略调整导致的功能异常/限制，本软件不承诺永久可用。
+7. 用户应妥善保管账号、卡密、平台凭证，不得用于违法违规用途。
+8. 在法律允许范围内，软件提供方对间接损失、预期收益损失不承担责任。
+
+请在完整阅读正式协议文本后再勾选同意。"""
+    candidates = []
+    for p in [PLATFORM_AI_AGREEMENT_FILE, LEGACY_PLATFORM_AGREEMENT_FILE, LEGACY_DOUYIN_AGREEMENT_FILE]:
+        if p and p not in candidates:
+            candidates.append(p)
+    try:
+        for p in candidates:
+            if os.path.exists(p):
+                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                    t = f.read().strip()
+                if t:
+                    return t
+        missing = '\n'.join(candidates)
+        return default_text + f"\n\n[提示] 未找到协议文件，请确认以下任一文件存在：\n{missing}"
+    except Exception as e:
+        return default_text + f"\n\n[提示] 协议文件读取失败：{e}"
+
 # ══════════════════════════════════════════════════════════════
 #  错误弹窗
 # ══════════════════════════════════════════════════════════════
@@ -350,11 +383,15 @@ def cleanup():
 def start_gradio():
     global gradio_process
     python_path = os.path.join(INDEXTTS_DIR, "installer_files", "env", "python.exe")
-    script_path = os.path.join(BASE_DIR, "unified_app.py")
+    candidates = [
+        os.path.join(BASE_DIR, "app_ui_optimized_with_agreement_file.py"),
+        os.path.join(BASE_DIR, "unified_app.py"),
+    ]
+    script_path = next((p for p in candidates if os.path.exists(p)), None)
     if not os.path.exists(python_path):
         _notify_error("Python 解释器未找到", f"路径不存在：\n{python_path}"); return
-    if not os.path.exists(script_path):
-        _notify_error("主程序未找到", f"路径不存在：\n{script_path}"); return
+    if not script_path:
+        _notify_error("主程序未找到", "未找到可启动的主程序文件（app_ui_optimized_with_agreement_file.py / unified_app.py）"); return
 
     flags = 0
     if sys.platform == "win32":
@@ -841,48 +878,99 @@ if __name__ == "__main__":
                                  bg="#ffffff", fg="#ef4444",
                                  wraplength=380, justify="center",
                                  height=2)
-            msg_label.pack(fill="x", pady=(0, 16))
+            msg_label.pack(fill="x", pady=(0, 12))
+            
+            # 抖音发布协议勾选 - 简洁美观设计
+            agreement_frame = tk.Frame(card_frame, bg="#ffffff")
+            agreement_frame.pack(fill="x", pady=(0, 20))
+            
+            agreement_var = tk.BooleanVar(value=False)
+            
+            # 勾选框和文字在同一行
+            check_frame = tk.Frame(agreement_frame, bg="#ffffff")
+            check_frame.pack(anchor="w")
+            
+            # 自定义勾选框（商业化风格）
+            cb_size = 18
+            cb_canvas = tk.Canvas(check_frame, width=cb_size, height=cb_size, bg="#ffffff",
+                                  highlightthickness=0, bd=0, cursor="hand2")
+            cb_canvas.pack(side="left", padx=(0, 6))
 
-            # 登录按钮（使用 Canvas 绘制圆角按钮）
-            btn_height = 52
-            btn_canvas = tk.Canvas(card_frame, height=btn_height, bg="#ffffff", 
-                                   highlightthickness=0)
-            btn_canvas.pack(fill="x")
+            def _draw_checkbox():
+                cb_canvas.delete("all")
+                if agreement_var.get():
+                    cb_canvas.create_round_rect = None
+                    cb_canvas.create_rectangle(1,1,cb_size-1,cb_size-1, outline="#6366f1", width=2, fill="#6366f1")
+                    cb_canvas.create_line(4, 10, 8, 14, 14, 5, fill="#ffffff", width=2.2, capstyle="round", joinstyle="round")
+                else:
+                    cb_canvas.create_rectangle(1,1,cb_size-1,cb_size-1, outline="#cbd5e1", width=2, fill="#ffffff")
+
+            def _toggle_agreement(_e=None):
+                agreement_var.set(not agreement_var.get())
+                _draw_checkbox()
+
+            cb_canvas.bind("<Button-1>", _toggle_agreement)
+            _draw_checkbox()
+
+            agree_text_label = tk.Label(check_frame, text="我已阅读并同意", 
+                     font=("Microsoft YaHei", 10),
+                     bg="#ffffff", fg="#64748b", cursor="hand2")
+            agree_text_label.pack(side="left", padx=(0, 0))
+            agree_text_label.bind("<Button-1>", _toggle_agreement)
             
-            # 按钮状态
-            btn_state = {"enabled": True, "bg": "#6366f1"}
+            def show_agreement():
+                agreement_window = tk.Toplevel(root)
+                agreement_window.title("平台与AI功能使用协议")
+                agreement_window.geometry("700x600")
+                agreement_window.resizable(True, True)
+                
+                # 创建滚动文本框
+                text_frame = tk.Frame(agreement_window)
+                text_frame.pack(fill="both", expand=True, padx=20, pady=20)
+                
+                scrollbar = tk.Scrollbar(text_frame)
+                scrollbar.pack(side="right", fill="y")
+                
+                text_widget = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set,
+                                     font=("Microsoft YaHei", 9), padx=10, pady=10)
+                text_widget.pack(side="left", fill="both", expand=True)
+                scrollbar.config(command=text_widget.yview)
+                
+                # 插入协议内容
+                try:
+                    agreement_text = _load_platform_ai_agreement_text()
+                except Exception as e:
+                    agreement_text = f"协议加载失败：{e}"
+                text_widget.insert("1.0", agreement_text if str(agreement_text).strip() else "协议内容为空，请检查协议文件。")
+                text_widget.config(state="disabled")
+                
+                # 关闭按钮
+                btn_frame = tk.Frame(agreement_window)
+                btn_frame.pack(pady=10)
+                tk.Button(btn_frame, text="关闭", command=agreement_window.destroy,
+                         font=("Microsoft YaHei", 10), bg="#6366f1", fg="white",
+                         relief="flat", padx=20, pady=5).pack()
             
-            def draw_button(bg_color, text, text_color="#ffffff"):
-                """绘制圆角按钮"""
-                btn_canvas.delete("all")
-                w = btn_canvas.winfo_width() if btn_canvas.winfo_width() > 1 else 400
-                h = btn_height
-                radius = 12  # 圆角半径
-                
-                # 绘制圆角矩形（使用多个图形组合）
-                # 主体矩形
-                btn_canvas.create_rectangle(radius, 0, w-radius, h, 
-                                            fill=bg_color, outline="")
-                btn_canvas.create_rectangle(0, radius, w, h-radius, 
-                                            fill=bg_color, outline="")
-                
-                # 四个圆角
-                btn_canvas.create_oval(0, 0, radius*2, radius*2, 
-                                       fill=bg_color, outline="")
-                btn_canvas.create_oval(w-radius*2, 0, w, radius*2, 
-                                       fill=bg_color, outline="")
-                btn_canvas.create_oval(0, h-radius*2, radius*2, h, 
-                                       fill=bg_color, outline="")
-                btn_canvas.create_oval(w-radius*2, h-radius*2, w, h, 
-                                       fill=bg_color, outline="")
-                
-                # 按钮文字
-                btn_canvas.create_text(w//2, h//2, text=text, 
-                                       font=("Microsoft YaHei", 14, "bold"),
-                                       fill=text_color, tags="btn_text")
+            link_label = tk.Label(check_frame, text="《平台与AI功能使用协议》",
+                                 font=("Microsoft YaHei", 10), 
+                                 bg="#ffffff", fg="#6366f1",
+                                 cursor="hand2")
+            link_label.pack(side="left")
+            link_label.bind("<Button-1>", lambda e: show_agreement())
             
+            # 添加鼠标悬停效果
+            def on_link_enter(e):
+                link_label.config(fg="#4f46e5", font=("Microsoft YaHei", 10, "underline"))
+            def on_link_leave(e):
+                link_label.config(fg="#6366f1", font=("Microsoft YaHei", 10))
+            link_label.bind("<Enter>", on_link_enter)
+            link_label.bind("<Leave>", on_link_leave)
+
+            # 登录按钮 - 简洁美观的标准按钮
             def _do_login():
-                if not btn_state["enabled"]:
+                # 检查协议是否勾选
+                if not agreement_var.get():
+                    msg_label.config(text="⚠ 请先阅读并同意《平台与AI功能使用协议》", fg="#f59e0b")
                     return
                     
                 key = key_entry.get().strip()
@@ -891,9 +979,7 @@ if __name__ == "__main__":
                     return
                 
                 # 禁用按钮和输入框
-                btn_state["enabled"] = False
-                btn_state["bg"] = "#94a3b8"
-                draw_button("#94a3b8", "⏳ 验证中...")
+                login_btn.config(state="disabled", text="⏳ 验证中...", bg="#94a3b8")
                 key_entry.config(state="disabled")
                 msg_label.config(text="🔄 正在验证卡密，请稍候...", fg="#6366f1")
                 root.update()
@@ -902,39 +988,40 @@ if __name__ == "__main__":
                 ok, msg = lic.validate_online(key)
                 if ok:
                     msg_label.config(text="✓ 激活成功！正在启动程序...", fg="#22c55e")
-                    draw_button("#10b981", "✓ 启动中...")
+                    login_btn.config(text="✓ 启动中...", bg="#10b981")
                     result["passed"] = True
                     root.after(1200, root.destroy)
                 else:
                     msg_label.config(text=f"✗ {msg}", fg="#ef4444")
-                    btn_state["enabled"] = True
-                    btn_state["bg"] = "#6366f1"
-                    draw_button("#6366f1", "🚀 登录启动")
+                    login_btn.config(state="normal", text="🚀 登录启动", bg="#6366f1")
                     key_entry.config(state="normal")
             
-            # 鼠标事件
+            login_btn = tk.Button(
+                card_frame, 
+                text="🚀 登录启动",
+                command=_do_login,
+                font=("Microsoft YaHei", 13, "bold"),
+                bg="#6366f1",
+                fg="#ffffff",
+                activebackground="#4f46e5",
+                activeforeground="#ffffff",
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                height=2,
+                padx=20
+            )
+            login_btn.pack(fill="x", pady=(0, 0))
+            
+            # 鼠标悬停效果
             def on_btn_enter(e):
-                if btn_state["enabled"]:
-                    draw_button("#4f46e5", "🚀 登录启动")
-                    btn_canvas.config(cursor="hand2")
-            
+                if login_btn['state'] == 'normal':
+                    login_btn.config(bg="#4f46e5")
             def on_btn_leave(e):
-                if btn_state["enabled"]:
-                    draw_button("#6366f1", "🚀 登录启动")
-                    btn_canvas.config(cursor="")
-            
-            def on_btn_click(e):
-                if btn_state["enabled"]:
-                    _do_login()
-            
-            # 绑定事件
-            btn_canvas.bind("<Enter>", on_btn_enter)
-            btn_canvas.bind("<Leave>", on_btn_leave)
-            btn_canvas.bind("<Button-1>", on_btn_click)
-            
-            # 初始绘制
-            root.update()
-            draw_button("#6366f1", "🚀 登录启动")
+                if login_btn['state'] == 'normal':
+                    login_btn.config(bg="#6366f1")
+            login_btn.bind("<Enter>", on_btn_enter)
+            login_btn.bind("<Leave>", on_btn_leave)
 
             key_entry.bind("<Return>", lambda e: _do_login())
             key_entry.focus_set()
