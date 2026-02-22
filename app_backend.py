@@ -8,12 +8,40 @@
 #   4. 主线程：销毁 tkinter → 调用 webview.start()
 
 import os, sys, time, socket, threading, subprocess, signal, traceback
+import json
+try:
+    import urllib.request
+    import urllib.error
+except ImportError:
+    urllib = None
 
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 INDEXTTS_DIR = os.path.join(BASE_DIR, "_internal_tts")
 PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
 LEGACY_PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")
+
+# 从.env文件读取版本信息
+def _load_version_from_env():
+    """从.env文件读取版本号"""
+    env_file = os.path.join(BASE_DIR, ".env")
+    version = "1.0.0"
+    build = 100
+    try:
+        if os.path.exists(env_file):
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('APP_VERSION='):
+                        version = line.split('=', 1)[1].strip()
+                    elif line.startswith('APP_BUILD='):
+                        build = int(line.split('=', 1)[1].strip())
+    except Exception as e:
+        print(f"[WARNING] 读取.env版本信息失败: {e}")
+    return version, build
+
+CURRENT_VERSION, CURRENT_BUILD = _load_version_from_env()
+UPDATE_CHECK_URL = "https://api.zhimengai.xyz/api/update/Dspcheck"
 
 os.environ['PYTHONNOUSERSITE'] = '1'
 os.environ['http_proxy']  = ''
@@ -26,6 +54,621 @@ _root_ref      = [None]
 _webview_win   = [None]
 _tray_icon     = [None]
 _hwnd          = [None]   # 主窗口 HWND 缓存
+
+
+# ══════════════════════════════════════════════════════════════
+#  更新检查
+# ══════════════════════════════════════════════════════════════
+def check_for_updates():
+    """检查更新，返回 (has_update, update_info, error_msg)"""
+    if not urllib:
+        return False, None, "网络模块未加载"
+    
+    try:
+        print(f"[UPDATE] 连接更新服务器: {UPDATE_CHECK_URL}")
+        req = urllib.request.Request(
+            UPDATE_CHECK_URL,
+            headers={
+                'User-Agent': 'ZhiMoAI/1.0',
+                'Accept': 'application/json'
+            }
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            raw_data = response.read().decode('utf-8')
+            print(f"[UPDATE] 服务器响应: {raw_data[:200]}")
+            data = json.loads(raw_data)
+            
+        # 解析返回数据
+        remote_version = data.get("version", "")
+        remote_build = int(data.get("build", 0))
+        download_url = data.get("url", "")
+        force_update = data.get("force", False)
+        description = data.get("desc", "")
+        
+        print(f"[UPDATE] 远程版本: {remote_version} (Build {remote_build})")
+        print(f"[UPDATE] 当前版本: {CURRENT_VERSION} (Build {CURRENT_BUILD})")
+        
+        # 比较版本号（使用build号）
+        if remote_build > CURRENT_BUILD:
+            print(f"[UPDATE] 发现新版本")
+            return True, {
+                "version": remote_version,
+                "build": remote_build,
+                "url": download_url,
+                "force": force_update,
+                "desc": description
+            }, None
+        
+        print(f"[UPDATE] 当前已是最新版本")
+        return False, None, None
+        
+    except urllib.error.HTTPError as e:
+        error_msg = f"HTTP错误 {e.code}: {e.reason}"
+        print(f"[UPDATE] {error_msg}")
+        return False, None, error_msg
+    except urllib.error.URLError as e:
+        error_msg = f"网络连接失败: {e.reason}"
+        print(f"[UPDATE] {error_msg}")
+        return False, None, error_msg
+    except json.JSONDecodeError as e:
+        error_msg = f"数据解析失败: {e}"
+        print(f"[UPDATE] {error_msg}")
+        return False, None, error_msg
+    except Exception as e:
+        error_msg = f"检查更新失败: {e}"
+        print(f"[UPDATE] {error_msg}")
+        return False, None, error_msg
+
+
+def _download_with_resume(url, dest_path, progress_callback=None, cancel_flag=None):
+    """从 OSS 下载文件，支持断点续传
+    
+    Args:
+        url: 下载地址（阿里云 OSS 直链）
+        dest_path: 保存路径
+        progress_callback: 回调函数 (downloaded_bytes, total_bytes)
+        cancel_flag: dict {"cancel": bool}，设为 True 可取消下载
+    Returns:
+        (success: bool, error_msg: str|None)
+    """
+    tmp_path = dest_path + ".downloading"
+    downloaded = 0
+    
+    # 检查已有的临时文件（断点续传）
+    if os.path.exists(tmp_path):
+        downloaded = os.path.getsize(tmp_path)
+        print(f"[DOWNLOAD] 发现未完成下载，已下载 {downloaded} 字节，继续下载...")
+    
+    headers = {
+        'User-Agent': 'ZhiMoAI/1.0',
+    }
+    if downloaded > 0:
+        headers['Range'] = f'bytes={downloaded}-'
+    
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        response = urllib.request.urlopen(req, timeout=30)
+        
+        # 获取文件总大小
+        if downloaded > 0 and response.status == 206:
+            # 断点续传成功
+            content_range = response.headers.get('Content-Range', '')
+            if '/' in content_range:
+                total_size = int(content_range.split('/')[-1])
+            else:
+                total_size = downloaded + int(response.headers.get('Content-Length', 0))
+        elif response.status == 200:
+            total_size = int(response.headers.get('Content-Length', 0))
+            downloaded = 0  # 服务器不支持断点续传，重新下载
+        else:
+            return False, f"HTTP 状态码异常: {response.status}"
+        
+        print(f"[DOWNLOAD] 文件总大小: {total_size} 字节")
+        
+        # 写入文件
+        mode = 'ab' if downloaded > 0 else 'wb'
+        chunk_size = 64 * 1024  # 64KB
+        
+        with open(tmp_path, mode) as f:
+            while True:
+                if cancel_flag and cancel_flag.get("cancel"):
+                    print("[DOWNLOAD] 用户取消下载")
+                    return False, "下载已取消"
+                
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                
+                f.write(chunk)
+                downloaded += len(chunk)
+                
+                if progress_callback:
+                    progress_callback(downloaded, total_size)
+        
+        response.close()
+        
+        # 验证下载完成
+        if total_size > 0 and downloaded < total_size:
+            return False, f"下载不完整: {downloaded}/{total_size}"
+        
+        # 重命名为正式文件
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        os.rename(tmp_path, dest_path)
+        
+        print(f"[DOWNLOAD] 下载完成: {dest_path}")
+        return True, None
+        
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP 错误 {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return False, f"网络连接失败: {e.reason}"
+    except Exception as e:
+        return False, f"下载失败: {e}"
+
+
+def show_update_dialog(update_info, is_force):
+    """显示更新对话框，支持从 OSS 直接下载并显示进度"""
+    import tkinter as tk
+    from tkinter import ttk, scrolledtext, messagebox
+    
+    result = {"action": "cancel"}
+    cancel_flag = {"cancel": False}
+    
+    dialog = tk.Tk()
+    dialog.title("织梦AI - 发现新版本")
+    dialog.resizable(False, False)
+    
+    # 设置图标
+    try:
+        icon_path = os.path.join(BASE_DIR, "logo.ico")
+        if os.path.exists(icon_path):
+            dialog.iconbitmap(icon_path)
+    except Exception:
+        pass
+    
+    # 窗口大小和居中
+    w, h = 520, 480
+    sw = dialog.winfo_screenwidth()
+    sh = dialog.winfo_screenheight()
+    dialog.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+    
+    # 背景色
+    dialog.configure(bg="#f8fafc")
+    
+    # 标题区域
+    title_frame = tk.Frame(dialog, bg="#3b82f6", height=80)
+    title_frame.pack(fill="x")
+    title_frame.pack_propagate(False)
+    
+    tk.Label(
+        title_frame,
+        text="🎉 发现新版本",
+        font=("Microsoft YaHei", 18, "bold"),
+        bg="#3b82f6",
+        fg="#ffffff"
+    ).pack(pady=20)
+    
+    # 内容区域
+    content_frame = tk.Frame(dialog, bg="#f8fafc")
+    content_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    
+    # 版本信息
+    info_frame = tk.Frame(content_frame, bg="#ffffff", relief="solid", bd=1)
+    info_frame.pack(fill="x", pady=(0, 10))
+    
+    tk.Label(
+        info_frame,
+        text=f"当前版本: {CURRENT_VERSION} (Build {CURRENT_BUILD})",
+        font=("Microsoft YaHei", 10),
+        bg="#ffffff",
+        fg="#64748b",
+        anchor="w"
+    ).pack(fill="x", padx=15, pady=(10, 5))
+    
+    tk.Label(
+        info_frame,
+        text=f"最新版本: {update_info['version']} (Build {update_info['build']})",
+        font=("Microsoft YaHei", 10, "bold"),
+        bg="#ffffff",
+        fg="#3b82f6",
+        anchor="w"
+    ).pack(fill="x", padx=15, pady=(0, 10))
+    
+    # 更新说明
+    tk.Label(
+        content_frame,
+        text="更新内容：",
+        font=("Microsoft YaHei", 10, "bold"),
+        bg="#f8fafc",
+        fg="#1e293b",
+        anchor="w"
+    ).pack(fill="x", pady=(0, 5))
+    
+    desc_box = scrolledtext.ScrolledText(
+        content_frame,
+        font=("Microsoft YaHei", 9),
+        bg="#ffffff",
+        fg="#334155",
+        wrap="word",
+        height=6,
+        relief="solid",
+        bd=1
+    )
+    desc_box.pack(fill="both", expand=True)
+    desc_box.insert("1.0", update_info.get("desc", "暂无更新说明"))
+    desc_box.configure(state="disabled")
+    
+    # 强制更新提示
+    if is_force:
+        warning_frame = tk.Frame(content_frame, bg="#fef2f2", relief="solid", bd=1)
+        warning_frame.pack(fill="x", pady=(10, 0))
+        
+        tk.Label(
+            warning_frame,
+            text="⚠ 此版本为强制更新，必须更新后才能继续使用",
+            font=("Microsoft YaHei", 9, "bold"),
+            bg="#fef2f2",
+            fg="#dc2626"
+        ).pack(pady=8)
+    
+    # ── 下载进度区域（初始隐藏） ──
+    progress_frame = tk.Frame(content_frame, bg="#f8fafc")
+    # 不 pack，下载时才显示
+    
+    progress_label = tk.Label(
+        progress_frame,
+        text="准备下载...",
+        font=("Microsoft YaHei", 9),
+        bg="#f8fafc",
+        fg="#475569",
+        anchor="w"
+    )
+    progress_label.pack(fill="x", pady=(5, 2))
+    
+    style = ttk.Style()
+    style.theme_use("default")
+    style.configure("Update.Horizontal.TProgressbar",
+                    troughcolor="#e2e8f0", background="#3b82f6",
+                    bordercolor="#e2e8f0", lightcolor="#3b82f6", darkcolor="#3b82f6")
+    
+    progress_bar = ttk.Progressbar(
+        progress_frame,
+        style="Update.Horizontal.TProgressbar",
+        mode="determinate",
+        maximum=100
+    )
+    progress_bar.pack(fill="x", pady=(0, 5))
+    
+    speed_label = tk.Label(
+        progress_frame,
+        text="",
+        font=("Microsoft YaHei", 8),
+        bg="#f8fafc",
+        fg="#94a3b8",
+        anchor="w"
+    )
+    speed_label.pack(fill="x")
+    
+    # ── 按钮区域 ──
+    button_frame = tk.Frame(dialog, bg="#f8fafc")
+    button_frame.pack(fill="x", padx=20, pady=(0, 20))
+    
+    def _format_size(size_bytes):
+        """格式化文件大小"""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024*1024):.1f} MB"
+        else:
+            return f"{size_bytes / (1024*1024*1024):.2f} GB"
+    
+    _dl_state = {"last_time": 0, "last_bytes": 0}
+    
+    def _on_progress(downloaded, total):
+        """下载进度回调（在下载线程中调用）"""
+        if total > 0:
+            pct = min(100, downloaded * 100.0 / total)
+        else:
+            pct = 0
+        
+        now = time.time()
+        speed_text = ""
+        if _dl_state["last_time"] > 0:
+            dt = now - _dl_state["last_time"]
+            if dt > 0.5:  # 每 0.5 秒更新一次速度
+                speed = (downloaded - _dl_state["last_bytes"]) / dt
+                speed_text = f"速度: {_format_size(int(speed))}/s"
+                _dl_state["last_time"] = now
+                _dl_state["last_bytes"] = downloaded
+        else:
+            _dl_state["last_time"] = now
+            _dl_state["last_bytes"] = downloaded
+        
+        # 使用 after 在主线程更新 UI
+        def _update_ui():
+            try:
+                progress_bar["value"] = pct
+                progress_label.configure(
+                    text=f"下载中: {_format_size(downloaded)} / {_format_size(total)}  ({pct:.1f}%)"
+                )
+                if speed_text:
+                    speed_label.configure(text=speed_text)
+            except tk.TclError:
+                pass
+        
+        try:
+            dialog.after(0, _update_ui)
+        except Exception:
+            pass
+    
+    def _do_download():
+        """在后台线程中执行下载"""
+        import tempfile
+        
+        url = update_info["url"]
+        # 从 URL 中提取文件名
+        filename = url.split('/')[-1].split('?')[0]
+        if not filename:
+            filename = f"ZhiMoAI_Update_{update_info['version']}.exe"
+        
+        # 下载到用户临时目录
+        download_dir = os.path.join(tempfile.gettempdir(), "ZhiMoAI_Updates")
+        os.makedirs(download_dir, exist_ok=True)
+        dest_path = os.path.join(download_dir, filename)
+        
+        print(f"[DOWNLOAD] 开始下载: {url}")
+        print(f"[DOWNLOAD] 保存到: {dest_path}")
+        
+        success, error_msg = _download_with_resume(
+            url, dest_path,
+            progress_callback=_on_progress,
+            cancel_flag=cancel_flag
+        )
+        
+        def _on_complete():
+            try:
+                if success:
+                    progress_label.configure(text="✅ 下载完成！正在安装...")
+                    speed_label.configure(text="")
+                    progress_bar["value"] = 100
+                    download_btn.configure(text="安装中...", state="disabled")
+                    if not is_force:
+                        later_btn.configure(state="disabled")
+                    
+                    # 在主线程中执行安装（延迟1秒）
+                    def do_install():
+                        print(f"[UPDATE] 开始执行安装...")
+                        _install_update(dest_path)
+                    
+                    dialog.after(1000, do_install)
+                else:
+                    if cancel_flag.get("cancel"):
+                        progress_label.configure(text="下载已取消")
+                    else:
+                        progress_label.configure(text=f"❌ {error_msg}")
+                        # 允许重试
+                        download_btn.configure(text="重新下载", state="normal",
+                                               command=on_download)
+                    speed_label.configure(text="")
+                    if not is_force:
+                        later_btn.configure(state="normal")
+            except tk.TclError:
+                pass
+        
+        try:
+            dialog.after(0, _on_complete)
+        except Exception:
+            pass
+    
+    def _safe_close_dialog():
+        """安全关闭对话框"""
+        try:
+            dialog.quit()
+        except Exception:
+            pass
+        try:
+            dialog.destroy()
+        except Exception:
+            pass
+    
+    def _install_update(file_path):
+        """运行安装程序并退出当前程序"""
+        result["action"] = "install"
+        
+        print(f"[UPDATE] 准备安装: {file_path}")
+        print(f"[UPDATE] 文件是否存在: {os.path.exists(file_path)}")
+        
+        if not os.path.exists(file_path):
+            print(f"[UPDATE] 错误：安装文件不存在")
+            try:
+                messagebox.showerror("错误", f"安装文件不存在:\n{file_path}")
+            except Exception:
+                pass
+            return
+        
+        # 创建重启脚本
+        import tempfile
+        restart_script = os.path.join(tempfile.gettempdir(), "zhimoai_restart.bat")
+        
+        # 获取安装目录
+        install_dir = os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'ZhiMoAI')
+        bat_path = os.path.join(install_dir, '启动应用.bat')
+        log_path = os.path.join(tempfile.gettempdir(), "zhimoai_restart.log")
+        
+        script_content = f'''@echo off
+echo [%date% %time%] 重启脚本开始 >> "{log_path}"
+
+echo 等待安装完成...
+timeout /t 8 /nobreak >nul
+
+echo [%date% %time%] 检查安装目录: {install_dir} >> "{log_path}"
+echo [%date% %time%] 检查bat文件: {bat_path} >> "{log_path}"
+
+if exist "{bat_path}" (
+    echo [%date% %time%] 找到bat文件，准备启动 >> "{log_path}"
+    cd /d "{install_dir}"
+    start "" "{bat_path}"
+    echo [%date% %time%] 已执行启动命令 >> "{log_path}"
+) else (
+    echo [%date% %time%] 错误：bat文件不存在 >> "{log_path}"
+)
+
+timeout /t 2 /nobreak >nul
+del "%~f0"
+'''
+        
+        try:
+            with open(restart_script, 'w', encoding='gbk') as f:
+                f.write(script_content)
+            print(f"[UPDATE] 重启脚本已创建: {restart_script}")
+            print(f"[UPDATE] 日志文件: {log_path}")
+        except Exception as e:
+            print(f"[UPDATE] 创建重启脚本失败: {e}")
+        
+        try:
+            # 启动重启脚本（先启动，避免程序退出后无法执行）
+            if os.path.exists(restart_script):
+                print(f"[UPDATE] 启动重启脚本...")
+                # 直接使用cmd.exe执行bat文件，不使用shell=True
+                subprocess.Popen(
+                    ['cmd.exe', '/c', restart_script],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0,
+                    close_fds=True
+                )
+                print(f"[UPDATE] 重启脚本已启动")
+                print(f"[UPDATE] 可以查看日志: {log_path}")
+            
+            # 启动安装程序（静默安装）
+            print(f"[UPDATE] 启动安装程序...")
+            subprocess.Popen(
+                [file_path, "/SILENT", "/CLOSEAPPLICATIONS"],
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            )
+            print(f"[UPDATE] 安装程序已启动")
+            
+        except Exception as e:
+            print(f"[UPDATE] 启动失败: {e}")
+            try:
+                # 如果失败，尝试普通安装
+                print(f"[UPDATE] 尝试普通安装...")
+                os.startfile(file_path)
+                print(f"[UPDATE] 普通安装程序已启动")
+            except Exception as e2:
+                print(f"[UPDATE] 普通安装也失败: {e2}")
+                try:
+                    messagebox.showerror("错误", f"启动安装程序失败:\n{e}\n\n文件位置:\n{file_path}")
+                except Exception:
+                    pass
+                return
+        
+        # 关闭对话框并退出程序
+        print(f"[UPDATE] 关闭更新对话框...")
+        _safe_close_dialog()
+        
+        # 延迟退出，确保安装程序和重启脚本已启动
+        print(f"[UPDATE] 程序将在2秒后退出...")
+        time.sleep(2)
+        print(f"[UPDATE] 退出当前程序")
+        os._exit(0)
+    
+    def on_download():
+        """点击下载按钮"""
+        cancel_flag["cancel"] = False
+        _dl_state["last_time"] = 0
+        _dl_state["last_bytes"] = 0
+        
+        # 显示进度区域
+        progress_frame.pack(fill="x", pady=(10, 0))
+        progress_label.configure(text="正在连接服务器...")
+        progress_bar["value"] = 0
+        speed_label.configure(text="")
+        
+        # 禁用按钮
+        download_btn.configure(text="下载中...", state="disabled")
+        later_btn.configure(text="取消下载", state="normal",
+                            command=on_cancel_download)
+        
+        # 启动下载线程
+        threading.Thread(target=_do_download, daemon=True).start()
+    
+    def on_cancel_download():
+        """取消下载"""
+        cancel_flag["cancel"] = True
+        later_btn.configure(state="disabled")
+    
+    def on_later():
+        if not is_force:
+            result["action"] = "later"
+            cancel_flag["cancel"] = True
+            _safe_close_dialog()
+    
+    def on_exit():
+        result["action"] = "exit"
+        cancel_flag["cancel"] = True
+        _safe_close_dialog()
+    
+    # 下载按钮
+    download_btn = tk.Button(
+        button_frame,
+        text="⬇ 下载更新",
+        command=on_download,
+        font=("Microsoft YaHei", 10, "bold"),
+        bg="#3b82f6",
+        fg="#ffffff",
+        bd=0,
+        padx=20,
+        pady=10,
+        cursor="hand2",
+        activebackground="#2563eb",
+        activeforeground="#ffffff"
+    )
+    download_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
+    
+    # 稍后/退出按钮
+    if is_force:
+        later_btn = tk.Button(
+            button_frame,
+            text="退出程序",
+            command=on_exit,
+            font=("Microsoft YaHei", 10),
+            bg="#e2e8f0",
+            fg="#475569",
+            bd=0,
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            activebackground="#cbd5e1",
+            activeforeground="#334155"
+        )
+    else:
+        later_btn = tk.Button(
+            button_frame,
+            text="稍后更新",
+            command=on_later,
+            font=("Microsoft YaHei", 10),
+            bg="#e2e8f0",
+            fg="#475569",
+            bd=0,
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            activebackground="#cbd5e1",
+            activeforeground="#334155"
+        )
+    later_btn.pack(side="left", expand=True, fill="x", padx=(5, 0))
+    
+    # 如果是强制更新，禁止关闭窗口
+    if is_force:
+        dialog.protocol("WM_DELETE_WINDOW", on_exit)
+    else:
+        dialog.protocol("WM_DELETE_WINDOW", on_later)
+    
+    dialog.mainloop()
+    
+    return result["action"]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -267,7 +910,12 @@ def _start_tray_icon():
 #  读取 .env 配置
 # ══════════════════════════════════════════════════════════════
 def load_env_config():
-    config = {'DEBUG_MODE': False, 'SERVER_PORT_START': 7870, 'SERVER_PORT_END': 7874}
+    config = {
+        'DEBUG_MODE': False, 
+        'SERVER_PORT_START': 7870, 
+        'SERVER_PORT_END': 7874,
+        'CHECK_UPDATE': True  # 默认启用更新检查
+    }
     env_path = os.path.join(BASE_DIR, '.env')
     if os.path.exists(env_path):
         try:
@@ -281,6 +929,7 @@ def load_env_config():
                     if   key == 'DEBUG_MODE':          config['DEBUG_MODE'] = value.lower() in ('true','1','yes','on')
                     elif key == 'SERVER_PORT_START':   config['SERVER_PORT_START'] = int(value)
                     elif key == 'SERVER_PORT_END':     config['SERVER_PORT_END']   = int(value)
+                    elif key == 'CHECK_UPDATE':        config['CHECK_UPDATE'] = value.lower() in ('true','1','yes','on')
         except Exception:
             pass
     return config
@@ -546,7 +1195,7 @@ def build_splash():
     tk.Frame(card, bg="#e2e8f0", height=1).pack(fill="x", padx=28)
     bf = tk.Frame(card, bg="#ffffff")
     bf.pack(pady=12)
-    for txt in ["🔒 本地运行 · 数据安全", "·", "v2.0 商业版"]:
+    for txt in ["🔒 本地运行 · 数据安全", "·", f"v{CURRENT_VERSION} (Build {CURRENT_BUILD})"]:
         tk.Label(bf, text=txt, font=("Microsoft YaHei", 8),
                  bg="#ffffff", fg="#94a3b8" if txt != "·" else "#cbd5e1").pack(side="left", padx=6)
 
@@ -612,6 +1261,34 @@ if __name__ == "__main__":
         except Exception:
             pass
         sys.exit(0)
+
+    # ── 检查更新 ─────────────────────────────────────────
+    if ENV_CONFIG.get('CHECK_UPDATE', True):
+        print("[UPDATE] 检查更新...")
+        has_update, update_info, error_msg = check_for_updates()
+        
+        if error_msg:
+            print(f"[UPDATE] {error_msg}")
+        elif has_update:
+            print(f"[UPDATE] 发现新版本: {update_info['version']} (Build {update_info['build']})")
+            is_force = update_info.get("force", False)
+            
+            if is_force:
+                print("[UPDATE] 强制更新，必须更新后才能继续")
+            
+            action = show_update_dialog(update_info, is_force)
+            
+            if action == "install":
+                print("[UPDATE] 用户已安装更新，退出当前程序")
+                sys.exit(0)
+            elif action == "exit" or (is_force and action not in ("install", "later")):
+                print("[UPDATE] 用户选择退出")
+                sys.exit(0)
+            # action == "later" 继续启动程序
+        else:
+            print("[UPDATE] 当前已是最新版本")
+    else:
+        print("[UPDATE] 更新检查已禁用")
 
     # ── 先进行激活验证（在启动任何服务之前）─────────────────
     print("[LICENSE] 开始激活验证...")
@@ -753,6 +1430,14 @@ if __name__ == "__main__":
                                text="AI语音克隆 · 智能视频合成 · 专业级解决方案", 
                                font=("Microsoft YaHei", 10),
                                fill="#e9d5ff")
+            
+            # 版本号显示（右下角）
+            version_text = f"v{CURRENT_VERSION} (Build {CURRENT_BUILD})"
+            canvas.create_text(w - 20, h - 15, 
+                               text=version_text,
+                               font=("Microsoft YaHei", 9),
+                               fill="#c4b5fd",
+                               anchor="e")
 
             # 卡密输入区域（玻璃态卡片）
             card_y = 300

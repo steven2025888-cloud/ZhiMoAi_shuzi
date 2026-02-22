@@ -27,14 +27,21 @@
     _rm();
     new MutationObserver(_rm).observe(document.documentElement, {childList:true, subtree:true});
 
-    /* ── 2.5. 添加顶部标题栏 ── */
+    /* ── 2.5. 添加顶部标题栏（带版本号）── */
     setTimeout(() => {
         const container = document.querySelector('.gradio-container');
         if (container && !document.querySelector('.app-header')) {
             const header = document.createElement('div');
             header.className = 'app-header';
             header.innerHTML = `
-                <h1>IP打造智能体</h1>
+                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <h1 style="margin: 0;">IP打造智能体</h1>
+                    <span style="font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); 
+                                 background: rgba(255,255,255,0.15); padding: 6px 16px; 
+                                 border-radius: 20px; backdrop-filter: blur(10px);">
+                        v{{APP_VERSION}} (Build {{APP_BUILD}})
+                    </span>
+                </div>
             `;
             container.insertBefore(header, container.firstChild);
         }
@@ -542,5 +549,39 @@
         }
     });
     
+    /* ── 13. 字体下拉框样式预览功能 ── */
+    function applyFontPreview() {
+        try {
+            var fontDropdowns = [];
+            document.querySelectorAll('label span').forEach(function(span) {
+                if (span.textContent && span.textContent.indexOf('字体') !== -1) {
+                    var block = span.closest('.block');
+                    if (block) {
+                        var dd = block.querySelector('select, .dropdown, [role="listbox"]');
+                        if (dd) fontDropdowns.push(dd);
+                    }
+                }
+            });
+            fontDropdowns.forEach(function(dropdown) {
+                var options = dropdown.querySelectorAll('option, [role="option"]');
+                options.forEach(function(option) {
+                    var fontName = option.textContent.trim();
+                    if (fontName && !option.dataset.fontApplied) {
+                        option.dataset.fontApplied = '1';
+                        if (fontName === '系统字体') {
+                            option.style.fontFamily = "'Microsoft YaHei', system-ui, sans-serif";
+                        } else {
+                            option.style.fontFamily = "'" + fontName + "', 'Microsoft YaHei', sans-serif";
+                        }
+                        option.style.fontSize = '16px';
+                        option.style.padding = '8px 12px';
+                    }
+                });
+            });
+        } catch(_) {}
+    }
+    setTimeout(applyFontPreview, 2000);
+    setTimeout(applyFontPreview, 5000);
+
     console.log('[织梦AI] 初始化完成 | Ctrl+Shift+Q 强制退出');
 }

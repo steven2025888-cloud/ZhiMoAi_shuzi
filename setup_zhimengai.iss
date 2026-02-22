@@ -7,7 +7,7 @@
 ;   需另行打包后让用户解压到安装目录对应位置。
 ;
 ; 更新内容：
-;   - 打包前自动清空 avatars/、voices/、unified_outputs/ 目录
+;   - avatars/、voices/、unified_outputs/ 目录只创建空文件夹，不打包内容
 ;   - Python代码和env文件加密打包
 ;   - 不打包调试用的bat文件
 ;   - 启动应用.bat和启动应用.vbs合并为exe程序
@@ -49,6 +49,10 @@ PrivilegesRequired=admin
 WizardStyle=modern
 WizardSizePercent=120,120
 DisableProgramGroupPage=yes
+; 支持静默安装
+; 自动关闭正在运行的应用程序
+CloseApplications=yes
+RestartApplications=yes
 ; 许可协议（可选：取消注释下面一行并提供文件）
 ; LicenseFile={#SourceRoot}\LICENSE.txt
 
@@ -82,7 +86,7 @@ Source: "{#SourceRoot}\ui_style.css";   DestDir: "{app}"; Flags: ignoreversion
 
 ; ── 配置文件 ──
 Source: "{#SourceRoot}\.env";           DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\.license";       DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\.license";       DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 Source: "{#SourceRoot}\pip.ini";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ── Logo / 图标 ──
@@ -119,7 +123,7 @@ Source: "{#SourceRoot}\_internal_data\*";   DestDir: "{app}\_internal_data";   F
 Source: "{#SourceRoot}\_internal_logs\*";   DestDir: "{app}\_internal_logs";   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "{#SourceRoot}\_internal_temp\*";   DestDir: "{app}\_internal_temp";   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; ── 注意：avatars/、voices/、unified_outputs/ 目录在打包前已清空，不包含在安装包中 ──
+; ── 注意：avatars/、voices/、unified_outputs/ 目录只创建空文件夹，不打包内容 ──
 
 ; ============================================================
 ;  注意：以下目录 **不** 包含在安装包中：
@@ -149,7 +153,10 @@ Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\ZhiMoAI_Launcher.exe"
 ;  安装后运行
 ; ============================================================
 [Run]
+; 普通安装完成后询问是否启动
 Filename: "{app}\ZhiMoAI_Launcher.exe"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; 静默安装完成后自动启动（用于自动更新）
+Filename: "{app}\ZhiMoAI_Launcher.exe"; Flags: nowait skipifdoesntexist runhidden; Check: WizardSilent
 
 ; ============================================================
 ;  卸载时删除生成的文件（可选）
@@ -162,34 +169,9 @@ Type: filesandordirs; Name: "{app}\_internal_temp"
 Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: files;          Name: "{app}\*.log"
-Type: files;          Name: "{app}\.license"
+; 注意：不删除 .license 文件，保留用户的卡密信息
 
 [Code]
-// 打包前清空指定目录
-procedure CleanDirectories();
-var
-  AvatarsDir, VoicesDir, OutputsDir: String;
-begin
-  AvatarsDir := ExpandConstant('{#SourceRoot}\avatars');
-  VoicesDir := ExpandConstant('{#SourceRoot}\voices');
-  OutputsDir := ExpandConstant('{#SourceRoot}\unified_outputs');
-  
-  // 清空目录（保留目录结构）
-  if DirExists(AvatarsDir) then
-    DelTree(AvatarsDir, True, False, True);
-  if DirExists(VoicesDir) then
-    DelTree(VoicesDir, True, False, True);
-  if DirExists(OutputsDir) then
-    DelTree(OutputsDir, True, False, True);
-end;
-
-// 初始化安装
-procedure InitializeWizard();
-begin
-  // 打包前清空目录
-  CleanDirectories();
-end;
-
 // 安装完成后的处理（已禁用提示）
 procedure CurStepChanged(CurStep: TSetupStep);
 begin

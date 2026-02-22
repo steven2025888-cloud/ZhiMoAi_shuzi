@@ -2,6 +2,11 @@
 import os, sys, time, subprocess, traceback, shutil, re, json, queue as _queue, threading
 import asyncio
 
+# ── LatentSync 常驻推理服务全局状态 ──
+_ls_server_proc = None       # 常驻子进程
+_ls_server_lock = threading.Lock()  # 保护服务启动/请求串行化
+_ls_server_ready = False     # 模型是否已加载完成
+
 # ── WebSocket 模块（用于提取文案功能）──
 try:
     import websockets
@@ -92,13 +97,38 @@ def safe_print(msg: str):
             pass
 
 
+# 从.env文件读取版本信息
+def _load_version_from_env():
+    """从.env文件读取版本号"""
+    env_file = os.path.join(BASE_DIR, ".env")
+    version = "1.0.0"
+    build = 100
+    try:
+        if os.path.exists(env_file):
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('APP_VERSION='):
+                        version = line.split('=', 1)[1].strip()
+                    elif line.startswith('APP_BUILD='):
+                        build = int(line.split('=', 1)[1].strip())
+    except Exception as e:
+        print(f"[WARNING] 读取.env版本信息失败: {e}")
+    return version, build
+
+APP_VERSION, APP_BUILD = _load_version_from_env()
+
+
 # ══════════════════════════════════════════════════════════════
 #  JS：注入全局逻辑（在 Gradio js= 参数中运行，页面加载后立即执行）
 # ══════════════════════════════════════════════════════════════
-# 从外部文件加载JS
+# 从外部文件加载JS，并注入版本号
 try:
     with open(os.path.join(BASE_DIR, "ui_init.js"), "r", encoding="utf-8") as f:
         INIT_JS = f.read()
+        # 替换版本号占位符
+        INIT_JS = INIT_JS.replace('{{APP_VERSION}}', APP_VERSION)
+        INIT_JS = INIT_JS.replace('{{APP_BUILD}}', str(APP_BUILD))
 except Exception as e:
     print(f"[WARNING] 无法加载 ui_init.js: {e}")
     INIT_JS = "() => { console.log('[织梦AI] JS加载失败'); }"
@@ -117,6 +147,138 @@ except Exception as e:
 
 
 # ══════════════════════════════════════════════════════════════
+#  LatentSync 常驻推理服务管理
+# ══════════════════════════════════════════════════════════════
+def _build_ls_env():
+    """构建 LatentSync 子进程所需的环境变量"""
+    env     = os.environ.copy()
+    ls_env  = os.path.join(LATENTSYNC_DIR, "latents_env")
+    fb      = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
+    env["HF_HOME"]    = os.path.join(LATENTSYNC_DIR, "huggingface")
+    env["TORCH_HOME"] = os.path.join(LATENTSYNC_DIR, "checkpoints")  # torch模型缓存
+    env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
+    env["PATH"]       = ";".join([ls_env, os.path.join(ls_env, "Library","bin"), fb, env.get("PATH","")])
+    # 移除 TTS 的缓存目录（避免指向 TTS 的 hf_cache），但保留离线模式
+    for k in ("TRANSFORMERS_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        env.pop(k, None)
+    # 模型已本地缓存，设为离线模式避免联网检查（网络被清代理后会卡住）
+    env["HF_HUB_OFFLINE"] = "1"
+    env["TRANSFORMERS_OFFLINE"] = "1"
+    return env
+
+
+def _copy_torch_cache_models():
+    """确保 torch hub 缓存中有必需的人脸检测模型文件"""
+    torch_cache_dir = os.path.join(LATENTSYNC_DIR, "checkpoints", "hub", "checkpoints")
+    os.makedirs(torch_cache_dir, exist_ok=True)
+    for model_file in ["s3fd-619a316812.pth", "2DFAN4-cd938726ad.zip"]:
+        source = os.path.join(LATENTSYNC_DIR, "checkpoints", "auxiliary", model_file)
+        target = os.path.join(torch_cache_dir, model_file)
+        if os.path.exists(source) and not os.path.exists(target):
+            try:
+                shutil.copy2(source, target)
+                safe_print(f"[LS] 已复制{model_file}到torch缓存目录")
+            except Exception as e:
+                safe_print(f"[LS] 复制{model_file}失败: {e}")
+
+
+def _start_latentsync_server(progress_cb=None):
+    """启动 LatentSync 常驻推理服务（模型只加载一次）。
+    progress_cb: 可选的 (float, str) 回调，用于向 UI 报告加载进度。"""
+    global _ls_server_proc, _ls_server_ready
+
+    if not os.path.exists(LATENTSYNC_PYTHON):
+        safe_print("[LS-SERVER] _internal_sync Python 未找到，跳过")
+        return False
+    if not os.path.exists(LATENTSYNC_CKPT):
+        safe_print("[LS-SERVER] 模型文件未找到，跳过")
+        return False
+
+    # 预先复制人脸检测模型到 torch 缓存
+    _copy_torch_cache_models()
+
+    safe_print("[LS-SERVER] 正在启动常驻推理服务（加载模型中）...")
+    if progress_cb:
+        progress_cb(0.06, "正在启动推理引擎...")
+
+    env = _build_ls_env()
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+    cmd = [LATENTSYNC_PYTHON, "-m", "scripts.inference_server",
+           "--unet_config_path", LATENTSYNC_CONFIG,
+           "--inference_ckpt_path", LATENTSYNC_CKPT]
+
+    try:
+        _ls_server_proc = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True, cwd=LATENTSYNC_DIR, env=env,
+            encoding="utf-8", errors="replace", creationflags=flags, bufsize=1)
+    except Exception as e:
+        safe_print(f"[LS-SERVER] 启动失败: {e}")
+        return False
+
+    # 等待 __READY__ 信号（最多等 180 秒），同时向 UI 报告加载阶段
+    import time as _time
+    deadline = _time.time() + 180
+    while _time.time() < deadline:
+        if _ls_server_proc.poll() is not None:
+            safe_print("[LS-SERVER] 服务进程在加载模型时意外退出")
+            _ls_server_proc = None
+            return False
+        line = _ls_server_proc.stdout.readline()
+        if not line:
+            continue
+        line = line.strip()
+        if not line:
+            continue
+        safe_print("[LS-SERVER] " + line)
+
+        # 向 UI 报告模型加载进度
+        if progress_cb:
+            low = line.lower()
+            if "audio encoder" in low:
+                progress_cb(0.06, "加载音频编码器...")
+            elif "vae" in low:
+                progress_cb(0.07, "加载 VAE 模型...")
+            elif "unet" in low:
+                progress_cb(0.08, "加载 UNet 模型...")
+            elif "pipeline" in low or "cuda" in low:
+                progress_cb(0.09, "模型转移到 GPU...")
+
+        if "__READY__" in line:
+            _ls_server_ready = True
+            safe_print("[LS-SERVER] ✅ 推理服务就绪，模型已常驻GPU显存")
+            if progress_cb:
+                progress_cb(0.10, "推理引擎就绪")
+            return True
+        if "__ERROR__" in line:
+            safe_print("[LS-SERVER] 模型加载失败")
+            _ls_server_proc = None
+            return False
+
+    safe_print("[LS-SERVER] 启动超时（180秒）")
+    try:
+        _ls_server_proc.kill()
+    except Exception:
+        pass
+    _ls_server_proc = None
+    return False
+
+
+def _ensure_ls_server(progress_cb=None):
+    """确保推理服务进程存活，必要时重启"""
+    global _ls_server_proc, _ls_server_ready
+    if _ls_server_proc is not None and _ls_server_proc.poll() is None:
+        return True  # 进程还在运行
+    # 需要重启
+    safe_print("[LS-SERVER] 服务进程不存在或已退出，正在重启...")
+    _ls_server_proc = None
+    _ls_server_ready = False
+    return _start_latentsync_server(progress_cb=progress_cb)
+
+
+# ══════════════════════════════════════════════════════════════
 def auto_load_model():
     global tts
     model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
@@ -126,6 +288,17 @@ def auto_load_model():
     os.chdir(INDEXTTS_DIR)
     try:
         safe_print("[MODEL] 正在加载 IndexTTS2 声学模型...")
+        
+        # 检查CUDA是否可用
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        safe_print(f"[MODEL] PyTorch CUDA可用: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            safe_print(f"[MODEL] GPU设备: {torch.cuda.get_device_name(0)}")
+            safe_print(f"[MODEL] CUDA版本: {torch.version.cuda}")
+        else:
+            safe_print("[MODEL] 警告：未检测到CUDA，将使用CPU（速度会很慢）")
+        
         from indextts.infer_v2 import IndexTTS2
         tts = IndexTTS2(model_dir=model_dir,
                         cfg_path=os.path.join(model_dir, "config.yaml"), use_fp16=True)
@@ -163,56 +336,89 @@ def auto_load_model():
     finally:
         os.chdir(original_cwd)
 
-    # ── 后台预热 _internal_sync 引擎 ──
-    def _warmup_latentsync():
-        try:
-            if not os.path.exists(LATENTSYNC_PYTHON):
-                safe_print("[WARMUP] _internal_sync Python 未找到，跳过预热")
-                return
-            if not os.path.exists(LATENTSYNC_CKPT):
-                safe_print("[WARMUP] _internal_sync 模型文件未找到，跳过预热")
-                return
+    # ── LatentSync 常驻服务采用懒启动：首次视频生成时通过 _ensure_ls_server() 启动 ──
+    safe_print("[LS-SERVER] 常驻推理服务将在首次视频生成时懒启动")
 
-            safe_print("[WARMUP] 正在预热 _internal_sync 引擎...")
-            env = os.environ.copy()
-            ls_env = os.path.join(LATENTSYNC_DIR, "latents_env")
-            fb = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-            env["HF_HOME"] = os.path.join(LATENTSYNC_DIR, "huggingface")
-            env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
-            env["PATH"] = ";".join([ls_env, os.path.join(ls_env, "Library", "bin"), fb, env.get("PATH", "")])
-            for k in ("TRANSFORMERS_CACHE", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_OFFLINE", "HF_HUB_OFFLINE"):
-                env.pop(k, None)
 
-            warmup_code = (
-                "import sys, os; "
-                "sys.path.insert(0, os.getcwd()); "
-                "import torch; "
-                "print('[WARMUP] PyTorch loaded'); "
-                "from omegaconf import OmegaConf; "
-                "print('[WARMUP] OmegaConf loaded'); "
-                "from latentsync.utils.util import load_model; "
-                "print('[WARMUP] _internal_sync modules loaded'); "
-                "print('[WARMUP] Engine warmup complete')"
-            )
-            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            proc = subprocess.run(
-                [LATENTSYNC_PYTHON, "-c", warmup_code],
-                cwd=LATENTSYNC_DIR, env=env,
-                capture_output=True, text=True, timeout=120,
-                creationflags=flags
-            )
-            if proc.returncode == 0:
-                safe_print("[WARMUP] _internal_sync 引擎预热完成")
-            else:
-                safe_print(f"[WARMUP] _internal_sync 预热返回非零码: {proc.returncode}")
-                if proc.stderr:
-                    safe_print(f"[WARMUP] stderr: {proc.stderr[-300:]}")
-        except subprocess.TimeoutExpired:
-            safe_print("[WARMUP] _internal_sync 预热超时，跳过")
-        except Exception as e:
-            safe_print(f"[WARMUP] _internal_sync 预热失败: {e}")
+# ══════════════════════════════════════════════════════════════
+#  TTS GPU 显存管理（在 TTS 与 LatentSync 之间切换 GPU 占用）
+# ══════════════════════════════════════════════════════════════
+_tts_on_gpu = True  # 追踪 TTS 模型当前是否在 GPU 上
 
-    threading.Thread(target=_warmup_latentsync, daemon=True).start()
+def _release_tts_gpu():
+    """将 TTS 模型从 GPU 移到 CPU，释放显存给 LatentSync 使用"""
+    global tts, _tts_on_gpu
+    if tts is None or not _tts_on_gpu:
+        return
+    try:
+        import torch
+        # 移动所有 nn.Module 子模型到 CPU
+        for name in ('gpt', 'semantic_model', 'semantic_codec', 's2mel',
+                      'campplus_model', 'bigvgan'):
+            model = getattr(tts, name, None)
+            if model is not None and isinstance(model, torch.nn.Module):
+                model.cpu()
+        # qwen_emo 内部也有模型
+        qwen = getattr(tts, 'qwen_emo', None)
+        if qwen is not None:
+            inner = getattr(qwen, 'model', None)
+            if inner is not None and isinstance(inner, torch.nn.Module):
+                inner.cpu()
+        # 移动普通 tensor 属性
+        for name in ('semantic_mean', 'semantic_std'):
+            t = getattr(tts, name, None)
+            if t is not None and isinstance(t, torch.Tensor) and t.is_cuda:
+                setattr(tts, name, t.cpu())
+        # emo_matrix / spk_matrix 是 tuple of tensors
+        for name in ('emo_matrix', 'spk_matrix'):
+            obj = getattr(tts, name, None)
+            if obj is not None and isinstance(obj, (list, tuple)):
+                setattr(tts, name, tuple(t.cpu() if isinstance(t, torch.Tensor) and t.is_cuda else t for t in obj))
+        # 清除推理缓存（它们引用 GPU tensor）
+        for name in ('cache_spk_cond', 'cache_s2mel_style', 'cache_s2mel_prompt',
+                      'cache_emo_cond', 'cache_mel'):
+            if hasattr(tts, name):
+                setattr(tts, name, None)
+        torch.cuda.empty_cache()
+        _tts_on_gpu = False
+        safe_print("[GPU] TTS 模型已暂时移到 CPU，显存已释放")
+    except Exception as e:
+        safe_print(f"[GPU] 释放 TTS 显存失败: {e}")
+
+
+def _restore_tts_gpu():
+    """将 TTS 模型从 CPU 恢复到 GPU"""
+    global tts, _tts_on_gpu
+    if tts is None or _tts_on_gpu:
+        return
+    try:
+        import torch
+        device = tts.device  # 原始设备，如 "cuda:0"
+        if not device or device == "cpu":
+            _tts_on_gpu = True
+            return
+        for name in ('gpt', 'semantic_model', 'semantic_codec', 's2mel',
+                      'campplus_model', 'bigvgan'):
+            model = getattr(tts, name, None)
+            if model is not None and isinstance(model, torch.nn.Module):
+                model.to(device)
+        qwen = getattr(tts, 'qwen_emo', None)
+        if qwen is not None:
+            inner = getattr(qwen, 'model', None)
+            if inner is not None and isinstance(inner, torch.nn.Module):
+                inner.to(device)
+        for name in ('semantic_mean', 'semantic_std'):
+            t = getattr(tts, name, None)
+            if t is not None and isinstance(t, torch.Tensor) and not t.is_cuda:
+                setattr(tts, name, t.to(device))
+        for name in ('emo_matrix', 'spk_matrix'):
+            obj = getattr(tts, name, None)
+            if obj is not None and isinstance(obj, (list, tuple)):
+                setattr(tts, name, tuple(t.to(device) if isinstance(t, torch.Tensor) and not t.is_cuda else t for t in obj))
+        _tts_on_gpu = True
+        safe_print("[GPU] TTS 模型已恢复到 GPU")
+    except Exception as e:
+        safe_print(f"[GPU] 恢复 TTS 到 GPU 失败: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -356,7 +562,120 @@ def _make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog):
     )
 
 # ══════════════════════════════════════════════════════════════
-#  视频合成（带进度更新）
+#  视频合成 — 常驻服务模式
+# ══════════════════════════════════════════════════════════════
+def _update_ls_progress(line, progress, detail_cb, state):
+    """统一的 LatentSync 进度行处理，server 和 oneshot 共用。
+    state 是一个 dict，包含 last / step_progress / frame_progress。
+    返回更新后的 state。"""
+    parsed = parse_progress_line(line)
+    if not parsed:
+        return state
+    stage, pct, cur, total, progress_type = parsed
+
+    if progress_type == "step":
+        state["step"] = (pct, cur, total)
+    elif progress_type == "frame":
+        state["frame"] = (pct, cur, total)
+
+    if stage == "预处理":
+        prog = 0.08 + (pct / 100.0) * 0.04
+        desc = f"预处理 {pct}%"
+    elif stage in ("推理", "生成"):
+        if pct >= 100:
+            prog = 0.89; desc = "生成中..."
+        else:
+            fp = state.get("frame")
+            sp = state.get("step")
+            if fp:
+                prog = 0.12 + (fp[0] / 100.0) * 0.76
+                f_pct, f_cur, f_total = fp
+                if sp:
+                    s_pct, s_cur, s_total = sp
+                    desc = f"生成中 {prog*100:.0f}%  帧{f_cur}/{f_total}  步骤{s_cur}/{s_total}"
+                    if detail_cb:
+                        detail_cb(_make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog))
+                else:
+                    desc = f"生成中 {prog*100:.0f}%（{f_cur}/{f_total}）"
+            else:
+                prog = 0.12 + (pct / 100.0) * 0.76
+                desc = f"生成中 {prog*100:.0f}%（{cur}/{total}）"
+    elif stage == "后处理":
+        prog = 0.90 + (pct / 100.0) * 0.06
+        desc = f"收尾处理 {pct}%"
+    else:
+        prog = state["last"]; desc = f"{stage} {pct}%"
+
+    prog = max(prog, state["last"]); state["last"] = prog
+    progress(prog, desc=desc)
+    return state
+
+
+def _run_latentsync_via_server(sv, sa, out, progress, detail_cb,
+                               inference_steps=12, guidance_scale=1.2, seed=1247):
+    """通过常驻推理服务执行 LatentSync（模型已预加载，省去冷启动）。
+    返回 True=成功, False=服务不可用需回退, 或抛异常。"""
+    global _ls_server_proc, _ls_server_ready
+
+    with _ls_server_lock:
+        # 确保服务进程存活（首次调用时会加载模型，progress 用于显示加载阶段）
+        if not _ensure_ls_server(progress_cb=lambda p, d: progress(p, desc=d)):
+            return False
+
+        # 发送 JSON 请求
+        request = json.dumps({
+            "video_path": sv, "audio_path": sa, "video_out_path": out,
+            "inference_steps": inference_steps,
+            "guidance_scale": guidance_scale,
+            "seed": seed
+        })
+        try:
+            _ls_server_proc.stdin.write(request + "\n")
+            _ls_server_proc.stdin.flush()
+        except Exception as e:
+            safe_print(f"[LS-SERVER] 发送请求失败: {e}")
+            try: _ls_server_proc.kill()
+            except Exception: pass
+            _ls_server_proc = None
+            _ls_server_ready = False
+            return False
+
+        # 读取进度输出
+        progress(0.08, desc="正在生成视频...")
+        state = {"last": 0.08, "step": None, "frame": None}
+
+        while True:
+            try:
+                line = _ls_server_proc.stdout.readline()
+            except Exception:
+                line = ""
+
+            if not line:
+                # 管道关闭 = 服务崩溃
+                safe_print("[LS-SERVER] 服务进程异常退出")
+                _ls_server_proc = None
+                _ls_server_ready = False
+                return False
+
+            line = line.strip()
+            if not line:
+                continue
+            safe_print("[LS] " + line)
+
+            if line.startswith("__DONE__:"):
+                break
+            elif line.startswith("__ERROR__:"):
+                raise gr.Error(f"视频合成失败: {line[len('__ERROR__:'):]}") 
+
+            state = _update_ls_progress(line, progress, detail_cb, state)
+
+    if state["last"] < 0.93:
+        progress(0.94, desc="写入文件...")
+    return True
+
+
+# ══════════════════════════════════════════════════════════════
+#  视频合成（带进度更新 + GPU 显存自动管理）
 # ══════════════════════════════════════════════════════════════
 def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None, output_path_override=None):
     if not video_path:                 raise gr.Error("请上传人物视频")
@@ -374,100 +693,82 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
         raise gr.Error("复制文件失败: " + str(e))
 
     progress(0.05, desc="初始化中...")
-    env     = os.environ.copy()
-    ls_env  = os.path.join(LATENTSYNC_DIR, "latents_env")
-    fb      = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-    env["HF_HOME"]    = os.path.join(LATENTSYNC_DIR, "huggingface")
-    env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
-    env["PATH"]       = ";".join([ls_env, os.path.join(ls_env, "Library","bin"), fb, env.get("PATH","")])
-    for k in ("TRANSFORMERS_CACHE","HUGGINGFACE_HUB_CACHE","TRANSFORMERS_OFFLINE","HF_HUB_OFFLINE"):
-        env.pop(k, None)
 
-    cmd = [LATENTSYNC_PYTHON, "-m", "scripts.inference",
-           "--unet_config_path", LATENTSYNC_CONFIG,
-           "--inference_ckpt_path", LATENTSYNC_CKPT,
-           "--video_path", sv, "--audio_path", sa,
-           "--video_out_path", out,
-           "--inference_steps", "12", "--guidance_scale", "1.2", "--seed", "1247"]
+    # 确保人脸检测模型在 torch 缓存目录
+    torch_cache_dir = os.path.join(LATENTSYNC_DIR, "checkpoints", "hub", "checkpoints")
+    os.makedirs(torch_cache_dir, exist_ok=True)
+    for model_file in ["s3fd-619a316812.pth", "2DFAN4-cd938726ad.zip"]:
+        source = os.path.join(LATENTSYNC_DIR, "checkpoints", "auxiliary", model_file)
+        target = os.path.join(torch_cache_dir, model_file)
+        if os.path.exists(source) and not os.path.exists(target):
+            try:
+                shutil.copy2(source, target)
+                safe_print(f"[LS] 已复制{model_file}到torch缓存目录")
+            except Exception as e:
+                safe_print(f"[LS] 复制{model_file}失败: {e}")
 
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    # ── 释放 TTS 显存，给 LatentSync 腾出 GPU 空间 ──
+    _release_tts_gpu()
+
+    server_ok = False
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, cwd=LATENTSYNC_DIR, env=env,
-                                encoding="utf-8", errors="replace", creationflags=flags, bufsize=1)
-    except subprocess.SubprocessError as e:
-        raise gr.Error("启动生成引擎失败: " + str(e))
+        # ── 优先走常驻服务模式（跳过模型冷加载） ──
+        server_ok = _run_latentsync_via_server(sv, sa, out, progress, detail_cb)
+        if server_ok:
+            safe_print("[LS] ✅ 通过常驻服务完成推理")
 
-    last = 0.05
-    progress(0.08, desc="正在生成视频...")
+        if not server_ok:
+            # ── 回退：独立子进程模式（每次冷加载） ──
+            safe_print("[LS] 常驻服务不可用，使用独立进程模式")
 
-    # 保存两层进度信息
-    step_progress = None  # 步骤进度 (3/4)
-    frame_progress = None  # 帧进度 (13/21)
-    
-    # 模型加载阶段 — 静默处理，只显示统一的"正在生成"
-    model_loaded = False
+            env = _build_ls_env()
+            cmd = [LATENTSYNC_PYTHON, "-m", "scripts.inference",
+                   "--unet_config_path", LATENTSYNC_CONFIG,
+                   "--inference_ckpt_path", LATENTSYNC_CKPT,
+                   "--video_path", sv, "--audio_path", sa,
+                   "--video_out_path", out,
+                   "--inference_steps", "12", "--guidance_scale", "1.2", "--seed", "1247"]
 
-    while True:
-        line = proc.stdout.readline()
-        if not line and proc.poll() is not None: break
-        if not line: continue
-        line = line.strip()
-        if not line: continue
-        safe_print("[LS] " + line)
-        
-        # 模型加载阶段：不显示细节，统一显示"正在生成视频"
-        loading_keywords = ["Loading", "loading", "Initializing", "initializing", "model", "checkpoint"]
-        if not model_loaded and any(kw in line for kw in loading_keywords):
-            if last < 0.12:
-                last = min(last + 0.005, 0.12)
-                progress(last, desc="正在生成视频...")
-            continue
-        
-        parsed = parse_progress_line(line)
-        if not parsed: continue
-        model_loaded = True  # 有实际进度了 = 模型已加载
-        stage, pct, cur, total, progress_type = parsed
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        text=True, cwd=LATENTSYNC_DIR, env=env,
+                                        encoding="utf-8", errors="replace", creationflags=flags, bufsize=1)
+            except subprocess.SubprocessError as e:
+                raise gr.Error("启动生成引擎失败: " + str(e))
 
-        # 根据类型保存进度
-        if progress_type == "step":
-            step_progress = (pct, cur, total)
-        elif progress_type == "frame":
-            frame_progress = (pct, cur, total)
+            progress(0.08, desc="正在生成视频...")
+            state = {"last": 0.08, "step": None, "frame": None}
+            model_loaded = False
 
-        if stage == "预处理":
-            prog = 0.08 + (pct / 100.0) * 0.04
-            desc = f"预处理 {pct}%"
-        elif stage in ("推理", "生成"):
-            if pct >= 100:
-                prog = 0.89; desc = "生成中..."
-            else:
-                if frame_progress:
-                    prog = 0.12 + (frame_progress[0] / 100.0) * 0.76
-                    f_pct, f_cur, f_total = frame_progress
-                    if step_progress:
-                        s_pct, s_cur, s_total = step_progress
-                        desc = f"生成中 {prog*100:.0f}%  帧{f_cur}/{f_total}  步骤{s_cur}/{s_total}"
-                        if detail_cb:
-                            detail_cb(_make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog))
-                    else:
-                        desc = f"生成中 {prog*100:.0f}%（{f_cur}/{f_total}）"
-                else:
-                    prog = 0.12 + (pct / 100.0) * 0.76
-                    desc = f"生成中 {prog*100:.0f}%（{cur}/{total}）"
-        elif stage == "后处理":
-            prog = 0.90 + (pct / 100.0) * 0.06
-            desc = f"收尾处理 {pct}%"
-        else:
-            prog = last; desc = f"{stage} {pct}%"
+            while True:
+                line = proc.stdout.readline()
+                if not line and proc.poll() is not None: break
+                if not line: continue
+                line = line.strip()
+                if not line: continue
+                safe_print("[LS] " + line)
 
-        prog = max(prog, last); last = prog
-        progress(prog, desc=desc)
+                # 模型加载阶段
+                loading_keywords = ["Loading", "loading", "Initializing", "initializing", "model", "checkpoint"]
+                if not model_loaded and any(kw in line for kw in loading_keywords):
+                    if state["last"] < 0.12:
+                        state["last"] = min(state["last"] + 0.005, 0.12)
+                        progress(state["last"], desc="正在生成视频...")
+                    continue
 
-    if last < 0.93:
-        progress(0.94, desc="写入文件...")
-    if proc.wait() != 0:
-        raise gr.Error("视频合成失败，请检查视频/音频格式是否正确")
+                if parse_progress_line(line):
+                    model_loaded = True
+                state = _update_ls_progress(line, progress, detail_cb, state)
+
+            if state["last"] < 0.93:
+                progress(0.94, desc="写入文件...")
+            if proc.wait() != 0:
+                raise gr.Error("视频合成失败，请检查视频/音频格式是否正确")
+    finally:
+        # ── 无论成败，恢复 TTS 到 GPU ──
+        _restore_tts_gpu()
+
     if not os.path.exists(out):
         raise gr.Error("输出视频文件未找到，请重试")
 
@@ -663,7 +964,7 @@ class TextExtractor:
                 safe_print("[TextExtractor] 未找到卡密")
                 return False
             
-            safe_print(f"[TextExtractor] 正在连接 {self._ws_url}")
+            # safe_print(f"[TextExtractor] 正在连接 {self._ws_url}")  # 移除域名日志
             self._ws = await websockets.connect(
                 self._ws_url,
                 ping_interval=30,
@@ -676,12 +977,12 @@ class TextExtractor:
             # 发送注册消息
             register_msg = json.dumps({"type": "register", "key": license_key})
             await self._ws.send(register_msg)
-            safe_print(f"[TextExtractor] 已发送注册消息")
+            # safe_print(f"[TextExtractor] 已发送注册消息")  # 移除日志
             
             # 等待注册响应
             try:
                 response = await asyncio.wait_for(self._ws.recv(), timeout=10)
-                safe_print(f"[TextExtractor] 收到注册响应: {response}")
+                # safe_print(f"[TextExtractor] 收到注册响应: {response}")  # 移除日志
                 self._registered = True
             except asyncio.TimeoutError:
                 safe_print("[TextExtractor] 注册响应超时，继续运行")
@@ -699,7 +1000,7 @@ class TextExtractor:
         while self._connected and self._ws:
             try:
                 message = await self._ws.recv()
-                safe_print(f"[TextExtractor] 收到消息: {message[:200]}..." if len(message) > 200 else f"[TextExtractor] 收到消息: {message}")
+                # safe_print(f"[TextExtractor] 收到消息: {message[:200]}..." if len(message) > 200 else f"[TextExtractor] 收到消息: {message}")  # 移除日志
                 self._response_queue.put(message)
             except websockets.exceptions.ConnectionClosed:
                 safe_print("[TextExtractor] 连接已关闭，尝试重连...")

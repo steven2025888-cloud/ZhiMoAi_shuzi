@@ -77,6 +77,7 @@ logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
 tts = None
+tts_warmup_done = False  # 预热完成标志
 APP_NAME = "织梦AI大模型"
 APP_SUB  = "AI语音克隆 · 智能视频合成 · 专业级解决方案"
 
@@ -129,90 +130,15 @@ def auto_load_model():
         from indextts.infer_v2 import IndexTTS2
         tts = IndexTTS2(model_dir=model_dir,
                         cfg_path=os.path.join(model_dir, "config.yaml"), use_fp16=True)
-        safe_print("[MODEL] 模型加载完成，正在预热引擎...")
-        # 预热：触发一次推理内部初始化（CUDA图/JIT编译等），避免首次合成卡顿
-        try:
-            import tempfile, numpy as np
-            _dummy_wav = os.path.join(OUTPUT_DIR, "_warmup.wav")
-            # 找任意一个已有音色作为 prompt 进行预热
-            _voice_meta = os.path.join(BASE_DIR, "voices", "meta.json")
-            _prompt = None
-            if os.path.exists(_voice_meta):
-                import json as _json
-                _vm = _json.load(open(_voice_meta, encoding='utf-8'))
-                if _vm and os.path.exists(_vm[0].get("path","")):
-                    _prompt = _vm[0]["path"]
-            if _prompt:
-                tts.infer(spk_audio_prompt=_prompt, text="你好。",
-                          output_path=_dummy_wav,
-                          do_sample=True, top_p=0.8, top_k=30,
-                          temperature=0.8, length_penalty=0.0,
-                          num_beams=1, repetition_penalty=10.0,
-                          max_mel_tokens=200,
-                          emo_audio_prompt=None, emo_alpha=0.5,
-                          emo_vector=None, use_emo_text=False,
-                          emo_text=None, use_random=False)
-                try: os.remove(_dummy_wav)
-                except Exception: pass
-                safe_print("[MODEL] 引擎预热完成，首次合成将直接输出")
-        except Exception as _we:
-            safe_print("[MODEL] 预热跳过（无音色文件或预热失败）: " + str(_we))
+        tts.auto_optimize_for_gpu()
+        safe_print("[MODEL] 模型加载完成")
         safe_print("[MODEL] OK")
     except Exception as e:
         safe_print("[MODEL] FAIL: " + str(e)); traceback.print_exc()
     finally:
         os.chdir(original_cwd)
 
-    # ── 后台预热 _internal_sync 引擎 ──
-    def _warmup_latentsync():
-        try:
-            if not os.path.exists(LATENTSYNC_PYTHON):
-                safe_print("[WARMUP] _internal_sync Python 未找到，跳过预热")
-                return
-            if not os.path.exists(LATENTSYNC_CKPT):
-                safe_print("[WARMUP] _internal_sync 模型文件未找到，跳过预热")
-                return
-
-            safe_print("[WARMUP] 正在预热 _internal_sync 引擎...")
-            env = os.environ.copy()
-            ls_env = os.path.join(LATENTSYNC_DIR, "latents_env")
-            fb = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-            env["HF_HOME"] = os.path.join(LATENTSYNC_DIR, "huggingface")
-            env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
-            env["PATH"] = ";".join([ls_env, os.path.join(ls_env, "Library", "bin"), fb, env.get("PATH", "")])
-            for k in ("TRANSFORMERS_CACHE", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_OFFLINE", "HF_HUB_OFFLINE"):
-                env.pop(k, None)
-
-            warmup_code = (
-                "import sys, os; "
-                "sys.path.insert(0, os.getcwd()); "
-                "import torch; "
-                "print('[WARMUP] PyTorch loaded'); "
-                "from omegaconf import OmegaConf; "
-                "print('[WARMUP] OmegaConf loaded'); "
-                "from latentsync.utils.util import load_model; "
-                "print('[WARMUP] _internal_sync modules loaded'); "
-                "print('[WARMUP] Engine warmup complete')"
-            )
-            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            proc = subprocess.run(
-                [LATENTSYNC_PYTHON, "-c", warmup_code],
-                cwd=LATENTSYNC_DIR, env=env,
-                capture_output=True, text=True, timeout=120,
-                creationflags=flags
-            )
-            if proc.returncode == 0:
-                safe_print("[WARMUP] _internal_sync 引擎预热完成")
-            else:
-                safe_print(f"[WARMUP] _internal_sync 预热返回非零码: {proc.returncode}")
-                if proc.stderr:
-                    safe_print(f"[WARMUP] stderr: {proc.stderr[-300:]}")
-        except subprocess.TimeoutExpired:
-            safe_print("[WARMUP] _internal_sync 预热超时，跳过")
-        except Exception as e:
-            safe_print(f"[WARMUP] _internal_sync 预热失败: {e}")
-
-    threading.Thread(target=_warmup_latentsync, daemon=True).start()
+    tts_warmup_done = True  # 不再预热，直接标记完成
 
 
 # ══════════════════════════════════════════════════════════════

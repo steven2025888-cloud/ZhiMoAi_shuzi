@@ -11,7 +11,6 @@ echo   3. 构建启动器（如需要）
 echo   4. 生成安装包
 echo   5. 清理临时.pyc文件
 echo.
-pause
 
 echo.
 echo [1/6] 清理临时目录...
@@ -25,7 +24,6 @@ echo [2/6] 编译Python代码为.pyc字节码...
 python build_pyc_for_package.py
 if errorlevel 1 (
     echo   ✗ 错误：Python编译失败
-    pause
     exit /b 1
 )
 echo   ✓ Python代码编译完成
@@ -38,7 +36,6 @@ if not exist "ZhiMoAI_Launcher.exe" (
     if errorlevel 1 (
         echo   ✗ 错误：启动器构建失败
         python build_pyc_for_package.py --clean
-        pause
         exit /b 1
     )
     echo   ✓ 启动器构建完成
@@ -62,7 +59,6 @@ if not exist "ws_worker.pyc" set MISSING=1
 if %MISSING%==1 (
     echo   ✗ 错误：部分.pyc文件缺失
     dir *.pyc /b 2>nul
-    pause
     exit /b 1
 )
 echo   ✓ 所有.pyc文件已就绪
@@ -76,7 +72,6 @@ if exist %ISCC% (
     if errorlevel 1 (
         echo   ✗ 错误：Inno Setup编译失败
         python build_pyc_for_package.py --clean
-        pause
         exit /b 1
     )
     echo   ✓ 安装包生成完成
@@ -84,7 +79,6 @@ if exist %ISCC% (
     echo   ✗ 错误：未找到Inno Setup
     echo   请安装Inno Setup 6到默认路径
     python build_pyc_for_package.py --clean
-    pause
     exit /b 1
 )
 
@@ -114,4 +108,3 @@ echo   2. 运行"验证安装包内容.bat"检查
 echo   3. 确认只有.pyc文件，没有.py文件
 echo.
 echo ============================================================
-pause

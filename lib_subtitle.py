@@ -155,7 +155,7 @@ def build_ass(words, font_name, font_size,
 
     kws = (keywords or []) if kw_enable else []
 
-    fn = font_name if font_name and font_name != "默认字体" else "Microsoft YaHei"
+    fn = font_name if font_name and font_name not in ("默认字体", "系统字体") else "Microsoft YaHei"
 
     # 背景色处理
     bg_op = max(0, min(100, int(bg_opacity or 0)))
