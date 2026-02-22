@@ -62,3 +62,6 @@ ImportError: cannot import name 'load_model' from 'latentsync.utils.util' (D:\Zh
 [TextExtractor] 收到消息: {"type":"ack","msg":"\u5df2\u63d0\u4ea4"}
 [TextExtractor] 已发送提取请求: {"type":"url","url":"https://v.douyin.com/OmcaiJo8...
 [TextExtractor] 收到消息: {"type":"ack","msg":"\u5df2\u63d0\u4ea4"}
+[TextExtractor] 已发送提取请求: {"type":"url","url":"https://v.douyin.com/OmcaiJo8...
+[TextExtractor] 收到消息: {"type":"ack","msg":"\u5df2\u63d0\u4ea4"}
+[TextExtractor] 收到消息: {"type":"result","content":"错误: 请输入链接地址！"}
