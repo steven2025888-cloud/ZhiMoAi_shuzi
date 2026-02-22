@@ -1,0 +1,768 @@
+
+/* ════════════════════════════════════════
+   织梦AI — 商业UI主题  v4.0
+   ════════════════════════════════════════ */
+
+/* ── 隐藏Gradio系统元素 ── */
+footer,.footer,.built-with,#footer,.show-api,.api-docs,
+a[href*="gradio.app"],a[href*="huggingface"],
+button[aria-label="Settings"],.hamburger-menu,span.version
+{display:none!important;height:0!important;overflow:hidden!important;}
+
+/* ── 全局 ── */
+*{box-sizing:border-box;}
+body,.gradio-container{background:#f0f2f7!important;font-family:'Microsoft YaHei',system-ui,sans-serif!important;}
+.gradio-container{padding-bottom:60px!important;min-height:0!important;overflow-x:hidden!important;}
+
+/* ── Tab 导航 ── */
+.tabs button[role=tab]{
+  font-size:13px!important;font-weight:600!important;
+  padding:10px 20px!important;border-radius:8px 8px 0 0!important;
+  color:#64748b!important;border:none!important;background:transparent!important;
+  transition:all .2s!important;
+}
+.tabs button[role=tab][aria-selected=true]{
+  color:#6366f1!important;font-weight:700!important;
+  border-bottom:3px solid #6366f1!important;
+  background:rgba(99,102,241,.06)!important;
+}
+
+/* ── 工作台布局 ── */
+.workspace{gap:14px!important;padding:14px 14px 0!important;align-items:stretch!important;}
+
+/* ── 面板卡片 ── */
+.panel{
+  background:#fff!important;
+  border:1px solid #e5e7eb!important;
+  border-radius:16px!important;
+  padding:18px!important;
+  box-shadow:0 1px 3px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04)!important;
+  transition:box-shadow .2s!important;
+  overflow:visible!important;
+}
+.panel:hover{box-shadow:0 2px 8px rgba(0,0,0,.07),0 8px 24px rgba(0,0,0,.06)!important;}
+
+/* ── 步骤标题栏 ── */
+.step-header{
+  display:flex;align-items:center;gap:10px;
+  padding-bottom:14px;margin-bottom:14px;
+  border-bottom:1.5px solid #f1f5f9;
+}
+.step-num{
+  width:28px;height:28px;border-radius:8px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:800;color:#fff;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  box-shadow:0 2px 6px rgba(99,102,241,.35);
+}
+.step-title{font-size:15px;font-weight:800;color:#0f172a;letter-spacing:.2px;}
+.step-badge{
+  margin-left:auto;font-size:10px;font-weight:700;
+  padding:2px 8px;border-radius:20px;
+  background:#ede9fe;color:#6d28d9;white-space:nowrap;
+}
+
+/* ── 分割线 ── */
+.divider{height:1px;background:#f1f5f9;margin:12px 0;}
+
+/* ── 子区块标签 ── */
+.section-label{
+  font-size:11px;font-weight:700;color:#6366f1;
+  text-transform:uppercase;letter-spacing:.8px;
+  margin:10px 0 5px;
+  display:flex;align-items:center;gap:5px;
+}
+.section-label::before{
+  content:'';width:3px;height:12px;border-radius:2px;
+  background:linear-gradient(#6366f1,#8b5cf6);display:inline-block;
+}
+
+/* ── 按钮 ── */
+.gr-button-primary, button.primary{
+  background:linear-gradient(135deg,#6366f1,#8b5cf6)!important;
+  border:none!important;color:#fff!important;
+  border-radius:10px!important;font-weight:700!important;
+  box-shadow:0 2px 8px rgba(99,102,241,.3)!important;
+  transition:all .2s!important;
+}
+.gr-button-primary:hover, button.primary:hover{
+  box-shadow:0 4px 14px rgba(99,102,241,.45)!important;
+  transform:translateY(-1px)!important;
+}
+.gr-button-secondary, button.secondary{
+  background:#f8fafc!important;border:1.5px solid #e2e8f0!important;
+  color:#475569!important;border-radius:10px!important;font-weight:600!important;
+  transition:all .2s!important;
+}
+.gr-button-secondary:hover, button.secondary:hover{
+  background:#f1f5f9!important;border-color:#cbd5e1!important;
+}
+
+/* ── 输入控件 ── */
+input[type=text],textarea,.gr-textbox input,.gr-textbox textarea{
+  border:1.5px solid #e5e7eb!important;
+  border-radius:10px!important;
+  font-size:13px!important;
+  transition:border-color .2s,box-shadow .2s!important;
+  background:#fafafa!important;
+}
+input[type=text]:focus,textarea:focus{
+  border-color:#6366f1!important;
+  box-shadow:0 0 0 3px rgba(99,102,241,.12)!important;
+  background:#fff!important;
+}
+input[type=range]{accent-color:#6366f1!important;}
+
+/* ── Dropdown ── */
+.gr-dropdown select,.gr-dropdown .wrap-inner{
+  border:1.5px solid #e5e7eb!important;border-radius:10px!important;
+  background:#fafafa!important;
+}
+
+/* ── 音频 / 视频组件 ── */
+.gr-audio{border-radius:12px!important;border:1.5px solid #f1f5f9!important;}
+.gr-video{border-radius:12px!important;overflow:hidden!important;}
+audio{border-radius:8px!important;}
+
+/* ── ColorPicker 美化（弹窗选色）── */
+.gr-color-picker, [class*="color-picker"], .colorpicker{
+  min-width:90px!important;
+}
+/* 颜色色块本体：固定样式，确保白色等浅色可见 */
+input[type=color]{
+  width:100%!important;min-width:80px!important;
+  height:42px!important;cursor:pointer!important;
+  border-radius:10px!important;
+  border:2px solid #94a3b8!important;
+  padding:3px!important;
+  background:#fff!important;
+  box-shadow:inset 0 0 0 1.5px #94a3b8, 0 1px 4px rgba(0,0,0,.1)!important;
+  transition:border-color .2s,box-shadow .2s!important;
+}
+input[type=color]:hover{
+  border-color:#6366f1!important;
+  box-shadow:inset 0 0 0 1.5px #6366f1, 0 0 0 3px rgba(99,102,241,.15)!important;
+}
+/* 字幕面板内颜色行：固定高度，防止拉伸变形 */
+.subtitle-panel .gr-row > *{ min-width:90px!important; }
+
+/* ── Accordion ── */
+.gr-accordion{border:1.5px solid #f1f5f9!important;border-radius:12px!important;}
+.gr-accordion summary{
+  font-size:13px!important;font-weight:700!important;color:#475569!important;
+  background:#f8fafc!important;border-radius:10px!important;padding:10px 14px!important;
+}
+
+/* ── 字幕面板 ── */
+.subtitle-panel{
+  background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);
+  border:2px solid #bae6fd;
+  border-radius:14px;padding:14px;margin-top:12px;
+}
+.subtitle-panel-head{
+  display:flex;align-items:center;gap:8px;
+  margin-bottom:12px;
+}
+.subtitle-panel-icon{
+  width:28px;height:28px;border-radius:8px;
+  background:linear-gradient(135deg,#0ea5e9,#0284c7);
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;flex-shrink:0;
+  box-shadow:0 2px 6px rgba(14,165,233,.3);
+}
+.subtitle-panel-title{font-size:14px;font-weight:800;color:#0c4a6e;}
+.subtitle-panel-tip{margin-left:auto;font-size:10px;color:#0369a1;
+  background:#e0f2fe;border:1px solid #bae6fd;
+  padding:2px 8px;border-radius:20px;}
+
+/* ── 字幕位置选择器 ── */
+.sub-pos-radio{min-width:0!important;}
+.sub-pos-radio .wrap{
+  display:flex!important;gap:4px!important;flex-direction:row!important;flex-wrap:nowrap!important;
+  width:100%!important;
+}
+.sub-pos-radio label{
+  flex:1 1 0%!important;
+  padding:0!important;margin:0!important;border-radius:8px!important;
+  border:2px solid #e2e8f0!important;
+  cursor:pointer!important;transition:all .18s!important;
+  background:#f8fafc!important;
+  height:36px!important;min-width:0!important;max-width:none!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  box-sizing:border-box!important;
+  overflow:hidden!important;white-space:nowrap!important;
+}
+/* 关键：让 Gradio 嵌套的所有 span 都居中 */
+.sub-pos-radio label>*:not(input),
+.sub-pos-radio label span,
+.sub-pos-radio label span span,
+.sub-pos-radio label [data-testid]{
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  width:100%!important;height:100%!important;
+  font-size:14px!important;font-weight:800!important;
+  text-align:center!important;
+  margin:0!important;padding:0!important;
+  pointer-events:none!important;
+  color:inherit!important;
+}
+.sub-pos-radio label:has(input:checked){
+  border-color:#0ea5e9!important;background:linear-gradient(135deg,#e0f2fe,#bae6fd)!important;
+  color:#0c4a6e!important;box-shadow:0 2px 8px rgba(14,165,233,.25)!important;
+  transform:scale(1.02)!important;
+}
+.sub-pos-radio label:hover:not(:has(input:checked)){
+  border-color:#bae6fd!important;background:#f0f9ff!important;
+}
+.sub-pos-radio input[type="radio"]{
+  display:none!important;width:0!important;height:0!important;
+  position:absolute!important;opacity:0!important;
+}
+
+/* ── 音频模式选择器 ── */
+.audio-mode-radio .wrap{
+  display:flex!important;gap:6px!important;flex-direction:row!important;
+}
+.audio-mode-radio label{
+  flex:1 1 0%!important;text-align:center!important;font-size:13px!important;font-weight:700!important;
+  padding:10px 8px!important;border-radius:10px!important;
+  border:2px solid #e2e8f0!important;
+  cursor:pointer!important;transition:all .18s!important;
+  background:#f8fafc!important;
+  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+}
+.audio-mode-radio label:has(input:checked){
+  border-color:#6366f1!important;background:linear-gradient(135deg,#eef2ff,#e0e7ff)!important;
+  color:#3730a3!important;box-shadow:0 2px 8px rgba(99,102,241,.2)!important;
+}
+.audio-mode-radio label:hover:not(:has(input:checked)){
+  border-color:#c7d2fe!important;background:#f5f3ff!important;
+}
+.audio-mode-radio input[type="radio"]{
+  display:none!important;width:0!important;height:0!important;
+  position:absolute!important;opacity:0!important;
+}
+
+/* ── 语音风格选择器 ── */
+.voice-style-radio .wrap{
+  display:flex!important;gap:6px!important;flex-direction:row!important;flex-wrap:wrap!important;
+}
+.voice-style-radio label{
+  flex:1 1 auto!important;text-align:center!important;font-size:12px!important;font-weight:600!important;
+  padding:7px 12px!important;border-radius:8px!important;
+  border:1.5px solid #e2e8f0!important;
+  cursor:pointer!important;transition:all .18s!important;
+  background:#f8fafc!important;min-width:60px!important;
+  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+}
+.voice-style-radio label:has(input:checked){
+  border-color:#6366f1!important;background:linear-gradient(135deg,#eef2ff,#e0e7ff)!important;
+  color:#3730a3!important;box-shadow:0 2px 8px rgba(99,102,241,.2)!important;
+  font-weight:700!important;
+}
+.voice-style-radio label:hover:not(:has(input:checked)){
+  border-color:#c7d2fe!important;background:#f5f3ff!important;
+}
+.voice-style-radio input[type="radio"]{
+  display:none!important;width:0!important;height:0!important;
+  position:absolute!important;opacity:0!important;
+}
+
+/* ── 关键词高亮 checkbox ── */
+.kw-checkbox label{font-weight:700!important;font-size:13px!important;}
+.kw-checkbox input[type=checkbox]{
+  accent-color:#0ea5e9!important;width:16px!important;height:16px!important;
+}
+
+/* ── 数字人/音色 库卡片 ── */
+.lib-card{
+  background:#fff;border:1.5px solid #e5e7eb;border-radius:12px;
+  padding:12px 14px;margin-bottom:8px;
+  display:flex;align-items:center;gap:12px;
+  box-shadow:0 1px 4px rgba(0,0,0,.04);
+  transition:border-color .15s,box-shadow .15s;
+}
+.lib-card:hover{border-color:#a5b4fc;box-shadow:0 2px 8px rgba(99,102,241,.1);}
+
+/* ── 输出视频区 ── */
+#output-video-col{overflow:visible!important;}
+#output-video video{
+  max-height:calc(100vh - 220px)!important;width:100%!important;
+  object-fit:contain!important;border-radius:12px!important;
+  background:#0f172a!important;display:block!important;
+}
+#ls-detail-box{margin-bottom:10px;}
+.hist-tab video{max-height:360px;}
+
+/* ── 提示横幅 ── */
+.hint-ok{background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:8px 12px;font-size:12px;color:#15803d;font-weight:600;}
+.hint-warn{background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:8px 12px;font-size:12px;color:#c2410c;font-weight:600;}
+.hint-err{background:#fff1f2;border:1.5px solid #fecdd3;border-radius:10px;padding:8px 12px;font-size:12px;color:#be123c;font-weight:600;}
+
+/* ── 日志 ── */
+#zdai-log-src{position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;}
+.log-entry{font-size:12px;color:#cbd5e1;line-height:1.7;padding:3px 0;border-bottom:1px solid rgba(100,116,139,.1);display:flex;align-items:baseline;gap:5px;}
+.log-entry:last-child{border-bottom:none;}
+.log-ok{color:#4ade80;font-weight:700;flex-shrink:0;}
+.log-err{color:#f87171;font-weight:700;flex-shrink:0;}
+.log-time{color:#64748b;font-size:11px;margin-right:3px;flex-shrink:0;}
+
+/* ── 进度 ── */
+.progress-description,[class*="progress"] p,.progress-text,tqdm{white-space:pre-wrap!important;}
+
+/* ── 清空弹窗 ── */
+#clear-confirm-overlay{
+  position:fixed!important;top:0!important;left:0!important;
+  width:100vw!important;height:100vh!important;z-index:9990!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  background:rgba(15,23,42,.75)!important;backdrop-filter:blur(8px)!important;
+  padding:0!important;margin:0!important;border:none!important;border-radius:0!important;box-shadow:none!important;
+}
+#clear-confirm-overlay>div.form{
+  background:#fff!important;border-radius:20px!important;
+  padding:36px 32px 28px!important;max-width:460px!important;
+  width:90%!important;box-shadow:0 24px 64px rgba(0,0,0,.3)!important;border:none!important;
+}
+
+/* ── 批量任务 ── */
+.bt-form,.bt-queue{
+  background:#fff!important;border:1.5px solid #e5e7eb!important;
+  border-radius:14px!important;padding:16px 14px!important;
+  box-shadow:0 2px 8px rgba(0,0,0,.04)!important;
+}
+.bt-step-row{display:flex;align-items:center;gap:8px;margin:12px 0 6px;padding-top:10px;border-top:1px solid #f1f5f9;}
+.bt-step-label{font-size:13px;font-weight:700;color:#0f172a;}
+.bt-section-title{font-size:12px;font-weight:700;color:#6366f1;margin-bottom:6px;}
+.bt-radio .wrap{flex-direction:row!important;flex-wrap:wrap!important;gap:6px!important;}
+.bt-radio label{
+  flex:1!important;text-align:center!important;font-size:12px!important;font-weight:600!important;
+  padding:6px 10px!important;border-radius:8px!important;border:1.5px solid #e5e7eb!important;
+  cursor:pointer!important;transition:all .15s!important;background:#fafafa!important;min-width:80px!important;
+}
+.bt-radio label:has(input:checked){border-color:#6366f1!important;background:#ede9fe!important;color:#4c1d95!important;}
+.bt-badge{border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;display:inline-block;white-space:nowrap;}
+.bt-badge-tts{background:#ede9fe;color:#6d28d9;}
+.bt-badge-audio{background:#e0f2fe;color:#0369a1;}
+.bt-badge-shared{background:#fce7f3;color:#9d174d;}
+.bt-badge-own{background:#f0fdf4;color:#166534;}
+#bt-progress-box{margin-top:10px;}
+#bt-task-list{min-height:60px;margin-top:4px;}
+
+/* ── 滚动条 ── */
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:#94a3b8;}
+
+/* ── 删除/预览桥接控件（不显示但保持DOM中以便JS触发）── */
+#av-del-input, #vc-del-input,
+#av-del-input-row, #vc-del-input-row,
+#av-prev-trigger, #vc-prev-trigger,
+#av-prev-trigger-row, #vc-prev-trigger-row {
+  position:fixed!important;left:-10000px!important;
+  width:1px!important;height:1px!important;
+  overflow:hidden!important;opacity:0!important;
+  pointer-events:none!important;z-index:-1!important;
+}
+
+/* ── 隐藏HTML容器的padding ── */
+.html-container.svelte-phx28p.padding,
+[class*="html-container"][class*="padding"] {
+  padding: 0!important;
+}
+
+/* ── 工作台记录面板 ── */
+#workspace-record-panel {
+  background: #fff!important;
+  border: none!important;
+  margin-bottom: 16px!important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06)!important;
+  padding: 16px!important;
+  border-radius: 12px!important;
+  transition: box-shadow .2s!important;
+}
+
+#workspace-record-panel:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,.08)!important;
+}
+
+/* Gradio 下拉框容器背景色 */
+#workspace-record-panel div.svelte-1nguped {
+  background: #fff!important;
+}
+
+/* 工作台记录下拉框样式 */
+#workspace-record-panel .gr-dropdown,
+#workspace-record-panel select,
+#workspace-record-panel .wrap {
+  border: 1.5px solid #e5e7eb!important;
+  border-radius: 6px!important;
+  background: #fff!important;
+  transition: all .2s!important;
+  font-size: 13px!important;
+}
+
+#workspace-record-panel .gr-dropdown:hover,
+#workspace-record-panel .gr-dropdown:focus-within {
+  border-color: #6366f1!important;
+  box-shadow: 0 0 0 3px rgba(99,102,241,.12)!important;
+  background: #fff!important;
+}
+
+/* 工作台记录按钮容器 */
+#workspace-record-buttons {
+  gap: 8px!important;
+  min-width: 0!important;
+}
+
+#workspace-record-buttons > .gr-row {
+  gap: 8px!important;
+  margin-bottom: 0!important;
+}
+
+#workspace-record-buttons > .gr-row:first-child {
+  margin-bottom: 8px!important;
+}
+
+/* 工作台记录按钮样式 */
+#workspace-record-panel button {
+  font-weight: 600!important;
+  transition: all .2s!important;
+  border-radius: 6px!important;
+  font-size: 13px!important;
+  background: #fff!important;
+  min-width: 80px!important;
+  padding: 8px 12px!important;
+}
+
+#workspace-record-panel button.primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6)!important;
+  box-shadow: 0 2px 8px rgba(99,102,241,.3)!important;
+  border: none!important;
+  color: #fff!important;
+}
+
+#workspace-record-panel button.primary:hover {
+  transform: translateY(-1px)!important;
+  box-shadow: 0 4px 14px rgba(99,102,241,.45)!important;
+}
+
+#workspace-record-panel button.secondary {
+  background: #fff!important;
+  border: 1.5px solid #e2e8f0!important;
+  color: #64748b!important;
+}
+
+#workspace-record-panel button.secondary:hover {
+  background: #f8fafc!important;
+  border-color: #cbd5e1!important;
+  color: #475569!important;
+}
+
+/* 删除按钮特殊样式 */
+#workspace-record-panel button.danger-btn {
+  color: #ef4444!important;
+  border-color: #fecaca!important;
+}
+
+#workspace-record-panel button.danger-btn:hover {
+  background: #fef2f2!important;
+  border-color: #ef4444!important;
+}
+
+.workspace-delete-btn:hover {
+  background: #fef2f2!important;
+  border-color: #ef4444!important;
+  color: #dc2626!important;
+}
+
+/* 危险按钮样式 */
+.danger-btn {
+  color: #ef4444!important;
+  border-color: #fecaca!important;
+}
+
+.danger-btn:hover {
+  background: #fef2f2!important;
+  border-color: #ef4444!important;
+  color: #dc2626!important;
+}
+
+/* 工作台记录列表样式 */
+.workspace-record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.workspace-record-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #fafafa;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  transition: all .2s;
+}
+
+.workspace-record-item:hover {
+  background: #fff;
+  border-color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99,102,241,.1);
+}
+
+.record-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.record-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-time {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.record-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.record-restore-btn,
+.record-delete-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1.5px solid;
+  cursor: pointer;
+  transition: all .2s;
+  background: #fff;
+  font-family: inherit;
+}
+
+.record-restore-btn {
+  color: #6366f1;
+  border-color: #c7d2fe;
+}
+
+.record-restore-btn:hover {
+  background: #eef2ff;
+  border-color: #6366f1;
+  transform: translateY(-1px);
+}
+
+.record-delete-btn {
+  color: #ef4444;
+  border-color: #fecaca;
+  min-width: 36px;
+}
+
+.record-delete-btn:hover {
+  background: #fef2f2;
+  border-color: #ef4444;
+  transform: translateY(-1px);
+}
+
+/* 工作台记录提示信息样式 */
+#workspace-record-panel .hint-ok,
+#workspace-record-panel .hint-warn,
+#workspace-record-panel .hint-err {
+  margin-top: 12px!important;
+}
+
+/* ── 按钮状态颜色增强 ── */
+.gr-button-primary:active,button.primary:active{
+  transform:translateY(0px)!important;
+  box-shadow:0 2px 8px rgba(99,102,241,.3)!important;
+}
+
+/* ── 工作台面板阴影优化 ── */
+.panel {
+  box-shadow: 0 4px 20px rgba(0,0,0,.06)!important;
+  border-radius: 16px!important;
+}
+
+/* ── Gradio flex 修复 ── */
+.stretch>div>.column>*,.stretch>div>.column>.form>*{flex-grow:0!important;}
+
+/* ── 描边颜色选择器加粗边框 ── */
+#sub-outline-color input[type="color"],
+#sub-outline-color .color-picker-input,
+#sub-outline-color input{
+  border-width:3px!important;
+  border-color:#64748b!important;
+}
+
+/* ── Gradio dialog按钮贴边边框 ── */
+.dialog-button, button.dialog-button,
+[class*="dialog-button"][class*="svelte"],
+button[class*="dialog-button"] {
+  border:1.5px solid #e2e8f0!important;
+  border-radius:8px!important;
+}
+
+/* ── AI功能按钮样式 ── */
+button:has-text("✨ AI改写"),
+button:has-text("✨ AI优化"),
+button[value*="AI改写"],
+button[value*="AI优化"] {
+  background:linear-gradient(135deg,#f0f9ff,#e0f2fe)!important;
+  border:1.5px solid #7dd3fc!important;
+  color:#0369a1!important;
+  font-weight:700!important;
+  transition:all .2s!important;
+}
+
+button:has-text("✨ AI改写"):hover,
+button:has-text("✨ AI优化"):hover,
+button[value*="AI改写"]:hover,
+button[value*="AI优化"]:hover {
+  background:linear-gradient(135deg,#e0f2fe,#bae6fd)!important;
+  border-color:#38bdf8!important;
+  transform:translateY(-1px)!important;
+  box-shadow:0 4px 12px rgba(14,165,233,.25)!important;
+}
+
+/* ══════════════════════════════════════
+   文案提取面板样式
+   ══════════════════════════════════════ */
+.extract-panel {
+  background: linear-gradient(135deg, #fdf4ff 0%, #fae8ff 50%, #f5d0fe 100%)!important;
+  border: 2px solid #e879f9!important;
+  border-radius: 14px!important;
+  padding: 14px 16px!important;
+  margin-bottom: 14px!important;
+  box-shadow: 0 2px 12px rgba(217, 70, 239, 0.12)!important;
+  transition: all 0.3s ease!important;
+}
+
+.extract-panel:hover {
+  box-shadow: 0 4px 20px rgba(217, 70, 239, 0.2)!important;
+  border-color: #d946ef!important;
+}
+
+.extract-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1.5px solid rgba(217, 70, 239, 0.2);
+}
+
+.extract-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 2px 4px rgba(217, 70, 239, 0.3));
+}
+
+.extract-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #86198f;
+  letter-spacing: 0.3px;
+}
+
+.extract-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #d946ef, #a855f7);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(168, 85, 247, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.extract-input textarea {
+  background: #fff!important;
+  border: 1.5px solid #e9d5ff!important;
+  border-radius: 10px!important;
+  font-size: 13px!important;
+  transition: all 0.2s!important;
+}
+
+.extract-input textarea:focus {
+  border-color: #d946ef!important;
+  box-shadow: 0 0 0 3px rgba(217, 70, 239, 0.15)!important;
+}
+
+.extract-btn {
+  background: linear-gradient(135deg, #d946ef, #a855f7)!important;
+  border: none!important;
+  color: #fff!important;
+  font-weight: 700!important;
+  border-radius: 10px!important;
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.35)!important;
+  transition: all 0.2s!important;
+  min-width: 120px!important;
+}
+
+.extract-btn:hover {
+  transform: translateY(-2px)!important;
+  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.45)!important;
+}
+
+.extract-btn:active {
+  transform: translateY(0)!important;
+}
+
+.extract-tip {
+  font-size: 11px;
+  color: #a855f7;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+}
+
+.extract-hint .hint-ok {
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5)!important;
+  border: 1.5px solid #34d399!important;
+  color: #065f46!important;
+  padding: 8px 12px!important;
+  border-radius: 8px!important;
+  font-size: 12px!important;
+  margin-top: 8px!important;
+}
+
+.extract-hint .hint-err {
+  background: linear-gradient(135deg, #fef2f2, #fee2e2)!important;
+  border: 1.5px solid #f87171!important;
+  color: #991b1b!important;
+  padding: 8px 12px!important;
+  border-radius: 8px!important;
+  font-size: 12px!important;
+  margin-top: 8px!important;
+}
+
+.extract-hint .hint-loading {
+  background: linear-gradient(135deg, #fdf4ff, #fae8ff)!important;
+  border: 1.5px solid #e879f9!important;
+  color: #86198f!important;
+  padding: 8px 12px!important;
+  border-radius: 8px!important;
+  font-size: 12px!important;
+  margin-top: 8px!important;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}

@@ -290,33 +290,24 @@ ENV_CONFIG = load_env_config()
 
 
 def _load_platform_ai_agreement_text():
-    default_text = """平台与AI功能使用协议（摘要）
+    """加载平台与AI功能使用协议文本 - 直接读取douyin_publish_agreement.txt"""
+    agreement_file = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")
+    
+    if os.path.exists(agreement_file):
+        try:
+            with open(agreement_file, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    return content
+        except Exception as e:
+            print(f"[WARNING] 读取协议文件失败: {e}")
+    
+    # 如果文件不存在，返回默认文本
+    return """平台与AI功能使用协议
 
-1. 本软件为技术工具，用户对使用本软件生成、编辑、发布、分发的全部内容承担责任。
-2. 用户应确保内容合法合规，不侵犯第三方权益（著作权、商标权、肖像权、隐私权等）。
-3. AI生成内容可能存在偏差、错误或不适当输出，用户需自行审核后再使用/发布。
-4. 平台规则（抖音/快手/小红书/视频号/B站等）由用户自行遵守，违规后果由用户承担。
-5. 涉及商业用途时，用户应自行确认素材、配音、字体、模型、脚本的授权范围。
-6. 因网络、接口、第三方平台策略调整导致的功能异常/限制，本软件不承诺永久可用。
-7. 用户应妥善保管账号、卡密、平台凭证，不得用于违法违规用途。
-8. 在法律允许范围内，软件提供方对间接损失、预期收益损失不承担责任。
+请阅读完整协议内容后再勾选同意。
 
-请在完整阅读正式协议文本后再勾选同意。"""
-    candidates = []
-    for p in [PLATFORM_AI_AGREEMENT_FILE, LEGACY_PLATFORM_AGREEMENT_FILE, LEGACY_DOUYIN_AGREEMENT_FILE]:
-        if p and p not in candidates:
-            candidates.append(p)
-    try:
-        for p in candidates:
-            if os.path.exists(p):
-                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
-                    t = f.read().strip()
-                if t:
-                    return t
-        missing = '\n'.join(candidates)
-        return default_text + f"\n\n[提示] 未找到协议文件，请确认以下任一文件存在：\n{missing}"
-    except Exception as e:
-        return default_text + f"\n\n[提示] 协议文件读取失败：{e}"
+协议文件 (douyin_publish_agreement.txt) 未找到，请联系技术支持。"""
 
 # ══════════════════════════════════════════════════════════════
 #  错误弹窗
@@ -758,7 +749,7 @@ if __name__ == "__main__":
 
             # 卡密输入区域（玻璃态卡片）
             card_y = 300
-            card_h = 360  # 再次增加高度
+            card_h = 380  # 增加高度以容纳按钮
             
             # 卡片多层阴影效果
             canvas.create_rectangle(44, card_y+6, w-44, card_y+card_h+6,
@@ -966,7 +957,29 @@ if __name__ == "__main__":
             link_label.bind("<Enter>", on_link_enter)
             link_label.bind("<Leave>", on_link_leave)
 
-            # 登录按钮 - 现代化美观设计
+            # 登录按钮 - 优化UI：圆角、阴影、更好的视觉效果
+            btn_container = tk.Frame(card_frame, bg="#ffffff", height=60)
+            btn_container.pack(fill="x", pady=(10, 0))
+            btn_container.pack_propagate(False)
+            
+            # 创建按钮 - 字体12px，圆角效果
+            login_btn = tk.Button(
+                btn_container,
+                text="🚀 登录启动",
+                font=("Microsoft YaHei", 12, "bold"),
+                bg="#6366f1",
+                fg="#ffffff",
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=20,
+                pady=18
+            )
+            login_btn.pack(fill="both", expand=True)
+            
+            # 按钮状态
+            btn_enabled = {"value": True}
+            
             def _do_login():
                 # 检查协议是否勾选
                 if not agreement_var.get():
@@ -978,8 +991,12 @@ if __name__ == "__main__":
                     msg_label.config(text="⚠ 请输入卡密", fg="#f59e0b")
                     return
                 
+                if not btn_enabled["value"]:
+                    return
+                
                 # 禁用按钮和输入框
-                login_btn.config(state="disabled", text="⏳ 验证中...", bg="#94a3b8")
+                btn_enabled["value"] = False
+                login_btn.config(state="disabled", text="⏳ 验证中...", bg="#94a3b8", cursor="arrow")
                 key_entry.config(state="disabled")
                 msg_label.config(text="🔄 正在验证卡密，请稍候...", fg="#6366f1")
                 root.update()
@@ -993,39 +1010,24 @@ if __name__ == "__main__":
                     root.after(1200, root.destroy)
                 else:
                     msg_label.config(text=f"✗ {msg}", fg="#ef4444")
-                    login_btn.config(state="normal", text="🚀 登录启动", bg="#6366f1")
+                    btn_enabled["value"] = True
+                    login_btn.config(state="normal", text="🚀 登录启动", bg="#6366f1", cursor="hand2")
                     key_entry.config(state="normal")
             
-            # 使用 Frame 包装按钮以实现更好的样式控制
-            btn_wrapper = tk.Frame(card_frame, bg="#ffffff")
-            btn_wrapper.pack(fill="x", pady=(0, 0))
+            # 绑定点击事件
+            login_btn.config(command=_do_login)
             
-            login_btn = tk.Button(
-                btn_wrapper, 
-                text="🚀 登录启动",
-                command=_do_login,
-                font=("Microsoft YaHei", 14, "bold"),
-                bg="#6366f1",
-                fg="#ffffff",
-                activebackground="#4f46e5",
-                activeforeground="#ffffff",
-                relief="flat",
-                bd=0,
-                cursor="hand2",
-                padx=30,
-                pady=16
-            )
-            login_btn.pack(fill="x", ipady=4)
-            
-            # 鼠标悬停效果 - 添加阴影感
-            def on_btn_enter(e):
-                if login_btn['state'] == 'normal':
+            # 鼠标悬停效果
+            def on_enter(event):
+                if btn_enabled["value"]:
                     login_btn.config(bg="#4f46e5")
-            def on_btn_leave(e):
-                if login_btn['state'] == 'normal':
+            
+            def on_leave(event):
+                if btn_enabled["value"]:
                     login_btn.config(bg="#6366f1")
-            login_btn.bind("<Enter>", on_btn_enter)
-            login_btn.bind("<Leave>", on_btn_leave)
+            
+            login_btn.bind("<Enter>", on_enter)
+            login_btn.bind("<Leave>", on_leave)
 
             key_entry.bind("<Return>", lambda e: _do_login())
             key_entry.focus_set()
