@@ -1954,7 +1954,7 @@ def build_ui():
                                                  interactive=False, visible=False)
                             
                             # 抖音发布区域
-                            with gr.Group(visible=False) as douyin_group:
+                            with gr.Group(visible=True) as douyin_group:
                                 gr.HTML('<div style="padding:12px 0;border-top:1px solid #e5e7eb;margin-top:12px;">'
                                         '<div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:8px;">📱 发布到抖音</div>'
                                         '</div>')
@@ -2721,9 +2721,14 @@ def build_ui():
                     f.write(f"    audio_for_ls_value: {audio_for_ls_value}\n")
                     f.write(f"    sub_text: {rec.get('sub_text', '')}\n")
                 
+                # 获取字幕视频路径
+                sub_video_path = rec.get("sub_video", "")
+                if sub_video_path and os.path.exists(sub_video_path):
+                    sub_video_update = gr.update(value=sub_video_path, visible=True, show_download_button=True)
+                else:
+                    sub_video_update = gr.update(visible=False)
+                
                 # 返回所有需要更新的组件值
-                # 注意：对于 Audio 组件，如果直接返回路径字符串不起作用，
-                # 可以尝试返回字典格式 {"name": path, "data": None}
                 result = [
                     gr.update(value=rec.get("input_text", "")),           # input_text
                     gr.update(value=safe_file_value(rec.get("prompt_audio"))),  # prompt_audio
@@ -2735,7 +2740,7 @@ def build_ui():
                     gr.update(value=output_audio_value) if output_audio_value else gr.update(),  # output_audio
                     gr.update(value=safe_file_value(rec.get("output_video"))),  # output_video
                     gr.update(value=rec.get("sub_text", "")),             # sub_text - 直接恢复文本
-                    gr.update(value=safe_file_value(rec.get("sub_video"))),     # sub_video
+                    sub_video_update,                                      # sub_video - 带 visible 控制
                     # 字幕参数
                     gr.update(value=rec.get("sub_font", "")),             # sub_font
                     gr.update(value=rec.get("sub_size", 32)),             # sub_size
@@ -3107,17 +3112,18 @@ def build_ui():
                     bg_opacity=int(bg_opacity or 0),
                     progress_cb=_cb
                 )
-                return (gr.update(value=out, visible=True, show_download_button=True),
+                # 返回：字幕视频路径（字符串）、提示、日志、抖音组（不再控制）、抖音标题
+                return (out,
                         _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)),
                         _make_log(True, "字幕完成 — " + os.path.basename(out)),
-                        gr.update(visible=True),  # 显示抖音发布区域
+                        gr.update(),  # douyin_group 始终可见，不需要控制
                         text[:30] if text else "")  # 自动填充标题
             except Exception as e:
                 traceback.print_exc()
-                return (gr.update(visible=False),
+                return ("",
                         _hint_html("error", f"字幕生成失败: {str(e)[:300]}"),
                         _make_log(False, f"字幕失败: {e}"),
-                        gr.update(visible=False),  # 隐藏抖音发布区域
+                        gr.update(),  # douyin_group 始终可见
                         "")
 
         # 字幕按钮点击 - 直接在完成后保存
@@ -3130,7 +3136,7 @@ def build_ui():
                              progress=gr.Progress()):
             """生成字幕并自动保存工作台状态"""
             # 先生成字幕
-            sub_vid, sub_hnt, log_msg, douyin_grp, douyin_ttl = _do_subtitle(
+            sub_vid_path, sub_hnt, log_msg, douyin_grp, douyin_ttl = _do_subtitle(
                 out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
@@ -3138,17 +3144,24 @@ def build_ui():
             )
             
             # 保存工作台状态
+            # 注意：使用实际的音频和视频路径
             hint_msg, dropdown_update = _auto_save_workspace(
                 inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
-                avatar_sel, aud_for_ls, out_aud, out_vid,
-                sub_txt, sub_vid,
+                avatar_sel, aud_for_ls, aud_for_ls, out_vid,
+                sub_txt, sub_vid_path,
                 sub_fnt, sub_sz, sub_ps,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op,
                 sub_kw_en, sub_hi_sc, sub_kw_txt
             )
             
-            return sub_vid, sub_hnt, log_msg, douyin_grp, douyin_ttl, hint_msg, dropdown_update
+            # 返回字幕视频，需要设置 visible=True 和 show_download_button=True
+            if sub_vid_path:
+                sub_vid_update = gr.update(value=sub_vid_path, visible=True, show_download_button=True)
+            else:
+                sub_vid_update = gr.update(visible=False)
+            
+            return sub_vid_update, sub_hnt, log_msg, douyin_grp, douyin_ttl, hint_msg, dropdown_update
         
         sub_btn.click(
             subtitle_and_save,
@@ -3166,8 +3179,8 @@ def build_ui():
                     workspace_record_hint, workspace_record_dropdown])
         
         # 抖音发布
-        def _do_douyin_publish(video, title_text, topics_text, progress=gr.Progress()):
-            """发布视频到抖音"""
+        def _do_douyin_publish(sub_video, output_video, title_text, topics_text, progress=gr.Progress()):
+            """发布视频到抖音 - 优先使用字幕视频，如果没有则使用最终合成视频"""
             try:
                 # 检查依赖是否安装
                 missing_deps = []
@@ -3194,14 +3207,34 @@ def build_ui():
                 # 导入抖音发布模块
                 import lib_douyin_publish as douyin_pub
                 
-                # 解析视频路径
-                if isinstance(video, dict):
-                    video_path = (video.get("video") or {}).get("path") or video.get("path") or ""
-                else:
-                    video_path = str(video) if video else ""
+                # 优先使用字幕视频，如果没有则使用最终合成视频
+                video_to_use = None
+                video_type = ""
                 
-                if not video_path or not os.path.exists(video_path):
-                    return (_hint_html("warning", "请先生成字幕视频"),
+                # 解析字幕视频路径
+                if sub_video:
+                    if isinstance(sub_video, dict):
+                        sub_video_path = (sub_video.get("video") or {}).get("path") or sub_video.get("path") or sub_video.get("value") or ""
+                    else:
+                        sub_video_path = str(sub_video) if sub_video else ""
+                    
+                    if sub_video_path and os.path.exists(sub_video_path):
+                        video_to_use = sub_video_path
+                        video_type = "字幕视频"
+                
+                # 如果没有字幕视频，使用最终合成视频
+                if not video_to_use and output_video:
+                    if isinstance(output_video, dict):
+                        output_video_path = (output_video.get("video") or {}).get("path") or output_video.get("path") or output_video.get("value") or ""
+                    else:
+                        output_video_path = str(output_video) if output_video else ""
+                    
+                    if output_video_path and os.path.exists(output_video_path):
+                        video_to_use = output_video_path
+                        video_type = "合成视频"
+                
+                if not video_to_use:
+                    return (_hint_html("warning", "⚠️ 请先生成视频（可以是最终合成视频或字幕视频）"),
                             _make_log(False, "无视频文件"))
                 
                 # 解析话题
@@ -3218,15 +3251,15 @@ def build_ui():
                 
                 # 发布
                 success, message = publisher.publish(
-                    video_path,
+                    video_to_use,
                     title_text or "精彩视频",
                     topics,
                     progress_callback=progress_cb
                 )
                 
                 if success:
-                    return (_hint_html("ok", f"✅ {message}"),
-                            _make_log(True, f"抖音发布成功 — {os.path.basename(video_path)}"))
+                    return (_hint_html("ok", f"✅ {message}<br>发布的视频：{video_type}"),
+                            _make_log(True, f"抖音发布成功 — {video_type}: {os.path.basename(video_to_use)}"))
                 else:
                     return (_hint_html("error", f"❌ {message}"),
                             _make_log(False, f"抖音发布失败: {message}"))
@@ -3249,7 +3282,7 @@ def build_ui():
                             _make_log(False, f"抖音发布失败: {e}"))
         
         douyin_btn.click(_do_douyin_publish,
-            inputs=[sub_video, douyin_title, douyin_topics],
+            inputs=[sub_video, output_video, douyin_title, douyin_topics],
             outputs=[douyin_hint, op_log_html])
 
         # 视频合成
@@ -3320,9 +3353,9 @@ def build_ui():
                 pass
             # 视频合成完成后显示抖音发布区域，并自动填充标题
             douyin_title_text = input_txt[:30] if input_txt else ""
-            # 返回：视频路径（字符串）、日志、详情、抖音组、抖音标题
+            # 返回：视频路径（字符串）、日志、详情、抖音组（不再控制）、抖音标题
             # 注意：第一个返回值是视频路径字符串，不是 gr.update 对象
-            yield out, log_html, gr.update(visible=False), gr.update(visible=True), douyin_title_text
+            yield out, log_html, gr.update(visible=False), gr.update(), douyin_title_text
 
         # 视频合成按钮点击 - 直接在完成后保存
         def video_and_save(avatar_sel, aud_for_ls, inp_txt,

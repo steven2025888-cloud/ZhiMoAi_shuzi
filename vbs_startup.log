@@ -257,3 +257,17 @@
 2026/2/22 2:21:01 | Execute command: "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\pythonw.exe" "D:\ZhiMoAi_shuzi\app_backend.py"
 2026/2/22 2:21:01 | [OK] Startup command executed
 2026/2/22 2:21:01 | ========== Startup Complete ==========
+2026/2/22 8:39:28 | ========== Startup Begin ==========
+2026/2/22 8:39:28 | Base Path: D:\ZhiMoAi_shuzi\
+2026/2/22 8:39:28 | [OK] Main program file exists
+2026/2/22 8:39:28 | [OK] Using pythonw.exe (no console)
+2026/2/22 8:39:28 | Execute command: "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\pythonw.exe" "D:\ZhiMoAi_shuzi\app_backend.py"
+2026/2/22 8:39:29 | [OK] Startup command executed
+2026/2/22 8:39:29 | ========== Startup Complete ==========
+2026/2/22 8:55:29 | ========== Startup Begin ==========
+2026/2/22 8:55:29 | Base Path: D:\ZhiMoAi_shuzi\
+2026/2/22 8:55:29 | [OK] Main program file exists
+2026/2/22 8:55:29 | [OK] Using pythonw.exe (no console)
+2026/2/22 8:55:29 | Execute command: "D:\ZhiMoAi_shuzi\IndexTTS2-SonicVale\installer_files\env\pythonw.exe" "D:\ZhiMoAi_shuzi\app_backend.py"
+2026/2/22 8:55:30 | [OK] Startup command executed
+2026/2/22 8:55:30 | ========== Startup Complete ==========
