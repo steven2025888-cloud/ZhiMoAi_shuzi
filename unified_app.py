@@ -1052,6 +1052,12 @@ def build_ui():
                                 type="filepath", interactive=True)
 
                             ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
+                            
+                            # ── 合成视频显示区（在步骤3内部）──
+                            ls_detail_html = gr.HTML(value="", visible=False, elem_id="ls-detail-box")
+                            output_video = gr.Video(
+                                label="✨ 合成视频",
+                                height=400, elem_id="output-video", interactive=False)
 
                     # ═══ 步骤 4+5：字幕合成 + 发布平台（右侧纵向排列）═══════════════════════════
                     with gr.Column(scale=2):
@@ -1162,13 +1168,6 @@ def build_ui():
                             
                             douyin_btn = gr.Button("🚀 发布到选中平台", variant="primary", size="lg")
                             douyin_hint = gr.HTML(value="")
-                        
-                        # 合成视频显示区（移到最下方）
-                        with gr.Column(elem_classes="panel", elem_id="output-video-col"):
-                            ls_detail_html = gr.HTML(value="", visible=False, elem_id="ls-detail-box")
-                            output_video = gr.Video(
-                                label="✨ 合成视频",
-                                height=400, elem_id="output-video", interactive=False)
                     
             # ── Tab 2：合成历史 ──────────────────────────────
             with gr.Tab("📁  合成历史", elem_classes="hist-tab"):

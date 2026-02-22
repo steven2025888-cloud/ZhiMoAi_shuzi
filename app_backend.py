@@ -972,8 +972,8 @@ if __name__ == "__main__":
                 cursor="hand2",
                 relief="flat",
                 bd=0,
-                padx=20,
-                pady=18
+                padx=24,
+                pady=22
             )
             login_btn.pack(fill="both", expand=True)
             

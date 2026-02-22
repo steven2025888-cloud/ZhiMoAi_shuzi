@@ -70,8 +70,12 @@ body,.gradio-container{
 }
 .panel:hover{
   box-shadow:0 4px 16px rgba(0,0,0,.1)!important;
-  transform:translateY(-1px)!important;
   border-color:#d1d5db!important;
+}
+
+/* 工作台记录面板不使用hover效果，避免下拉框错位 */
+#workspace-record-panel.panel:hover {
+  transform: none!important;
 }
 
 /* ── 步骤标题栏（在白色卡片外面）── */
@@ -181,6 +185,13 @@ input[type=range]{accent-color:#7c3aed!important;}
   background:#fff!important;
   font-size:14px!important;
   padding:10px 14px!important;
+}
+
+/* 工作台记录下拉框排除全局样式 */
+#workspace-record-dropdown select,
+#workspace-record-dropdown .wrap-inner,
+#workspace-record-dropdown .wrap {
+  all: revert!important;
 }
 
 /* ── 音频 / 视频组件 ── */
@@ -394,6 +405,15 @@ input[type=color]:hover{
 #ls-detail-box{margin-bottom:10px;}
 .hist-tab video{max-height:360px;}
 
+/* 步骤3内的合成视频样式 */
+#output-video {
+  margin-top: 16px!important;
+}
+#ls-detail-box {
+  margin-top: 12px!important;
+  margin-bottom: 10px!important;
+}
+
 /* ── 提示横幅 ── */
 .hint-ok{background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:8px 12px;font-size:12px;color:#15803d;font-weight:600;}
 .hint-warn{background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:8px 12px;font-size:12px;color:#c2410c;font-weight:600;}
@@ -472,61 +492,17 @@ input[type=color]:hover{
   box-shadow: 0 1px 3px rgba(0,0,0,.06)!important;
   padding: 16px!important;
   border-radius: 12px!important;
-  transition: box-shadow .2s!important;
-  pointer-events: auto!important;
-  position: relative!important;
-  z-index: 5!important;
 }
 
-#workspace-record-panel * {
-  pointer-events: auto!important;
-}
-
-#workspace-record-panel:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,.08)!important;
-}
-
-/* 工作台记录下拉框 - 确保可点击 */
+/* 工作台记录下拉框 - 完全不干预，使用Gradio默认样式 */
 #workspace-record-dropdown {
-  pointer-events: auto!important;
-  position: relative!important;
-  z-index: 10!important;
-}
-
-#workspace-record-dropdown *,
-#workspace-record-dropdown input,
-#workspace-record-dropdown button,
-#workspace-record-dropdown ul,
-#workspace-record-dropdown li {
-  pointer-events: auto!important;
-}
-
-#workspace-record-dropdown .wrap,
-#workspace-record-dropdown .wrap-inner {
-  border: 1.5px solid #e5e7eb!important;
-  border-radius: 8px!important;
-  background: #fff!important;
-  transition: all .2s!important;
-  font-size: 13px!important;
-  cursor: pointer!important;
-}
-
-#workspace-record-dropdown:hover .wrap,
-#workspace-record-dropdown:focus-within .wrap {
-  border-color: #7c3aed!important;
-  box-shadow: 0 0 0 3px rgba(124,58,237,.12)!important;
+  /* 不添加任何样式，让Gradio自己处理 */
 }
 
 /* 工作台记录按钮容器 */
 #workspace-record-buttons {
   gap: 8px!important;
   min-width: 0!important;
-  pointer-events: auto!important;
-}
-
-#workspace-record-buttons button {
-  pointer-events: auto!important;
-  cursor: pointer!important;
 }
 
 #workspace-record-buttons > .gr-row {
@@ -536,9 +512,7 @@ input[type=color]:hover{
 
 #workspace-record-buttons > .gr-row:first-child {
   margin-bottom: 8px!important;
-}
-
-/* 工作台记录按钮样式 */
+}/* 工作台记录按钮样式 */
 #workspace-record-panel button {
   font-weight: 600!important;
   transition: all .2s!important;
@@ -952,10 +926,10 @@ div.svelte-1nguped,
 #component-150,
 #component-118,
 #component-98,
-#output-video-col,
 #component-148,
-#component-111,
+#component-113,
 #component-144,
+#component-146,
 #sub-video-panel {
   background: #fff!important;
   border-radius: 12px!important;
@@ -969,33 +943,4 @@ div.svelte-1nguped,
   margin-bottom: 16px!important;
 }
 
-/* 排除工作台记录下拉框，避免样式冲突 */
-#workspace-record-dropdown,
-#workspace-record-dropdown *,
-#workspace-record-panel .gr-dropdown,
-#workspace-record-panel .gr-dropdown * {
-  background: transparent!important;
-  border: none!important;
-  padding: 0!important;
-}
 
-/* 恢复工作台记录下拉框的正确样式 */
-#workspace-record-dropdown .wrap,
-#workspace-record-dropdown .wrap-inner,
-#workspace-record-dropdown select,
-#workspace-record-panel .gr-dropdown .wrap,
-#workspace-record-panel .gr-dropdown select {
-  background: #fff!important;
-  border: 1.5px solid #e5e7eb!important;
-  padding: 8px 12px!important;
-  pointer-events: auto!important;
-  cursor: pointer!important;
-}
-
-/* 确保下拉框可以交互 */
-#workspace-record-dropdown,
-#workspace-record-dropdown *,
-#workspace-record-panel .gr-dropdown,
-#workspace-record-panel .gr-dropdown * {
-  pointer-events: auto!important;
-}
