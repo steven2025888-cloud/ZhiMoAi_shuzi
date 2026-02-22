@@ -966,7 +966,7 @@ if __name__ == "__main__":
             link_label.bind("<Enter>", on_link_enter)
             link_label.bind("<Leave>", on_link_leave)
 
-            # 登录按钮 - 简洁美观的标准按钮
+            # 登录按钮 - 现代化美观设计
             def _do_login():
                 # 检查协议是否勾选
                 if not agreement_var.get():
@@ -996,11 +996,15 @@ if __name__ == "__main__":
                     login_btn.config(state="normal", text="🚀 登录启动", bg="#6366f1")
                     key_entry.config(state="normal")
             
+            # 使用 Frame 包装按钮以实现更好的样式控制
+            btn_wrapper = tk.Frame(card_frame, bg="#ffffff")
+            btn_wrapper.pack(fill="x", pady=(0, 0))
+            
             login_btn = tk.Button(
-                card_frame, 
+                btn_wrapper, 
                 text="🚀 登录启动",
                 command=_do_login,
-                font=("Microsoft YaHei", 13, "bold"),
+                font=("Microsoft YaHei", 14, "bold"),
                 bg="#6366f1",
                 fg="#ffffff",
                 activebackground="#4f46e5",
@@ -1008,12 +1012,12 @@ if __name__ == "__main__":
                 relief="flat",
                 bd=0,
                 cursor="hand2",
-                height=2,
-                padx=20
+                padx=30,
+                pady=16
             )
-            login_btn.pack(fill="x", pady=(0, 0))
+            login_btn.pack(fill="x", ipady=4)
             
-            # 鼠标悬停效果
+            # 鼠标悬停效果 - 添加阴影感
             def on_btn_enter(e):
                 if login_btn['state'] == 'normal':
                     login_btn.config(bg="#4f46e5")

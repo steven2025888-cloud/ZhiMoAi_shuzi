@@ -2256,7 +2256,7 @@ def build_ui():
                             
                             with gr.Row():
                                 rewrite_btn = gr.Button("✨ AI改写", variant="secondary", size="sm", scale=1)
-                                gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用DeepSeek AI改写文案，让内容更生动</div>')
+                                gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用AI智能改写文案，让内容更生动</div>')
 
                             gr.HTML('<div class="section-label">🎙 音色选择</div>')
                             with gr.Row():
@@ -2478,7 +2478,7 @@ def build_ui():
                         
                         with gr.Row():
                             optimize_btn = gr.Button("✨ AI优化", variant="secondary", size="sm", scale=1)
-                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用DeepSeek AI优化标题并生成5个话题标签</div>')
+                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;">使用AI智能优化标题并生成5个话题标签</div>')
                         
                         douyin_btn = gr.Button("🚀 发布到抖音", variant="primary", size="lg")
                         douyin_hint = gr.HTML(value="")
@@ -3715,7 +3715,7 @@ def build_ui():
                     return None, "❌ 未配置DeepSeek API密钥\n\n请在.env文件中添加：\nDEEPSEEK_API_KEY=your_api_key"
                 
                 # 调用API
-                url = "https://api.deepseek.com/v1/chat/completions"
+                url = "https://ai.zhimengai.xyz/v1/chat/completions"
                 headers = {
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {api_key}"
