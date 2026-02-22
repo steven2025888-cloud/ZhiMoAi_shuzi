@@ -2120,7 +2120,13 @@ class TextExtractor:
                     
                     if data.get("type") == "result":
                         content = data.get("content", "")
-                        if content:
+                        is_error = data.get("error", False)
+                        
+                        if is_error:
+                            # 错误情况：返回失败和错误信息
+                            return False, content
+                        elif content:
+                            # 成功情况：返回成功和内容
                             return True, content
                         else:
                             return False, "返回内容为空"

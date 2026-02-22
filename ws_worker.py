@@ -270,22 +270,25 @@ class VideoToTextWorker:
             print(f"[Queue] 队列剩余: {self.queue.qsize()}")
             print(f"{'=' * 50}")
 
+            error_flag = False
             try:
                 await self.ensure_on_target_page()
                 result = await self.process_url(url)
             except Exception as e:
                 print(f"[Queue] 处理异常: {e}")
-                result = f"处理失败: {e}"
+                result = f"错误: {e}"
+                error_flag = True
 
-            # 发回结果，带上 key
+            # 发回结果，带上 key 和 error 标识
             if self.ws:
                 try:
                     await self.ws.send(json.dumps({
                         "type": "result",
                         "key": key,
                         "content": result,
+                        "error": error_flag
                     }, ensure_ascii=False))
-                    print(f"[Queue] 结果已发送 → key={key} ({len(result)} 字)")
+                    print(f"[Queue] 结果已发送 → key={key} ({len(result)} 字) error={error_flag}")
                 except Exception as e:
                     print(f"[Queue] 发送失败: {e}")
 
