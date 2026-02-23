@@ -926,19 +926,30 @@ div.svelte-1nguped,
 
 /* ── 特定组件白色背景样式 ── */
 #component-36,
-#component-100,
 #component-150,
-#component-118,
+#component-120,
 #component-98,
 #component-148,
 #component-113,
 #component-144,
 #component-146,
+#component-101,
+#component-163,
 #sub-video-panel {
   background: #fff!important;
   border-radius: 12px!important;
   padding: 10px!important;
   border: 1px solid #e5e7eb!important;
+}
+
+/* 取消以下组件的白色背景样式 */
+#component-99,
+#component-100,
+#component-118 {
+  background: transparent!important;
+  border-radius: 0!important;
+  padding: 0!important;
+  border: none!important;
 }
 
 /* 字幕视频面板特殊样式 */

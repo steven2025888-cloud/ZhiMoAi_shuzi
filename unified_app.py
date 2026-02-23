@@ -1254,7 +1254,7 @@ def build_ui():
                                 placeholder="在此输入或粘贴文案内容，或使用上方提取功能...",
                                 lines=6)
                             
-                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">AI智能改写文案，同时生成标题和话题标签（节省算力）</div>')
+                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">AI智能改写文案，同时生成标题和话题标签</div>')
                             rewrite_btn = gr.Button("✨ AI改写 + 标题标签", variant="secondary", size="sm")
 
                     # ═══ 步骤 2：音频合成 ═══════════════════════════
