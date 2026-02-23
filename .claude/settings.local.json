@@ -15,7 +15,8 @@
       "Bash(pip install:*)",
       "Bash(set PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1)",
       "Bash(timeout 20 cmd:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(ls:*)"
     ]
   }
 }

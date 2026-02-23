@@ -71,6 +71,22 @@ LATENTSYNC_PYTHON = os.path.join(LATENTSYNC_DIR, "latents_env", "python.exe")
 LATENTSYNC_CKPT   = os.path.join(LATENTSYNC_DIR, "checkpoints", "latentsync_unet.pt")
 LATENTSYNC_CONFIG = os.path.join(LATENTSYNC_DIR, "configs", "unet", "stage2_efficient.yaml")
 
+# ── 视频合成质量预设 ──
+QUALITY_PRESETS = {
+    "⚡ 极快":   {"inference_steps": 6,  "guidance_scale": 1.0},
+    "🚀 快速":   {"inference_steps": 8,  "guidance_scale": 1.0},
+    "⚖️ 标准":   {"inference_steps": 12, "guidance_scale": 1.2},
+    "✨ 高质量": {"inference_steps": 20, "guidance_scale": 1.5},
+}
+
+# ── TTS 合成速度预设（主要控制 num_beams 和 max_mel_tokens）──
+TTS_SPEED_PRESETS = {
+    "⚡ 极快":   {"num_beams": 1, "max_mel_tokens": 1200},
+    "🚀 快速":   {"num_beams": 1, "max_mel_tokens": 1500},
+    "⚖️ 标准":   {"num_beams": 2, "max_mel_tokens": 2000},
+    "✨ 高质量": {"num_beams": 4, "max_mel_tokens": 2500},
+}
+
 sys.path.insert(0, INDEXTTS_DIR)
 sys.path.insert(0, os.path.join(INDEXTTS_DIR, "indextts"))
 
@@ -266,6 +282,20 @@ def _start_latentsync_server(progress_cb=None):
     return False
 
 
+def _stop_ls_server():
+    """停止 LatentSync 常驻服务，彻底释放所有 GPU 显存（包括 CUDA 上下文）"""
+    global _ls_server_proc, _ls_server_ready
+    if _ls_server_proc is not None:
+        try:
+            _ls_server_proc.kill()
+            _ls_server_proc.wait(timeout=5)
+        except Exception:
+            pass
+        _ls_server_proc = None
+    _ls_server_ready = False
+    safe_print("[LS-SERVER] 服务已停止，GPU 显存已完全释放")
+
+
 def _ensure_ls_server(progress_cb=None):
     """确保推理服务进程存活，必要时重启"""
     global _ls_server_proc, _ls_server_ready
@@ -346,54 +376,52 @@ def auto_load_model():
 _tts_on_gpu = True  # 追踪 TTS 模型当前是否在 GPU 上
 
 def _release_tts_gpu():
-    """将 TTS 模型从 GPU 移到 CPU，释放显存给 LatentSync 使用"""
+    """完全卸载 TTS 模型，同时释放 GPU 显存和系统内存"""
     global tts, _tts_on_gpu
-    if tts is None or not _tts_on_gpu:
+    if tts is None:
         return
     try:
-        import torch
-        # 移动所有 nn.Module 子模型到 CPU
-        for name in ('gpt', 'semantic_model', 'semantic_codec', 's2mel',
-                      'campplus_model', 'bigvgan'):
-            model = getattr(tts, name, None)
-            if model is not None and isinstance(model, torch.nn.Module):
-                model.cpu()
-        # qwen_emo 内部也有模型
-        qwen = getattr(tts, 'qwen_emo', None)
-        if qwen is not None:
-            inner = getattr(qwen, 'model', None)
-            if inner is not None and isinstance(inner, torch.nn.Module):
-                inner.cpu()
-        # 移动普通 tensor 属性
-        for name in ('semantic_mean', 'semantic_std'):
-            t = getattr(tts, name, None)
-            if t is not None and isinstance(t, torch.Tensor) and t.is_cuda:
-                setattr(tts, name, t.cpu())
-        # emo_matrix / spk_matrix 是 tuple of tensors
-        for name in ('emo_matrix', 'spk_matrix'):
-            obj = getattr(tts, name, None)
-            if obj is not None and isinstance(obj, (list, tuple)):
-                setattr(tts, name, tuple(t.cpu() if isinstance(t, torch.Tensor) and t.is_cuda else t for t in obj))
-        # 清除推理缓存（它们引用 GPU tensor）
-        for name in ('cache_spk_cond', 'cache_s2mel_style', 'cache_s2mel_prompt',
-                      'cache_emo_cond', 'cache_mel'):
-            if hasattr(tts, name):
-                setattr(tts, name, None)
-        torch.cuda.empty_cache()
+        import torch, gc
+        del tts
+        tts = None
         _tts_on_gpu = False
-        safe_print("[GPU] TTS 模型已暂时移到 CPU，显存已释放")
+        gc.collect()
+        torch.cuda.empty_cache()
+        safe_print("[GPU] TTS 模型已完全卸载（GPU + RAM 均已释放）")
     except Exception as e:
-        safe_print(f"[GPU] 释放 TTS 显存失败: {e}")
+        safe_print(f"[GPU] 释放 TTS 失败: {e}")
 
 
 def _restore_tts_gpu():
-    """将 TTS 模型从 CPU 恢复到 GPU"""
+    """确保 TTS 模型已加载到 GPU（如已卸载则从磁盘重新加载）"""
     global tts, _tts_on_gpu
-    if tts is None or _tts_on_gpu:
+    if tts is not None and _tts_on_gpu:
         return
+    # tts 已被卸载，需要从磁盘重新加载
+    if tts is None:
+        try:
+            safe_print("[GPU] TTS 模型已卸载，正在重新加载...")
+            model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
+            if not os.path.exists(model_dir):
+                safe_print("[GPU] 模型目录不存在，无法重新加载")
+                return
+            original_cwd = os.getcwd()
+            os.chdir(INDEXTTS_DIR)
+            try:
+                from indextts.infer_v2 import IndexTTS2
+                tts = IndexTTS2(model_dir=model_dir,
+                                cfg_path=os.path.join(model_dir, "config.yaml"), use_fp16=True)
+                _tts_on_gpu = True
+                safe_print("[GPU] TTS 模型重新加载完成")
+            finally:
+                os.chdir(original_cwd)
+        except Exception as e:
+            safe_print(f"[GPU] 重新加载 TTS 失败: {e}")
+        return
+    # tts 在内存中但在 CPU 上（兼容旧逻辑）
     try:
         import torch
-        device = tts.device  # 原始设备，如 "cuda:0"
+        device = tts.device
         if not device or device == "cpu":
             _tts_on_gpu = True
             return
@@ -429,9 +457,12 @@ def generate_speech(text, prompt_audio, top_p, top_k, temperature, num_beams,
                     emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                     progress=gr.Progress()):
     global tts
-    if tts is None:          raise gr.Error("模型未加载，请等待初始化完成")
     if not text.strip():     raise gr.Error("请输入要合成的文本内容")
     if prompt_audio is None: raise gr.Error("请上传参考音频文件")
+
+    # 确保 TTS 模型已加载且在 GPU 上（视频合成后模型已卸载，需重新加载）
+    _restore_tts_gpu()
+    if tts is None:          raise gr.Error("模型未加载，请等待初始化完成")
 
     ts  = int(time.time())
     out = os.path.join(OUTPUT_DIR, f"tts_{ts}.wav")
@@ -677,7 +708,8 @@ def _run_latentsync_via_server(sv, sa, out, progress, detail_cb,
 # ══════════════════════════════════════════════════════════════
 #  视频合成（带进度更新 + GPU 显存自动管理）
 # ══════════════════════════════════════════════════════════════
-def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None, output_path_override=None):
+def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None, output_path_override=None,
+                   inference_steps=12, guidance_scale=1.2):
     if not video_path:                 raise gr.Error("请上传人物视频")
     if not audio_path:                 raise gr.Error("请先在步骤1准备音频（文字转语音 或 直接上传音频文件）")
     if not os.path.exists(video_path): raise gr.Error("视频文件不存在，请重新上传")
@@ -713,7 +745,9 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
     server_ok = False
     try:
         # ── 优先走常驻服务模式（跳过模型冷加载） ──
-        server_ok = _run_latentsync_via_server(sv, sa, out, progress, detail_cb)
+        server_ok = _run_latentsync_via_server(sv, sa, out, progress, detail_cb,
+                                               inference_steps=inference_steps,
+                                               guidance_scale=guidance_scale)
         if server_ok:
             safe_print("[LS] ✅ 通过常驻服务完成推理")
 
@@ -727,7 +761,8 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
                    "--inference_ckpt_path", LATENTSYNC_CKPT,
                    "--video_path", sv, "--audio_path", sa,
                    "--video_out_path", out,
-                   "--inference_steps", "12", "--guidance_scale", "1.2", "--seed", "1247"]
+                   "--inference_steps", str(inference_steps),
+                   "--guidance_scale", str(guidance_scale), "--seed", "1247"]
 
             flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             try:
@@ -766,7 +801,9 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
             if proc.wait() != 0:
                 raise gr.Error("视频合成失败，请检查视频/音频格式是否正确")
     finally:
-        # ── 无论成败，恢复 TTS 到 GPU ──
+        # ── 杀掉 LS 服务进程，彻底释放 GPU 显存（含 CUDA 上下文） ──
+        _stop_ls_server()
+        # ── 恢复 TTS 到 GPU ──
         _restore_tts_gpu()
 
     if not os.path.exists(out):
@@ -802,9 +839,11 @@ def generate_speech_batch(text, prompt_audio, out_path,
                           top_p=0.8, top_k=30, temperature=0.8,
                           num_beams=3, repetition_penalty=10.0, max_mel_tokens=1500):
     global tts
-    if tts is None: raise RuntimeError("模型未加载")
     if not text.strip(): raise RuntimeError("文本为空")
     if not prompt_audio: raise RuntimeError("缺少参考音频")
+    # 确保 TTS 模型已加载且在 GPU 上（视频合成后模型已卸载，需重新加载）
+    _restore_tts_gpu()
+    if tts is None: raise RuntimeError("模型未加载")
     cwd = os.getcwd(); os.chdir(INDEXTTS_DIR)
     try:
         kw = dict(do_sample=True, top_p=float(top_p), top_k=int(top_k),
@@ -1255,6 +1294,20 @@ def build_ui():
                                     choices=["标准", "稳定播报", "活泼生动", "慢速朗读", "专业模式"],
                                     value="标准",
                                     elem_classes="voice-style-radio")
+                                # ── 合成速度预设 ──
+                                tts_speed_preset = gr.Radio(
+                                    label="合成速度",
+                                    choices=list(TTS_SPEED_PRESETS.keys()),
+                                    value="🚀 快速(FP16)",
+                                    elem_classes="voice-style-radio")
+                                gr.HTML(
+                                    '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
+                                    '⚡极快：最快速度，适合预览试听<br>'
+                                    '🚀快速：速度优先，默认推荐（FP16）<br>'
+                                    '⚖️标准：速度与质量兼顾<br>'
+                                    '✨高质量：最佳语音质量，速度较慢</div>'
+                                )
+
                                 voice_speed = gr.Slider(
                                     label="语速调节",
                                     info="← 慢  |  快 →",
@@ -1351,6 +1404,21 @@ def build_ui():
                             audio_for_ls = gr.Audio(
                                 label="用于视频合成的音频",
                                 type="filepath", interactive=True)
+
+                            # ── 生成质量选择 ──
+                            gr.HTML('<div class="section-label">⚙️ 生成质量</div>')
+                            quality_preset = gr.Radio(
+                                label="速度 ↔ 质量",
+                                choices=list(QUALITY_PRESETS.keys()),
+                                value="⚖️ 标准",
+                                elem_classes="voice-style-radio")
+                            gr.HTML(
+                                '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
+                                '⚡极快：6步，速度最快，适合预览<br>'
+                                '🚀快速：8步，速度与质量兼顾<br>'
+                                '⚖️标准：12步，默认推荐<br>'
+                                '✨高质量：20步，效果最佳但较慢</div>'
+                            )
 
                             ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
                             
@@ -2395,17 +2463,17 @@ def build_ui():
             inputs=[audio_mode],
             outputs=[tts_mode_group, upload_mode_group])
 
-        # ── 语音风格预设 ──
+        # ── 语音风格预设（不再控制 num_beams / max_mel_tokens，由合成速度预设控制）──
         _VOICE_PRESETS = {
-            "标准":     dict(tp=0.8,  tk=30, temp=0.7, nb=1, rp=8.0,  mmt=1500, spd=1.0),
-            "稳定播报": dict(tp=0.6,  tk=10, temp=0.2, nb=3, rp=14.0, mmt=1500, spd=0.95),
-            "活泼生动": dict(tp=0.95, tk=60, temp=1.4, nb=1, rp=4.0,  mmt=1500, spd=1.1),
-            "慢速朗读": dict(tp=0.6,  tk=10, temp=0.15,nb=3, rp=14.0, mmt=2500, spd=0.9),
+            "标准":     dict(tp=0.8,  tk=30, temp=0.7, rp=8.0,  spd=1.0),
+            "稳定播报": dict(tp=0.6,  tk=10, temp=0.2, rp=14.0, spd=0.95),
+            "活泼生动": dict(tp=0.95, tk=60, temp=1.4, rp=4.0,  spd=1.1),
+            "慢速朗读": dict(tp=0.6,  tk=10, temp=0.15, rp=14.0, spd=0.9),
         }
         def _on_voice_style(style):
             is_pro = (style == "专业模式")
             if is_pro:
-                return [gr.update(visible=True), gr.update()] + [gr.update()] * 6
+                return [gr.update(visible=True), gr.update()] + [gr.update()] * 4
             p = _VOICE_PRESETS.get(style, _VOICE_PRESETS["标准"])
             return [
                 gr.update(visible=False),
@@ -2413,13 +2481,22 @@ def build_ui():
                 gr.update(value=p["tp"]),
                 gr.update(value=p["tk"]),
                 gr.update(value=p["temp"]),
-                gr.update(value=p["nb"]),
                 gr.update(value=p["rp"]),
-                gr.update(value=p["mmt"]),
             ]
         voice_style.change(_on_voice_style,
             inputs=[voice_style],
-            outputs=[pro_mode_group, voice_speed, top_p, top_k, temperature, num_beams, repetition_penalty, max_mel_tokens])
+            outputs=[pro_mode_group, voice_speed, top_p, top_k, temperature, repetition_penalty])
+
+        # ── TTS 合成速度预设 ──
+        def _on_tts_speed(preset):
+            p = TTS_SPEED_PRESETS.get(preset, TTS_SPEED_PRESETS["🚀 快速(FP16)"])
+            return [
+                gr.update(value=p["num_beams"]),
+                gr.update(value=p["max_mel_tokens"]),
+            ]
+        tts_speed_preset.change(_on_tts_speed,
+            inputs=[tts_speed_preset],
+            outputs=[num_beams, max_mel_tokens])
 
         # 直接上传音频时自动填入 audio_for_ls
         def _on_direct_audio(audio_path):
@@ -2974,12 +3051,13 @@ def build_ui():
             outputs=[douyin_hint])
 
         # 视频合成
-        def ls_wrap(avatar_name, auto_a, input_txt, progress=gr.Progress()):
+        def ls_wrap(avatar_name, auto_a, input_txt, quality_name="⚖️ 标准", progress=gr.Progress()):
             # 把数字人名转换成文件路径
             video = None
             if _LIBS_OK and avatar_name and not avatar_name.startswith("（"):
                 video = _av.get_path(avatar_name)
             audio  = auto_a
+            preset = QUALITY_PRESETS.get(quality_name, QUALITY_PRESETS["⚖️ 标准"])
             q      = _queue.Queue()
             result = {"out": None, "err": None}
 
@@ -2988,7 +3066,9 @@ def build_ui():
 
             def _run():
                 try:
-                    out, _ = run_latentsync(video, audio, progress, detail_cb=_detail_cb)
+                    out, _ = run_latentsync(video, audio, progress, detail_cb=_detail_cb,
+                                            inference_steps=preset["inference_steps"],
+                                            guidance_scale=preset["guidance_scale"])
                     result["out"] = out
                 except Exception as e:
                     result["err"] = e
@@ -3044,7 +3124,7 @@ def build_ui():
             yield out, gr.update(visible=False)
 
         # 视频合成按钮点击 - 直接在完成后保存
-        def video_and_save(avatar_sel, aud_for_ls, inp_txt,
+        def video_and_save(avatar_sel, aud_for_ls, inp_txt, quality_name,
                           # 保存需要的其他参数
                           prmt_aud, voice_sel, audio_mode_val, direct_aud,
                           out_aud, sub_txt, sub_vid,
@@ -3056,7 +3136,7 @@ def build_ui():
             """合成视频并自动保存工作台状态"""
             # 先合成视频（ls_wrap 是生成器，需要逐步 yield）
             final_result = None
-            for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, progress=progress):
+            for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, quality_name=quality_name, progress=progress):
                 # 在视频合成过程中，传递中间结果，但不保存工作台
                 # 返回 4 个值：前 2 个来自 ls_wrap，后 2 个是空的工作台更新
                 yield result + (gr.update(), gr.update())
@@ -3095,7 +3175,7 @@ def build_ui():
         ls_btn.click(
             video_and_save,
             inputs=[
-                avatar_select, audio_for_ls, input_text,
+                avatar_select, audio_for_ls, input_text, quality_preset,
                 # 保存需要的参数
                 prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 output_audio, sub_text, sub_video,
