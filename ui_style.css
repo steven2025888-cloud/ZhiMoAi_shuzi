@@ -37,7 +37,20 @@ body,.gradio-container{
   font-family:'Microsoft YaHei',system-ui,sans-serif!important;
   min-height:100vh!important;
 }
-.gradio-container{padding:20px!important;min-height:0!important;overflow-x:hidden!important;}
+.gradio-container{
+  padding:0!important;
+  min-height:0!important;
+  overflow-x:hidden!important;
+  max-width:none!important;
+  width:100%!important;
+  margin:0 auto!important;
+}
+
+/* ── 增加工作台内容区宽度 ── */
+.gradio-container > .main{
+  max-width:none!important;
+  padding:0!important;
+}
 
 /* ── Tab 导航 ── */
 .tabs button[role=tab]{
@@ -56,15 +69,19 @@ body,.gradio-container{
 }
 
 /* ── 工作台布局 ── */
-.workspace{gap:16px!important;padding:16px!important;align-items:stretch!important;}
-.workspace > .column{gap:16px!important;}
+.workspace{
+  gap:12px!important;
+  padding:8px!important;
+  align-items:stretch!important;
+}
+.workspace > .column{gap:12px!important;}
 
 /* ── 面板卡片 ── */
 .panel{
   background:#fff!important;
   border:1px solid #e5e7eb!important;
   border-radius:16px!important;
-  padding:16px!important;
+  padding:12px!important;
   box-shadow:0 2px 8px rgba(0,0,0,.06)!important;
   transition:all .3s!important;
 }
@@ -226,10 +243,15 @@ input[type=color]:hover{
   background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);
   border:2px solid #bae6fd;
   border-radius:14px;padding:14px;margin-top:12px;
+  max-height:60vh;
+  overflow-y:auto;
 }
 .subtitle-panel-head{
   display:flex;align-items:center;gap:8px;
-  margin-bottom:12px;
+  margin-bottom:10px;
+  position:sticky;top:0;z-index:2;
+  background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%);
+  padding-bottom:6px;
 }
 .subtitle-panel-icon{
   width:28px;height:28px;border-radius:8px;
@@ -242,6 +264,136 @@ input[type=color]:hover{
 .subtitle-panel-tip{margin-left:auto;font-size:10px;color:#0369a1;
   background:#e0f2fe;border:1px solid #bae6fd;
   padding:2px 8px;border-radius:20px;}
+
+/* ── 字幕高级设置弹窗 ── */
+#sub-settings-modal{
+  position:fixed!important;top:0!important;left:0!important;
+  width:100vw!important;height:100vh!important;z-index:9990!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  background:rgba(15,23,42,.55)!important;backdrop-filter:blur(12px)!important;
+  padding:0!important;margin:0!important;border:none!important;border-radius:0!important;box-shadow:none!important;
+}
+#sub-settings-modal>div{
+  background:#ffffff!important;border-radius:18px!important;
+  padding:28px 28px 22px 28px!important;max-width:860px!important;
+  width:94%!important;
+  box-shadow:0 20px 60px rgba(0,0,0,.18),0 0 0 1px rgba(186,230,253,.6)!important;
+  border:2px solid #bae6fd!important;
+  max-height:85vh!important;
+  overflow-y:auto!important;
+  scrollbar-gutter:stable!important;
+}
+/* 弹窗细滚动条 */
+#sub-settings-modal>div::-webkit-scrollbar{width:5px;}
+#sub-settings-modal>div::-webkit-scrollbar-track{background:transparent;}
+#sub-settings-modal>div::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+#sub-settings-modal>div::-webkit-scrollbar-thumb:hover{background:#94a3b8;}
+/* 左右两栏布局 */
+.sub-modal-columns{
+  gap:20px!important;align-items:flex-start!important;
+}
+.sub-modal-columns>div{
+  background:#f8fafc!important;border:1.5px solid #e2e8f0!important;
+  border-radius:14px!important;padding:16px!important;
+}
+/* 弹窗内颜色选择器修正：覆盖全局 width:100%，改为固定宽度 */
+#sub-settings-modal input[type=color]{
+  width:48px!important;min-width:48px!important;max-width:48px!important;
+  height:36px!important;flex-shrink:0!important;
+  border-radius:8px!important;padding:2px!important;
+  margin-right:6px!important;
+}
+/* 颜色选择器整体容器 */
+#sub-settings-modal .gr-color-picker,
+#sub-settings-modal [class*="color-picker"]{
+  overflow:visible!important;
+}
+/* 弹窗内所有 block 减少间距 */
+#sub-settings-modal .block{margin-top:0!important;padding-top:0!important;}
+#sub-settings-modal .block .wrap{gap:8px!important;}
+/* 弹窗内行间距 */
+#sub-settings-modal>.form>.block{margin-bottom:2px!important;}
+/* section 标签 */
+.sub-modal-section{
+  font-size:12px;font-weight:800;color:#0c4a6e;
+  padding:7px 12px;margin:12px 0 6px;
+  background:linear-gradient(135deg,rgba(224,242,254,.6),rgba(186,230,253,.3));
+  border-radius:8px;border-left:3px solid #0ea5e9;
+  letter-spacing:.3px;
+}
+/* 弹窗内第一个 section 不需要 margin-top */
+#sub-settings-modal .sub-modal-section:first-of-type{margin-top:0;}
+/* 高级设置入口按钮 */
+.sub-settings-btn{
+  margin-top:8px!important;
+  border:1.5px dashed #bae6fd!important;
+  color:#0369a1!important;
+  background:rgba(224,242,254,.4)!important;
+  font-weight:700!important;
+  font-size:12px!important;
+  border-radius:8px!important;
+  padding:6px 14px!important;
+  transition:all .2s!important;
+}
+.sub-settings-btn:hover{
+  background:rgba(186,230,253,.5)!important;
+  border-color:#0ea5e9!important;
+}
+/* 取消 / 确定按钮：统一高度 + 美化 */
+.sub-modal-close-btn{
+  margin-top:10px!important;
+  height:42px!important;min-height:42px!important;max-height:42px!important;
+  display:inline-flex!important;align-items:center!important;justify-content:center!important;
+  padding:0 28px!important;font-size:14px!important;font-weight:700!important;
+  box-sizing:border-box!important;
+  border-radius:12px!important;
+  transition:all .2s ease!important;
+  letter-spacing:.3px!important;
+}
+/* 确定按钮：蓝色渐变 */
+#sub-settings-modal .sub-modal-close-btn.primary,
+#sub-settings-modal button.primary.sub-modal-close-btn{
+  background:linear-gradient(135deg,#0ea5e9,#0284c7)!important;
+  border:none!important;color:#fff!important;
+  box-shadow:0 4px 14px rgba(14,165,233,.35)!important;
+}
+#sub-settings-modal .sub-modal-close-btn.primary:hover,
+#sub-settings-modal button.primary.sub-modal-close-btn:hover{
+  box-shadow:0 6px 20px rgba(14,165,233,.45)!important;
+  transform:translateY(-1px)!important;
+}
+/* 取消按钮：淡雅边框 */
+#sub-settings-modal .sub-modal-close-btn.secondary,
+#sub-settings-modal button.secondary.sub-modal-close-btn{
+  background:#f8fafc!important;
+  border:1.5px solid #e2e8f0!important;
+  color:#64748b!important;
+  box-shadow:none!important;
+}
+#sub-settings-modal .sub-modal-close-btn.secondary:hover,
+#sub-settings-modal button.secondary.sub-modal-close-btn:hover{
+  background:#f1f5f9!important;
+  border-color:#cbd5e1!important;
+  color:#475569!important;
+}
+/* AI改写提示区：空时折叠 */
+#sub-rewrite-hint{min-height:0!important;margin:0!important;padding:0!important;}
+#sub-rewrite-hint .prose:empty,
+#sub-rewrite-hint>div:empty{display:none!important;height:0!important;}
+#subtitle-panel-tail{
+  background:linear-gradient(135deg,#f0f9ff 0%,#e0f2fe 100%)!important;
+  border:2px solid #bae6fd!important;
+  border-top:none!important;
+  border-radius:0 0 14px 14px!important;
+  padding:14px!important;
+  margin-top:-2px!important;
+  max-height:none!important;
+  overflow:visible!important;
+}
+#subtitle-panel-main{
+  border-radius:14px 14px 0 0!important;
+  margin-bottom:0!important;
+}
 
 /* ── 字幕位置选择器 ── */
 .sub-pos-radio{min-width:0!important;}
@@ -926,31 +1078,21 @@ div.svelte-1nguped,
 
 /* ── 特定组件白色背景样式 ── */
 #component-36,
-#component-150,
 #component-120,
-#component-98,
 #component-148,
-#component-113,
-#component-144,
-#component-146,
-#component-101,
-#component-163,
+#component-33,
+#component-100,
+#component-119,
+#component-171,
+#component-173,
 #sub-video-panel {
   background: #fff!important;
   border-radius: 12px!important;
-  padding: 10px!important;
+  padding: 8px!important;
   border: 1px solid #e5e7eb!important;
 }
 
-/* 取消以下组件的白色背景样式 */
-#component-99,
-#component-100,
-#component-118 {
-  background: transparent!important;
-  border-radius: 0!important;
-  padding: 0!important;
-  border: none!important;
-}
+
 
 /* 字幕视频面板特殊样式 */
 #sub-video-panel {

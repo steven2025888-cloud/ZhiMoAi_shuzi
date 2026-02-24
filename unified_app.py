@@ -20,6 +20,7 @@ try:
     import lib_avatar as _av
     import lib_voice  as _vc
     import lib_subtitle as _sub
+    import lib_pip     as _pip
     _LIBS_OK = True
 except Exception as _libs_err:
     _LIBS_OK = False
@@ -39,6 +40,7 @@ except Exception as _libs_err:
     _av  = _StubLib()
     _vc  = _StubLib()
     _sub = _StubLib()
+    _pip = type('_StubPip', (), {'apply_pip': staticmethod(lambda *a, **kw: None)})()
 
 # ── 清除代理 ──
 for _k in ('http_proxy','https_proxy','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','all_proxy'):
@@ -1212,7 +1214,7 @@ def build_ui():
                 
                 with gr.Row(elem_classes="workspace"):
 
-                    # ═══ 步骤 1：文案提取 ═══════════════════════════
+                    # ═══ 步骤 1：文案提取 + 步骤 2：音频合成 ═══════════════════════════
                     with gr.Column(scale=1):
                         gr.HTML(
                             '<div class="step-header">'
@@ -1248,17 +1250,17 @@ def build_ui():
                                     elem_classes="extract-btn"
                                 )
                                 extract_hint = gr.HTML(value="", elem_classes="extract-hint")
+                                
+                                # ── AI改写功能（放在提取框内） ──
+                                gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-top:12px;margin-bottom:8px;">AI智能改写文案，同时生成标题和话题标签</div>')
+                                rewrite_btn = gr.Button("✨ AI改写 + 标题标签", variant="secondary", size="sm")
                             
                             input_text = gr.TextArea(
                                 label="文案内容",
                                 placeholder="在此输入或粘贴文案内容，或使用上方提取功能...",
                                 lines=6)
-                            
-                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">AI智能改写文案，同时生成标题和话题标签</div>')
-                            rewrite_btn = gr.Button("✨ AI改写 + 标题标签", variant="secondary", size="sm")
 
-                    # ═══ 步骤 2：音频合成 ═══════════════════════════
-                    with gr.Column(scale=1):
+                        # ═══ 步骤 2：音频合成 ═══════════════════════════
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">2</div>'
@@ -1378,7 +1380,7 @@ def build_ui():
                                     sources=["upload"], type="filepath")
 
                     # ═══ 步骤 3：视频合成 ═══════════════════════════
-                    with gr.Column(scale=1):
+                    with gr.Column(scale=2):
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">3</div>'
@@ -1428,18 +1430,49 @@ def build_ui():
                                 label="✨ 合成视频",
                                 height=400, elem_id="output-video", interactive=False)
 
-                    # ═══ 步骤 4+5：字幕合成 + 发布平台（右侧纵向排列）═══════════════════════════
+                    # ═══ 步骤 4：字幕合成与画中画 ═══════════════════════════
                     with gr.Column(scale=2):
-                        # 步骤4：字幕合成（上方）
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">4</div>'
-                            '<span class="step-title">字幕合成</span>'
+                            '<span class="step-title">字幕合成与画中画</span>'
                             '</div>'
                         )
                         with gr.Column(elem_classes="panel"):
+                            # ══ 画中画设置 ══════════════════════════════
+                            with gr.Group(elem_classes="pip-panel"):
+                                gr.HTML(
+                                    '<div class="subtitle-panel-head">'
+                                    '<div class="subtitle-panel-icon">🖼</div>'
+                                    '<span class="subtitle-panel-title">画中画设置</span>'
+                                    '</div>'
+                                )
+                                pip_enable = gr.Checkbox(
+                                    label="🖼 启用画中画",
+                                    value=False,
+                                    elem_classes="kw-checkbox")
+                                with gr.Group(visible=False) as pip_settings_group:
+                                    gr.HTML(
+                                        '<div style="background:#f0f9ff;border:1.5px solid #bae6fd;'
+                                        'border-radius:12px;padding:12px 14px;margin-bottom:12px;">'
+                                        '<div style="font-size:13px;font-weight:700;color:#0c4a6e;margin-bottom:6px;">📁 使用说明</div>'
+                                        '<div style="font-size:11px;color:#0369a1;line-height:1.8;">'
+                                        '1. 在 <b>画中画/</b> 文件夹下建立关键词子文件夹<br>'
+                                        '（如 <b>画中画/猫粮/</b>、<b>画中画/性价比/</b>）<br>'
+                                        '2. 在子文件夹中放入对应的视频素材（MP4等）<br>'
+                                        '3. 程序根据文案中的关键词自动匹配对应素材<br>'
+                                        '4. 匹配句子时长精确对齐，自动组合或截断素材<br>'
+                                        '5. 不足3秒的句子会自动扩展合并相邻句子</div></div>'
+                                    )
+                                    pip_folder_hint = gr.HTML(
+                                        value=f'<div style="font-size:11px;color:#64748b;padding:4px 8px;">'
+                                              f'📂 素材路径：<b>{os.path.join(BASE_DIR, "画中画")}</b></div>'
+                                    )
+                                    pip_btn = gr.Button("🎬 生成画中画视频", variant="primary", size="lg")
+                                    pip_hint = gr.HTML(value="")
+                            
                             # ══ 字幕面板 ══════════════════════════════
-                            with gr.Group(elem_classes="subtitle-panel"):
+                            with gr.Group(elem_classes="subtitle-panel", elem_id="subtitle-panel-main"):
                                 gr.HTML(
                                     '<div class="subtitle-panel-head">'
                                     '<div class="subtitle-panel-icon">✏️</div>'
@@ -1447,7 +1480,7 @@ def build_ui():
                                     '<span class="subtitle-panel-tip">✨ 支持关键词高亮</span>'
                                     '</div>'
                                 )
-                                # 行1：字体 字号 位置
+                                # 基本设置：字体 字号 位置（始终可见）
                                 with gr.Row():
                                     sub_font = gr.Dropdown(
                                         label="字体",
@@ -1459,58 +1492,96 @@ def build_ui():
                                     sub_pos = gr.Radio(label="位置", choices=["上","中","下"],
                                                        value="下", scale=2,
                                                        elem_classes="sub-pos-radio")
-                                # 行2：颜色 — 每行2个确保显示完整
+                                # ── 高级设置按钮（弹窗入口）──
+                                sub_settings_open_btn = gr.Button(
+                                    "⚙️ 高级设置", variant="secondary", size="sm",
+                                    elem_classes="sub-settings-btn")
+
+                            # ── 字幕高级设置弹窗（独立于字幕面板）──
+                            with gr.Group(visible=False, elem_id="sub-settings-modal") as sub_settings_modal:
+                                gr.HTML(
+                                    '<div style="text-align:center;margin-bottom:16px;">'
+                                    '<div style="width:44px;height:44px;border-radius:12px;'
+                                    'background:linear-gradient(135deg,#0ea5e9,#0284c7);'
+                                    'display:flex;align-items:center;justify-content:center;'
+                                    'margin:0 auto 12px;font-size:20px;'
+                                    'box-shadow:0 4px 12px rgba(14,165,233,.3);">⚙️</div>'
+                                    '<div style="font-size:17px;font-weight:800;color:#0f172a;">字幕高级设置</div>'
+                                    '</div>'
+                                )
+                                with gr.Row(elem_classes="sub-modal-columns"):
+                                    # ══ 左侧：颜色与样式 + 关键词高亮 ══
+                                    with gr.Column(scale=1, min_width=260):
+                                        gr.HTML('<div class="sub-modal-section">🎨 颜色与样式</div>')
+                                        with gr.Row():
+                                            sub_color_txt = gr.ColorPicker(
+                                                label="字幕颜色", value="#FFFFFF", scale=1)
+                                            sub_hi_txt = gr.ColorPicker(
+                                                label="高亮颜色", value="#FFD700", scale=1)
+                                        with gr.Row():
+                                            sub_outline_txt = gr.ColorPicker(
+                                                label="描边颜色", value="#000000", scale=1,
+                                                elem_id="sub-outline-color")
+                                            sub_outline_size = gr.Slider(
+                                                label="描边宽度 px", minimum=0, maximum=10,
+                                                value=6, step=1, scale=1)
+                                        with gr.Row():
+                                            sub_bg_color = gr.ColorPicker(
+                                                label="背景颜色", value="#000000", scale=1)
+                                            sub_bg_opacity = gr.Slider(
+                                                label="背景透明度", minimum=0, maximum=100,
+                                                value=0, step=5, scale=1,
+                                                info="0=全透明 100=不透明")
+                                        gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">🌟 关键词高亮</div>')
+                                        with gr.Row():
+                                            sub_kw_enable = gr.Checkbox(
+                                                label="🌟 启用关键词放大高亮", value=False,
+                                                scale=2, elem_classes="kw-checkbox")
+                                            sub_hi_scale = gr.Slider(
+                                                label="放大倍数", minimum=1.1, maximum=2.5,
+                                                value=1.5, step=0.1, scale=2, visible=False)
+                                        with gr.Row(visible=False) as sub_kw_row:
+                                            sub_kw_text = gr.Textbox(
+                                                label="关键词（逗号分隔）",
+                                                placeholder="如：便宜,优质,推荐,限时  — 多个词用逗号隔开",
+                                                max_lines=1, scale=1)
+                                    # ══ 右侧：标题设置 + 字幕内容 ══
+                                    with gr.Column(scale=1, min_width=260):
+                                        gr.HTML('<div class="sub-modal-section">📌 标题设置</div>')
+                                        sub_title_text = gr.Textbox(
+                                            label="标题内容",
+                                            placeholder="输入标题文字，留空则不显示标题",
+                                            max_lines=1)
+                                        with gr.Row():
+                                            sub_title_duration = gr.Slider(
+                                                label="显示时长(秒)", minimum=1, maximum=30,
+                                                value=5, step=1, scale=2)
+                                            sub_title_margin_top = gr.Slider(
+                                                label="距顶部距离 px", minimum=0, maximum=200,
+                                                value=30, step=5, scale=2)
+                                        with gr.Row():
+                                            sub_title_color = gr.ColorPicker(
+                                                label="标题颜色", value="#FFFFFF", scale=1)
+                                            sub_title_outline_color = gr.ColorPicker(
+                                                label="标题描边颜色", value="#000000", scale=1)
+                                        gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">📝 字幕内容</div>')
+                                        sub_text_modal = gr.Textbox(
+                                            label="字幕内容",
+                                            placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
+                                            lines=3)
+                                        sub_rewrite_btn = gr.Button("✨ AI改写文案", variant="secondary", size="sm")
+                                        sub_rewrite_hint = gr.HTML(value="", elem_id="sub-rewrite-hint")
+                                # ── 底部按钮（全宽）──
                                 with gr.Row():
-                                    sub_color_txt = gr.ColorPicker(
-                                        label="字幕颜色", value="#FFFFFF", scale=1)
-                                    sub_hi_txt = gr.ColorPicker(
-                                        label="高亮颜色", value="#FFD700", scale=1)
-                                with gr.Row():
-                                    sub_outline_txt = gr.ColorPicker(
-                                        label="描边颜色", value="#000000", scale=1,
-                                        elem_id="sub-outline-color")
-                                    sub_outline_size = gr.Slider(
-                                        label="描边宽度 px", minimum=0, maximum=10,
-                                        value=6, step=1, scale=1)
-                                with gr.Row():
-                                    sub_bg_color = gr.ColorPicker(
-                                        label="背景颜色", value="#000000", scale=1)
-                                    sub_bg_opacity = gr.Slider(
-                                        label="背景透明度", minimum=0, maximum=100,
-                                        value=0, step=5, scale=1,
-                                        info="0=全透明 100=不透明")
-                                # 行3：关键词高亮
-                                with gr.Row():
-                                    sub_kw_enable = gr.Checkbox(
-                                        label="🌟 启用关键词放大高亮", value=False,
-                                        scale=2, elem_classes="kw-checkbox")
-                                    sub_hi_scale = gr.Slider(
-                                        label="放大倍数", minimum=1.1, maximum=2.5,
-                                        value=1.5, step=0.1, scale=2, visible=False)
-                                with gr.Row(visible=False) as sub_kw_row:
-                                    sub_kw_text = gr.Textbox(
-                                        label="关键词（逗号分隔）",
-                                        placeholder="如：便宜,优质,推荐,限时  — 多个词用逗号隔开",
-                                        max_lines=1, scale=1)
-                                # 行4：标题设置
-                                gr.HTML('<div style="font-size:12px;font-weight:700;color:#475569;margin:10px 0 6px;">📌 标题设置（显示在视频顶部）</div>')
-                                sub_title_text = gr.Textbox(
-                                    label="标题内容",
-                                    placeholder="输入标题文字，留空则不显示标题",
-                                    max_lines=1)
-                                with gr.Row():
-                                    sub_title_duration = gr.Slider(
-                                        label="显示时长(秒)", minimum=1, maximum=30,
-                                        value=5, step=1, scale=2)
-                                    sub_title_margin_top = gr.Slider(
-                                        label="距顶部距离 px", minimum=0, maximum=200,
-                                        value=30, step=5, scale=2)
-                                with gr.Row():
-                                    sub_title_color = gr.ColorPicker(
-                                        label="标题颜色", value="#FFFFFF", scale=1)
-                                    sub_title_outline_color = gr.ColorPicker(
-                                        label="标题描边颜色", value="#000000", scale=1)
-                                # 行5：字幕文本
+                                    sub_settings_cancel_btn = gr.Button(
+                                        "取消", variant="secondary", size="lg",
+                                        elem_classes="sub-modal-close-btn")
+                                    sub_settings_close_btn = gr.Button(
+                                        "✅ 确定", variant="primary", size="lg",
+                                        elem_classes="sub-modal-close-btn")
+
+                            with gr.Group(elem_classes="subtitle-panel", elem_id="subtitle-panel-tail"):
+                                # ── 字幕文本 + 按钮（始终可见）──
                                 sub_text = gr.Textbox(
                                     label="字幕内容（语音合成后自动填入）",
                                     placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
@@ -2463,7 +2534,65 @@ def build_ui():
             inputs=[audio_mode],
             outputs=[tts_mode_group, upload_mode_group])
 
-        # ── 语音风格预设（不再控制 num_beams / max_mel_tokens，由合成速度预设控制）──
+        # ── 画中画复选框切换 ──
+        pip_enable.change(
+            lambda v: gr.update(visible=v),
+            inputs=[pip_enable],
+            outputs=[pip_settings_group])
+
+        # ── 画中画生成按钮 ──
+        def generate_pip_video(current_video, current_audio, text_content, progress=gr.Progress()):
+            """独立的画中画视频生成函数"""
+            if not current_video:
+                return gr.update(), '<div class="hint-err">⚠ 请先在步骤3生成视频</div>'
+            if not os.path.exists(str(current_video)):
+                return gr.update(), '<div class="hint-err">⚠ 视频文件不存在，请重新生成</div>'
+            if not text_content or not text_content.strip():
+                return gr.update(), '<div class="hint-err">⚠ 请先输入文案内容</div>'
+            
+            try:
+                progress(0.05, desc="🖼 开始处理画中画...")
+                
+                # 调用画中画处理函数
+                pip_result = _pip.apply_pip(
+                    str(current_video), 
+                    str(current_audio) if current_audio else str(current_video),
+                    text_content,
+                    progress_cb=lambda pct, msg: progress(pct, desc=f"🖼 {msg}")
+                )
+                
+                if pip_result and os.path.exists(pip_result):
+                    safe_print(f"[PIP] 画中画处理完成: {pip_result}")
+                    progress(1.0, desc="✅ 画中画生成完成")
+                    return pip_result, '<div class="hint-ok">✅ 画中画视频生成完成</div>'
+                else:
+                    safe_print("[PIP] 画中画处理返回空结果，请查看控制台日志")
+                    return gr.update(), '<div class="hint-warn">⚠ 画中画处理失败，请查看控制台日志了解详情</div>'
+                    
+            except Exception as e:
+                safe_print(f"[PIP] 画中画处理失败: {e}")
+                traceback.print_exc()
+                return gr.update(), f'<div class="hint-err">❌ 画中画生成失败: {str(e)}</div>'
+        
+        pip_btn.click(
+            generate_pip_video,
+            inputs=[output_video, audio_for_ls, input_text],
+            outputs=[output_video, pip_hint])
+
+        # ── 字幕高级设置弹窗 ──
+        sub_settings_open_btn.click(
+            lambda txt: (gr.update(visible=True), gr.update(value=txt)),
+            inputs=[sub_text],
+            outputs=[sub_settings_modal, sub_text_modal])
+        sub_settings_close_btn.click(
+            lambda txt: (gr.update(visible=False), gr.update(value=txt)),
+            inputs=[sub_text_modal],
+            outputs=[sub_settings_modal, sub_text])
+        sub_settings_cancel_btn.click(
+            lambda: gr.update(visible=False),
+            outputs=[sub_settings_modal])
+
+        # ── 语音风格预设
         _VOICE_PRESETS = {
             "标准":     dict(tp=0.8,  tk=30, temp=0.7, rp=8.0,  spd=1.0),
             "稳定播报": dict(tp=0.6,  tk=10, temp=0.2, rp=14.0, spd=0.95),
@@ -2940,6 +3069,12 @@ def build_ui():
             inputs=[input_text],
             outputs=[input_text, douyin_title, douyin_topics, tts_hint])
         
+        # 字幕弹窗内AI改写按钮
+        sub_rewrite_btn.click(
+            _rewrite_text_with_deepseek,
+            inputs=[sub_text_modal],
+            outputs=[sub_text_modal, douyin_title, douyin_topics, sub_rewrite_hint])
+        
         # 清空提示
         input_text.change(lambda: "", outputs=[tts_hint])
         
@@ -3125,6 +3260,7 @@ def build_ui():
 
         # 视频合成按钮点击 - 直接在完成后保存
         def video_and_save(avatar_sel, aud_for_ls, inp_txt, quality_name,
+                          pip_enabled,
                           # 保存需要的其他参数
                           prmt_aud, voice_sel, audio_mode_val, direct_aud,
                           out_aud, sub_txt, sub_vid,
@@ -3145,10 +3281,33 @@ def build_ui():
             # 视频合成完成后，保存工作台状态
             if final_result:
                 video_path, ls_detail = final_result
-                
-                # 现在 video_path 直接就是视频路径字符串
-                # 不需要从 gr.update 对象中提取
-                
+
+                # ── 画中画处理 ──
+                if pip_enabled and video_path and os.path.exists(str(video_path)):
+                    try:
+                        yield gr.update(), gr.update(
+                            value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;'
+                                  'background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;">'
+                                  '<div style="width:18px;height:18px;border:2.5px solid #bae6fd;'
+                                  'border-top-color:#0ea5e9;border-radius:50%;'
+                                  'animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div>'
+                                  '<span style="font-size:13px;color:#0369a1;font-weight:600;">'
+                                  '🖼 正在处理画中画替换…</span>'
+                                  '<style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>',
+                            visible=True), gr.update(), gr.update()
+                        pip_result = _pip.apply_pip(
+                            str(video_path), str(aud_for_ls), inp_txt,
+                            progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
+                        )
+                        if pip_result and os.path.exists(pip_result):
+                            safe_print(f"[PIP] 画中画处理完成: {pip_result}")
+                            video_path = pip_result
+                        else:
+                            safe_print("[PIP] 无匹配关键词或处理未产出结果")
+                    except Exception as e:
+                        safe_print(f"[PIP] 画中画处理失败（不影响视频输出）: {e}")
+                        traceback.print_exc()
+
                 # 调试输出
                 debug_file = os.path.join(OUTPUT_DIR, "debug_video_save.txt")
                 with open(debug_file, "a", encoding="utf-8") as f:
@@ -3176,6 +3335,7 @@ def build_ui():
             video_and_save,
             inputs=[
                 avatar_select, audio_for_ls, input_text, quality_preset,
+                pip_enable,
                 # 保存需要的参数
                 prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 output_audio, sub_text, sub_video,

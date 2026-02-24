@@ -1806,12 +1806,34 @@ if __name__ == "__main__":
             else:
                 icon_path = None
 
+        # 获取屏幕尺寸并设置窗口为屏幕的90%
+        import tkinter as tk
+        try:
+            temp_root = tk.Tk()
+            screen_width = temp_root.winfo_screenwidth()
+            screen_height = temp_root.winfo_screenheight()
+            temp_root.destroy()
+            
+            # 窗口大小为屏幕的80%
+            window_width = int(screen_width * 0.8)
+            window_height = int(screen_height * 0.8)
+            
+            # 最小尺寸为屏幕的60%
+            min_width = int(screen_width * 0.6)
+            min_height = int(screen_height * 0.6)
+        except Exception:
+            # 如果获取失败，使用默认值
+            window_width = 1600
+            window_height = 1000
+            min_width = 1200
+            min_height = 800
+
         window = webview.create_window(
             title='织梦AI大模型 - 专业版',
             url=_gradio_url,
             js_api=_api,
-            width=1480, height=940, resizable=True,
-            min_size=(1200, 800), text_select=True, easy_drag=False,
+            width=window_width, height=window_height, resizable=True,
+            min_size=(min_width, min_height), text_select=True, easy_drag=False,
         )
         _webview_win[0] = window
 
