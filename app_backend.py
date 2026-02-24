@@ -18,21 +18,55 @@ except ImportError:
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 INDEXTTS_DIR = os.path.join(BASE_DIR, "_internal_tts")
 PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
+
+
+def has_local_tts_content():
+    """检测 _internal_tts 文件夹是否有可用的 TTS 模型内容
+    
+    Returns:
+        bool: True 表示有内容可用本地版，False 表示只能用在线版
+    """
+    if not os.path.exists(INDEXTTS_DIR):
+        return False
+    
+    # 检查关键目录和文件是否存在
+    checkpoints_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
+    if not os.path.exists(checkpoints_dir):
+        return False
+    
+    # 检查 checkpoints 目录是否有内容（至少有几个文件或子目录）
+    try:
+        contents = os.listdir(checkpoints_dir)
+        # 需要至少有一些内容（模型文件、config.yaml 等）
+        if len(contents) < 2:
+            return False
+        
+        # 检查是否有 config.yaml（TTS 模型的关键配置文件）
+        config_path = os.path.join(checkpoints_dir, "config.yaml")
+        if not os.path.exists(config_path):
+            return False
+        
+        return True
+    except Exception as e:
+        print(f"[TTS检测] 检查 _internal_tts 内容失败: {e}")
+        return False
 LEGACY_PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")
 
 # 从.env文件读取版本信息
 def _load_version_from_env():
-    """从.env文件读取版本号"""
+    """从.env文件读取版本号和 build 号"""
     env_file = os.path.join(BASE_DIR, ".env")
-    version = "1.0.0"
+    version = "1.0.0"  # 默认版本号
     build = 100
     try:
         if os.path.exists(env_file):
             with open(env_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
-                    if line.startswith('APP_VERSION='):
+                    # 注意：APP_VERSION_NUMBER 是版本号（如 "1.0.0"）
+                    # TTS_MODE 是 TTS 模式选择（local / online），不要混淆
+                    if line.startswith('APP_VERSION_NUMBER='):
                         version = line.split('=', 1)[1].strip()
                     elif line.startswith('APP_BUILD='):
                         build = int(line.split('=', 1)[1].strip())
@@ -914,7 +948,8 @@ def load_env_config():
         'DEBUG_MODE': False, 
         'SERVER_PORT_START': 7870, 
         'SERVER_PORT_END': 7874,
-        'CHECK_UPDATE': True  # 默认启用更新检查
+        'CHECK_UPDATE': True,  # 默认启用更新检查
+        'TTS_MODE': 'local'  # TTS 模式：local 或 online（默认本地版）
     }
     env_path = os.path.join(BASE_DIR, '.env')
     if os.path.exists(env_path):
@@ -930,6 +965,7 @@ def load_env_config():
                     elif key == 'SERVER_PORT_START':   config['SERVER_PORT_START'] = int(value)
                     elif key == 'SERVER_PORT_END':     config['SERVER_PORT_END']   = int(value)
                     elif key == 'CHECK_UPDATE':        config['CHECK_UPDATE'] = value.lower() in ('true','1','yes','on')
+                    elif key == 'TTS_MODE':            config['TTS_MODE'] = value  # 读取 TTS 模式选择
         except Exception:
             pass
     return config
@@ -1331,7 +1367,7 @@ if __name__ == "__main__":
                 pass
 
             # 居中
-            w, h = 560, 750  # 再次增加窗口高度
+            w, h = 560, 780  # 增加窗口高度保证按钮完整显示
             sx = (root.winfo_screenwidth() - w) // 2
             sy = (root.winfo_screenheight() - h) // 2
             root.geometry(f"{w}x{h}+{sx}+{sy}")
@@ -1376,59 +1412,20 @@ if __name__ == "__main__":
                 canvas.create_oval(w//2-r, logo_y-r, w//2+r, logo_y+r,
                                    fill="", outline="#c4b5fd", width=1, stipple="gray12")
             
-            try:
-                logo_path = os.path.join(BASE_DIR, "logo.jpg")
-                if os.path.exists(logo_path):
-                    from PIL import Image, ImageTk, ImageDraw, ImageFilter
-                    img = Image.open(logo_path).convert("RGBA")
-                    
-                    # 创建圆形遮罩
-                    size = (110, 110)
-                    img = img.resize(size, Image.Resampling.LANCZOS)
-                    
-                    # 创建遮罩
-                    mask = Image.new('L', size, 0)
-                    draw = ImageDraw.Draw(mask)
-                    draw.ellipse((0, 0) + size, fill=255)
-                    
-                    # 应用遮罩
-                    output = Image.new('RGBA', size, (0, 0, 0, 0))
-                    output.paste(img, (0, 0))
-                    output.putalpha(mask)
-                    
-                    photo = ImageTk.PhotoImage(output)
-                    canvas.create_image(w//2, logo_y, image=photo)
-                    canvas.image = photo
-                    
-                    # Logo 边框
-                    canvas.create_oval(w//2-58, logo_y-58, w//2+58, logo_y+58,
-                                       outline="#ffffff", width=3)
-                    canvas.create_oval(w//2-62, logo_y-62, w//2+62, logo_y+62,
-                                       outline="#c4b5fd", width=1)
-                else:
-                    raise Exception("Logo not found")
-            except Exception:
-                # 使用精美的渐变圆形作为 Logo
-                canvas.create_oval(w//2-55, logo_y-55, w//2+55, logo_y+55,
-                                   fill="#6366f1", outline="")
-                canvas.create_oval(w//2-50, logo_y-50, w//2+50, logo_y+50,
-                                   fill="#7c3aed", outline="")
-                canvas.create_text(w//2, logo_y, text="✨", 
-                                   font=("Segoe UI Emoji", 48), fill="#ffffff")
-                # Logo 边框
-                canvas.create_oval(w//2-58, logo_y-58, w//2+58, logo_y+58,
-                                   outline="#ffffff", width=3)
-
-            # 标题区域
-            canvas.create_text(w//2, 210, text="织梦AI大模型", 
-                               font=("Microsoft YaHei", 28, "bold"),
+            # Logo和标题已取消，节省空间
+            # try:
+            #     logo_path = os.path.join(BASE_DIR, "logo.jpg")
+            #     ...
+            # except Exception:
+            #     ...
+            
+            # 标题区域（简化版，只保留主标题）
+            canvas.create_text(w//2, 80, text="织梦AI大模型", 
+                               font=("Microsoft YaHei", 24, "bold"),
                                fill="#ffffff")
             
-            # 副标题背景
-            canvas.create_rectangle(w//2-160, 245, w//2+160, 270,
-                                    fill="#5b21b6", outline="", stipple="gray25")
-            canvas.create_text(w//2, 257, 
-                               text="AI语音克隆 · 智能视频合成 · 专业级解决方案", 
+            canvas.create_text(w//2, 115, 
+                               text="AI语音克隆 · 智能视频合成", 
                                font=("Microsoft YaHei", 10),
                                fill="#e9d5ff")
             
@@ -1441,8 +1438,8 @@ if __name__ == "__main__":
                                anchor="e")
 
             # 卡密输入区域（玻璃态卡片）
-            card_y = 300
-            card_h = 420  # 增加高度以容纳所有内容
+            card_y = 145
+            card_h = 530  # 增大卡片高度保证内容完整
             
             # 卡片多层阴影效果
             canvas.create_rectangle(44, card_y+6, w-44, card_y+card_h+6,
@@ -1476,6 +1473,80 @@ if __name__ == "__main__":
             # 装饰线
             canvas.create_line(70, card_y+60, w-70, card_y+60,
                                fill="#e5e7eb", width=1)
+            
+            # 版本选择（本地版/在线版）—— 同一行布局
+            version_container = tk.Frame(card_frame, bg="#ffffff")
+            version_container.pack(fill="x", pady=(0, 10))
+            
+            # 检测本地 TTS 是否可用
+            _has_local_tts = has_local_tts_content()
+            print(f"[LOGIN] 本地 TTS 模型检测: {'可用' if _has_local_tts else '不可用'}")
+            
+            # 根据 TTS 检测结果决定默认版本
+            if _has_local_tts:
+                saved_mode = ENV_CONFIG.get('TTS_MODE', 'local')
+                default_version = saved_mode if saved_mode in ('local', 'online') else 'local'
+            else:
+                default_version = 'online'
+            
+            version_var = tk.StringVar(value=default_version)
+            
+            # 标签 + 两个单选按钮在同一行
+            version_frame = tk.Frame(version_container, bg="#ffffff")
+            version_frame.pack(fill="x")
+            
+            tk.Label(version_frame, text="TTS模式",
+                     font=("Microsoft YaHei", 9),
+                     bg="#ffffff", fg="#64748b").pack(side="left", padx=(0, 10))
+            
+            # 本地版选项
+            local_text = "本地版" if _has_local_tts else "本地版(不可用)"
+            local_fg = "#1e293b" if _has_local_tts else "#94a3b8"
+            local_radio = tk.Radiobutton(
+                version_frame,
+                text=local_text,
+                variable=version_var,
+                value="local",
+                font=("Microsoft YaHei", 10),
+                bg="#ffffff",
+                fg=local_fg,
+                activebackground="#ffffff",
+                activeforeground=local_fg,
+                selectcolor="#ffffff",
+                indicatoron=True,
+                cursor="hand2" if _has_local_tts else "arrow",
+                state="normal" if _has_local_tts else "disabled",
+                disabledforeground="#94a3b8"
+            )
+            local_radio.pack(side="left", padx=(0, 16))
+            
+            # 在线版选项
+            online_radio = tk.Radiobutton(
+                version_frame,
+                text="在线版",
+                variable=version_var,
+                value="online",
+                font=("Microsoft YaHei", 10),
+                bg="#ffffff",
+                fg="#1e293b",
+                activebackground="#ffffff",
+                activeforeground="#1e293b",
+                selectcolor="#ffffff",
+                indicatoron=True,
+                cursor="hand2"
+            )
+            online_radio.pack(side="left")
+            
+            # 如果没有本地 TTS，显示提示信息
+            if not _has_local_tts:
+                hint_label = tk.Label(
+                    version_container,
+                    text="⚠ 未检测到本地模型，仅可使用在线版",
+                    font=("Microsoft YaHei", 8),
+                    bg="#ffffff",
+                    fg="#f59e0b"
+                )
+                hint_label.pack(anchor="w", pady=(4, 0))
             
             # 卡密输入框（现代风格）
             entry_container = tk.Frame(card_frame, bg="#ffffff")
@@ -1746,9 +1817,38 @@ if __name__ == "__main__":
                 
                 ok, msg = lic.validate_online(key)
                 if ok:
+                    # 保存 TTS 模式选择到 .env 文件
+                    selected_mode = version_var.get()
+                    try:
+                        env_path = os.path.join(os.path.dirname(__file__), ".env")
+                        env_lines = []
+                        mode_found = False
+                        
+                        if os.path.exists(env_path):
+                            with open(env_path, 'r', encoding='utf-8') as f:
+                                for line in f:
+                                    if line.startswith('TTS_MODE='):
+                                        env_lines.append(f'TTS_MODE={selected_mode}\n')
+                                        mode_found = True
+                                    else:
+                                        env_lines.append(line)
+                        
+                        if not mode_found:
+                            env_lines.append(f'TTS_MODE={selected_mode}\n')
+                        
+                        with open(env_path, 'w', encoding='utf-8') as f:
+                            f.writelines(env_lines)
+                        
+                        # 同时设置环境变量，以便子进程可以读取
+                        os.environ['TTS_MODE'] = selected_mode
+                        print(f"[LICENSE] TTS 模式已保存: {selected_mode}")
+                    except Exception as e:
+                        print(f"[LICENSE] 保存 TTS 模式失败: {e}")
+                    
                     msg_label.config(text="[OK] 激活成功！正在启动程序...", fg="#22c55e")
                     btn_canvas.itemconfig(text_id, text="[OK] 启动中...")
                     result["passed"] = True
+                    result["tts_mode"] = selected_mode  # 保存到result中
                     root.after(1200, root.destroy)
                 else:
                     msg_label.config(text=f"[ERROR] {msg}", fg="#ef4444")

@@ -5,7 +5,14 @@ import os, json, time, hashlib, platform, subprocess, uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LICENSE_FILE = os.path.join(BASE_DIR, ".license")
-API_URL = "https://api.zhimengai.xyz/api/dsp/login"
+
+# 导入统一的API配置
+try:
+    from voice_api import API_BASE_URL
+    API_URL = f"{API_BASE_URL}/api/dsp/login"
+except ImportError:
+    # 如果voice_api不可用，使用硬编码
+    API_URL = "https://api.zhimengai.xyz/api/dsp/login"
 
 
 def _get_machine_code():

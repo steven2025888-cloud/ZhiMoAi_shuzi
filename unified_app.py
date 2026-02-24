@@ -2,6 +2,24 @@
 import os, sys, time, subprocess, traceback, shutil, re, json, queue as _queue, threading
 import asyncio
 
+# ── 加载 .env 配置 ──
+def load_env_file():
+    """加载.env文件到环境变量"""
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+        except Exception as e:
+            print(f"[WARN] 加载.env文件失败: {e}")
+
+load_env_file()
+
 # ── LatentSync 常驻推理服务全局状态 ──
 _ls_server_proc = None       # 常驻子进程
 _ls_server_lock = threading.Lock()  # 保护服务启动/请求串行化
@@ -116,16 +134,18 @@ def safe_print(msg: str):
 
 # 从.env文件读取版本信息
 def _load_version_from_env():
-    """从.env文件读取版本号"""
+    """从.env文件读取版本号和 build 号"""
     env_file = os.path.join(BASE_DIR, ".env")
-    version = "1.0.0"
+    version = "1.0.0"  # 默认版本号
     build = 100
     try:
         if os.path.exists(env_file):
             with open(env_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
-                    if line.startswith('APP_VERSION='):
+                    # 注意：APP_VERSION_NUMBER 是版本号（如 "1.0.0"）
+                    # TTS_MODE 是 TTS 模式选择（local / online），不要混淆
+                    if line.startswith('APP_VERSION_NUMBER='):
                         version = line.split('=', 1)[1].strip()
                     elif line.startswith('APP_BUILD='):
                         build = int(line.split('=', 1)[1].strip())
@@ -311,7 +331,22 @@ def _ensure_ls_server(progress_cb=None):
 
 # ══════════════════════════════════════════════════════════════
 def auto_load_model():
+    """根据 TTS 模式选择决定是否加载 IndexTTS2 模型"""
     global tts
+    
+    # 读取 TTS 模式选择（local 或 online）
+    tts_mode = os.getenv('TTS_MODE', 'local')
+    safe_print(f"[MODEL] TTS 模式: {tts_mode}")
+    
+    # 如果是在线版，跳过模型加载
+    if tts_mode == 'online':
+        safe_print("[MODEL] 当前为在线版，跳过 IndexTTS2 模型加载")
+        tts = None
+        return
+    
+    # 本地版才加载模型
+    safe_print("[MODEL] 当前为本地版，开始加载 IndexTTS2 模型...")
+    
     model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
     if not os.path.exists(model_dir):
         safe_print("[ERR] model dir not found"); return
@@ -451,12 +486,153 @@ def _restore_tts_gpu():
 
 
 # ══════════════════════════════════════════════════════════════
-#  语音合成
+#  语音合成（支持本地版和在线版）
 # ══════════════════════════════════════════════════════════════
-def generate_speech(text, prompt_audio, top_p, top_k, temperature, num_beams,
-                    repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
-                    emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
-                    progress=gr.Progress()):
+def download_voice_from_proxy(play_url: str, output_path: str) -> str:
+    """通过代理URL下载音频文件到指定路径"""
+    import requests
+    
+    r = requests.get(play_url, timeout=60)
+    r.raise_for_status()
+    
+    with open(output_path, 'wb') as f:
+        f.write(r.content)
+    
+    return output_path
+
+
+def generate_speech_online(text, voice_name, progress=gr.Progress()):
+    """在线版 TTS：调用云端 API 合成语音"""
+    if not text.strip():
+        raise gr.Error("请输入要合成的文本内容")
+    
+    try:
+        from voice_api import VoiceApiClient
+        from lib_license import check_saved_license
+        import lib_voice as _vc
+        
+        # 检查卡密
+        status, info = check_saved_license()
+        if status != "valid":
+            raise gr.Error("请先登录卡密后再使用在线版 TTS")
+        
+        license_key = info.get("license_key", "")
+        if not license_key:
+            raise gr.Error("卡密无效，请重新登录")
+        
+        # 获取 model_id
+        model_id = _vc.get_online_model_id(voice_name)
+        if not model_id:
+            raise gr.Error(f"未找到在线音色「{voice_name}」的模型 ID")
+        
+        progress(0.1, desc="[在线] 正在调用云端 TTS 服务...")
+        
+        # 调用 API
+        from voice_api import API_BASE_URL
+        client = VoiceApiClient(API_BASE_URL, license_key)
+        
+        result = client.tts(model_id, text)
+        print(f"[TTS在线版] 服务器返回: {result}")
+        
+        if result.get("code") != 0:
+            raise gr.Error(f"合成失败：{result.get('msg', '未知错误')}")
+        
+        data = result.get("data", {})
+        # 兼容不同的字段名：task_id, taskId, id
+        task_id = data.get("task_id") or data.get("taskId") or data.get("id")
+        
+        if not task_id:
+            print(f"[TTS在线版] 错误：未找到任务ID，data={data}")
+            raise gr.Error(f"服务器返回的任务 ID 无效，返回数据: {data}")
+        
+        progress(0.3, desc="[在线] 云端正在处理中...")
+        
+        # 轮询结果
+        import time as _time
+        max_wait = 120  # 最多等待 120 秒
+        start_time = _time.time()
+        while _time.time() - start_time < max_wait:
+            result = client.tts_result(task_id)
+            print(f"[TTS在线版] 轮询结果: {result}")
+            
+            status_code = result.get("code")
+            data = result.get("data", {})
+            task_status = data.get("status", "")
+            
+            # 兼容不同的状态表示：
+            # - 字符串: "completed", "success", "done"
+            # - 数字: 2 (完成), 1 (处理中), 0 (等待), -1 (失败)
+            is_completed = (
+                task_status in ["completed", "success", "done"] or
+                task_status == 2 or
+                (isinstance(task_status, int) and task_status >= 2)
+            )
+            
+            is_failed = (
+                task_status in ["failed", "error"] or
+                task_status == -1 or
+                (isinstance(task_status, int) and task_status < 0)
+            )
+            
+            if status_code == 0 and is_completed:
+                # 兼容多种音频URL字段名
+                voice_url = (
+                    data.get("audio_url") or 
+                    data.get("audioUrl") or 
+                    data.get("voiceUrl") or 
+                    data.get("voice_url") or 
+                    data.get("url")
+                )
+                
+                if voice_url:
+                    progress(0.9, desc="[在线] 下载音频文件...")
+                    from urllib.parse import quote
+                    from voice_api import API_BASE_URL
+                    
+                    try:
+                        print(f"[TTS在线版] 下载音频: {voice_url}")
+                        
+                        # 生成本地保存路径（和本地版一样保存到 unified_outputs）
+                        ts = int(_time.time())
+                        local_file = os.path.join(OUTPUT_DIR, f"tts_online_{ts}.wav")
+                        
+                        # 构造代理URL并下载
+                        proxy_url = f"{API_BASE_URL}/api/voice/tts/play?voice_url={quote(voice_url)}"
+                        download_voice_from_proxy(proxy_url, local_file)
+                        
+                        progress(1.0, desc="[OK] 合成完成")
+                        print(f"[TTS在线版] 合成成功: {local_file}")
+                        
+                        # 返回本地文件路径
+                        return local_file, "[OK] 在线语音合成完成", local_file
+                    except Exception as e:
+                        raise gr.Error(f"下载音频失败：{e}")
+                else:
+                    print(f"[TTS在线版] 错误：未找到音频URL，data={data}")
+                    raise gr.Error(f"服务器返回的音频 URL 无效，返回数据: {data}")
+            elif is_failed:
+                error_msg = data.get("message") or data.get("msg") or data.get("error") or "未知错误"
+                raise gr.Error(f"合成失败：{error_msg}")
+            
+            # 更新进度
+            elapsed = int(_time.time() - start_time)
+            progress(0.3 + min(elapsed / max_wait * 0.5, 0.5), desc=f"[在线] 云端处理中...已等待 {elapsed} 秒")
+            _time.sleep(2)
+        
+        raise gr.Error("合成超时，请稍后重试")
+        
+    except gr.Error:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise gr.Error(f"在线 TTS 失败：{e}")
+
+
+def generate_speech_local(text, prompt_audio, top_p, top_k, temperature, num_beams,
+                          repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
+                          emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                          progress=gr.Progress()):
+    """本地版 TTS：使用本机 GPU 合成语音"""
     global tts
     if not text.strip():     raise gr.Error("请输入要合成的文本内容")
     if prompt_audio is None: raise gr.Error("请上传参考音频文件")
@@ -505,6 +681,25 @@ def generate_speech(text, prompt_audio, top_p, top_k, temperature, num_beams,
     except Exception as e:
         os.chdir(cwd); traceback.print_exc()
         raise gr.Error("TTS 失败: " + str(e))
+
+
+def generate_speech(text, prompt_audio, voice_name, top_p, top_k, temperature, num_beams,
+                    repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
+                    emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                    progress=gr.Progress()):
+    """语音合成入口：根据音色类型自动选择本地版或在线版"""
+    import lib_voice as _vc
+    
+    # 判断是否为在线版音色
+    if voice_name and _vc.is_online(voice_name):
+        # 在线版：只传文本内容，忽略其他参数
+        return generate_speech_online(text, voice_name, progress)
+    else:
+        # 本地版：使用完整参数
+        return generate_speech_local(text, prompt_audio, top_p, top_k, temperature, num_beams,
+                                     repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
+                                     emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                                     progress)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1668,7 +1863,7 @@ def build_ui():
                         av_prev_video = gr.Video(label="", height=240, interactive=False)
                         av_prev_title = gr.HTML(value="")
 
-            # ── Tab 4：音色模型 ───────────────────────────────
+            # ── Tab 4：音色模型 ───────────────────────────
             with gr.Tab("🎙  音色模型"):
                 with gr.Row(elem_classes="workspace"):
 
@@ -1679,6 +1874,17 @@ def build_ui():
                             '<div class="step-num" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);">＋</div>'
                             '<span class="step-title">添加音色</span>'
                             '</div>'
+                        )
+                        # ── 版本选择 ──
+                        vc_source = gr.Radio(
+                            label="音色版本",
+                            choices=["💻 本地版（本机处理）", "☁️ 在线版（云端处理）"],
+                            value="💻 本地版（本机处理）",
+                            elem_classes="voice-style-radio")
+                        gr.HTML(
+                            '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
+                            '💻 <b>本地版</b>：使用本机 GPU 处理，需要较高配置<br>'
+                            '☁️ <b>在线版</b>：使用云端服务器处理，无需高配置显卡</div>'
                         )
                         vc_upload = gr.Audio(
                             label="上传参考音频（3-10秒 WAV/MP3）",
@@ -1691,8 +1897,11 @@ def build_ui():
                         gr.HTML(
                             '<div style="font-size:11px;color:#94a3b8;line-height:2;margin-top:10px;">'
                             '💡 保存后可在工作台直接选用<br>'
-                            '📁 存储于 <b>voices/</b> 目录</div>'
+                            '💻 本地版存储于 <b>voices/</b> 目录<br>'
+                            '☁️ 在线版存储在云端服务器</div>'
                         )
+                        # ── 同步在线音色按钮 ──
+                        vc_sync_btn = gr.Button("🔄 同步在线音色", variant="secondary", size="sm")
                         vc_del_dd   = gr.Textbox(visible=False, value="")
                         vc_del_btn  = gr.Button("删除", visible=False)
                         vc_del_hint = gr.HTML(value="")
@@ -2333,19 +2542,27 @@ def build_ui():
                 return [gr.update()] * 25 + [_hint_html("error", f"恢复失败: {str(e)}")]
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
-        def tts_wrap(text, pa, spd, tp, tk, temp, nb, rp, mmt,
+        def tts_wrap(text, pa, voice_name, spd, tp, tk, temp, nb, rp, mmt,
                      emo_m, emo_a, emo_w, emo_t,
                      v1, v2, v3, v4, v5, v6, v7, v8,
                      progress=gr.Progress()):
             # 参数验证
             if not text or not text.strip():
                 raise gr.Error("请在文案内容中输入文本")
-            if pa is None:
+            
+            # 检查音色是否为在线版
+            is_online = False
+            if _LIBS_OK and voice_name and not voice_name.startswith("（"):
+                is_online = _vc.is_online(voice_name)
+            
+            # 在线版不需要 prompt_audio，本地版需要
+            if not is_online and pa is None:
                 raise gr.Error("请先选择音色或上传参考音频")
+            
             try:
                 progress(0.05, desc="正在合成语音...")
                 
-                r = generate_speech(text, pa, tp, tk, temp, nb, rp, mmt,
+                r = generate_speech(text, pa, voice_name, tp, tk, temp, nb, rp, mmt,
                                     emo_m, emo_a, emo_w, emo_t,
                                     v1, v2, v3, v4, v5, v6, v7, v8,
                                     progress=progress)
@@ -2397,11 +2614,11 @@ def build_ui():
                 raise gr.Error("合成失败: " + str(e))
 
         # TTS 按钮点击 - 直接在完成后保存
-        def tts_and_save(text, pa, spd, tp, tk, temp, nb, rp, mmt,
+        def tts_and_save(text, pa, voice_sel, spd, tp, tk, temp, nb, rp, mmt,
                         emo_m, emo_a, emo_w, emo_t,
                         v1, v2, v3, v4, v5, v6, v7, v8,
                         # 保存需要的其他参数
-                        voice_sel, audio_mode_val, direct_aud, avatar_sel,
+                        audio_mode_val, direct_aud, avatar_sel,
                         out_vid, sub_vid,
                         sub_font_val, sub_size_val, sub_pos_val,
                         sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
@@ -2409,10 +2626,10 @@ def build_ui():
                         sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
                         douyin_title_val, douyin_topics_val,
                         progress=gr.Progress()):
-            """TTS合成并自动保存工作台状态"""
-            # 先执行TTS
+            """合成并自动保存工作台状态"""
+            # 先执行TTS，voice_sel 在第三个位置
             audio_path, audio_for_ls_path = tts_wrap(
-                text, pa, spd, tp, tk, temp, nb, rp, mmt,
+                text, pa, voice_sel, spd, tp, tk, temp, nb, rp, mmt,
                 emo_m, emo_a, emo_w, emo_t,
                 v1, v2, v3, v4, v5, v6, v7, v8,
                 progress=progress
@@ -2446,12 +2663,12 @@ def build_ui():
         gen_btn.click(
             tts_and_save,
             inputs=[
-                input_text, prompt_audio, voice_speed, top_p, top_k, temperature,
+                input_text, prompt_audio, voice_select, voice_speed, top_p, top_k, temperature,
                 num_beams, repetition_penalty, max_mel_tokens,
                 emo_mode, emo_audio, emo_weight, emo_text,
                 vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                 # 保存需要的参数
-                voice_select, audio_mode, direct_audio_upload, avatar_select,
+                audio_mode, direct_audio_upload, avatar_select,
                 output_video, sub_video,
                 sub_font, sub_size, sub_pos,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
@@ -2623,7 +2840,7 @@ def build_ui():
 
         # ── 数字人 Tab 事件 ──────────────────────────────────
         def _av_all_outputs(hint_html):
-            """统一返回格式：hint + gallery + 下拉刷新 + 清空隐藏输入框"""
+            """统一返回格式: hint + gallery + 下拉刷新 + 清空隐藏输入框"""
             ch = _av.get_choices() if _LIBS_OK else []
             return (hint_html,
                     _av.render_gallery("av-del-input", "av-prev-trigger") if _LIBS_OK else "",
@@ -2680,14 +2897,28 @@ def build_ui():
                     gr.update(choices=ch, value=None),
                     gr.update(value=""))  # 清空隐藏输入框
 
-        def _save_voice(audio, name):
+        def _save_voice(audio, name, source_choice):
             if not _LIBS_OK:
                 return _vc_all_outputs(_hint_html("error","扩展模块未加载"))
-            ok, msg = _vc.add_voice(audio, name)
+            # 根据选择的版本调用不同的保存方法
+            if "在线版" in source_choice:
+                ok, msg = _vc.add_online_voice(audio, name)
+            else:
+                ok, msg = _vc.add_local_voice(audio, name)
             return _vc_all_outputs(_hint_html("ok" if ok else "warning", msg))
 
         vc_save_btn.click(_save_voice,
-            inputs=[vc_upload, vc_name],
+            inputs=[vc_upload, vc_name, vc_source],
+            outputs=[vc_save_hint, vc_gallery, voice_select, vc_del_js_input])
+        
+        # ── 同步在线音色按钮 ──
+        def _sync_online_voices():
+            if not _LIBS_OK:
+                return _vc_all_outputs(_hint_html("error","扩展模块未加载"))
+            ok, msg = _vc.sync_online_voices()
+            return _vc_all_outputs(_hint_html("ok" if ok else "warning", msg))
+        
+        vc_sync_btn.click(_sync_online_voices,
             outputs=[vc_save_hint, vc_gallery, voice_select, vc_del_js_input])
 
         def _del_voice_handler(name):
@@ -2902,7 +3133,7 @@ def build_ui():
                 return None, f"❌ API调用失败: {str(e)}"
         
         def _rewrite_text_with_deepseek(original_text):
-            """使用DeepSeek AI改写文案，同时优化标题和生成话题标签（单次API调用节省算力）"""
+            """使用DeepSeek AI改写文案,同时优化标题和生成话题标签(单次API调用节省算力)"""
             if not original_text or not original_text.strip():
                 return original_text, "", "", _hint_html("warning", "⚠️ 请先输入文本内容")
             
