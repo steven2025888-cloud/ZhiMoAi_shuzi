@@ -56,7 +56,6 @@ DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")  
 INDEXTTS_DIR   = os.path.join(BASE_DIR, "_internal_tts")
 LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
-HISTORY_FILE   = os.path.join(OUTPUT_DIR, "history.json")
 WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -818,18 +817,6 @@ def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=Non
         except Exception:
             pass
 
-    try:
-        entry = {"time": time.strftime("%Y-%m-%d %H:%M"), "video_path": out,
-                 "size_mb": round(os.path.getsize(out)/1048576, 1)}
-        hist = []
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as hf:
-                hist = json.load(hf)
-        hist.insert(0, entry)
-        with open(HISTORY_FILE, 'w', encoding='utf-8') as hf:
-            json.dump(hist[:50], hf, ensure_ascii=False)
-    except Exception:
-        pass
     return out, "✅ 视频合成完成"
 
 
@@ -1569,8 +1556,6 @@ def build_ui():
                                             label="字幕内容",
                                             placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
                                             lines=3)
-                                        sub_rewrite_btn = gr.Button("✨ AI改写文案", variant="secondary", size="sm")
-                                        sub_rewrite_hint = gr.HTML(value="", elem_id="sub-rewrite-hint")
                                 # ── 底部按钮（全宽）──
                                 with gr.Row():
                                     sub_settings_cancel_btn = gr.Button(
@@ -1627,55 +1612,7 @@ def build_ui():
                             douyin_btn = gr.Button("🚀 发布到选中平台", variant="primary", size="lg")
                             douyin_hint = gr.HTML(value="")
                     
-            # ── Tab 2：合成历史 ──────────────────────────────
-            with gr.Tab("📁  合成历史", elem_classes="hist-tab"):
-                with gr.Row(elem_classes="workspace"):
-                    with gr.Column(scale=1, elem_classes="panel"):
-                        gr.HTML('<div class="panel-head"><span class="step-chip">📋</span>历史记录</div>')
-                        with gr.Row():
-                            refresh_hist_btn = gr.Button("🔄  刷新列表", variant="secondary", scale=1, min_width=100)
-                            open_folder_btn  = gr.Button("📂  打开文件夹", variant="secondary", scale=1, min_width=120)
-                            clear_hist_btn   = gr.Button("🗑  清空历史", variant="stop", scale=1, min_width=100)
-                        hist_dropdown = gr.Dropdown(
-                            label="选择记录（点击直接播放）",
-                            choices=[], value=None, interactive=True)
-                        gr.HTML('<div class="divider"></div>')
-                        hist_info = gr.HTML(
-                            value='<div style="font-size:12px;color:#94a3b8;padding:8px 0">尚无记录，完成一次视频合成后自动保存。</div>'
-                        )
-
-                        # ── 清空确认弹窗（默认隐藏）──
-                        with gr.Group(visible=False, elem_id="clear-confirm-overlay") as clear_confirm_group:
-                            gr.HTML("""
-                            <div style="text-align:center;padding-bottom:8px;">
-                              <div style="width:52px;height:52px;border-radius:14px;
-                                background:linear-gradient(135deg,#fbbf24,#f59e0b);
-                                display:flex;align-items:center;justify-content:center;
-                                margin:0 auto 16px;font-size:26px;">🗑</div>
-                              <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:10px;">
-                                清空历史记录
-                              </div>
-                              <div style="font-size:13px;color:#64748b;line-height:1.8;margin-bottom:4px;">
-                                请选择清空方式：
-                              </div>
-                              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-                                padding:12px 14px;text-align:left;font-size:12px;color:#475569;line-height:1.9;">
-                                <b>🗂 仅移除记录</b> — 清空历史列表，磁盘视频文件<b>保留不动</b><br>
-                                <b>🗑 连同文件删除</b> — 清空列表并<b>彻底删除</b>所有已生成视频
-                              </div>
-                            </div>
-                            """)
-                            with gr.Row():
-                                cancel_clear_btn    = gr.Button("取消", variant="secondary", scale=1)
-                                clear_records_btn   = gr.Button("🗂 仅移除记录", variant="secondary", scale=1)
-                                clear_all_files_btn = gr.Button("🗑 连同文件一起删除", variant="stop", scale=1)
-
-                    with gr.Column(scale=2, elem_classes="panel"):
-                        gr.HTML('<div class="panel-head"><span class="step-chip">▶</span>视频预览</div>')
-                        hist_video = gr.Video(label="", height=420, interactive=False)
-
-
-            # ── Tab 3：数字人管理 ────────────────────────────
+            # ── Tab 2：数字人管理 ────────────────────────
             with gr.Tab("🎭  数字人"):
                 with gr.Row(elem_classes="workspace"):
 
@@ -2039,30 +1976,7 @@ def build_ui():
                 f'</div>'
             )
 
-        def _hist_choices():
-            if not os.path.exists(HISTORY_FILE): return []
-            try:
-                with open(HISTORY_FILE, 'r', encoding='utf-8') as hf:
-                    h = json.load(hf)
-                return [
-                    (f'{"✅" if os.path.exists(i["video_path"]) else "❌"}  '
-                     f'{i["time"]}  {os.path.basename(i["video_path"])}  ({i["size_mb"]}MB)',
-                     i["video_path"])
-                    for i in h
-                ]
-            except Exception:
-                return []
-
-        def _hist_info_html():
-            choices = _hist_choices()
-            if not choices:
-                return '<div style="font-size:12px;color:#94a3b8;padding:8px 0">尚无记录。</div>'
-            total = len(choices)
-            ok    = sum(1 for _,p in choices if os.path.exists(p))
-            return (f'<div style="font-size:12px;color:#475569;padding:8px 0">'
-                    f'共 <b>{total}</b> 条，<span style="color:#16a34a">✅ {ok} 个有效</span></div>')
-
-        # ══════════════════════════════════════════════════════════════
+        # ══════════════════════════════════════════════════════════
         #  工作台记录保存与恢复
         # ══════════════════════════════════════════════════════════════
         def _load_workspace_records():
@@ -2151,8 +2065,14 @@ def build_ui():
                                 sub_font_val, sub_size_val, sub_pos_val,
                                 sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                                 sub_bg_color_val, sub_bg_opacity_val,
-                                sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val):
-            """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建"""
+                                sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
+                                # 发布参数
+                                douyin_title_val="", douyin_topics_val="",
+                                # 可选：用于 AI 改写场景，按原文查找已有记录并替换
+                                search_key=None):
+            """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建
+            当 search_key 不为 None 时，用 search_key 查找已有记录（用于 AI 改写场景：按原文查找并用改写后的文案替换）
+            """
             try:
                 # 强制输出到文件以便调试
                 debug_file = os.path.join(OUTPUT_DIR, "debug_save.txt")
@@ -2245,17 +2165,29 @@ def build_ui():
                     "sub_kw_enable": bool(sub_kw_enable_val) if sub_kw_enable_val is not None else False,
                     "sub_hi_scale": to_json_safe(sub_hi_scale_val) or 1.5,
                     "sub_kw_text": to_json_safe(sub_kw_text_val),
+                    # 发布参数
+                    "douyin_title": to_json_safe(douyin_title_val),
+                    "douyin_topics": to_json_safe(douyin_topics_val),
                 }
                 
                 # 读取现有记录
                 records = _load_workspace_records()
                 
                 # 查找是否有相同文本的记录（只比较文本内容）
+                # 如果提供了 search_key，用 search_key 查找（AI改写场景：按原文查找）
+                match_text = (search_key or "").strip() if search_key is not None else text
                 existing_idx = -1
                 for i, rec in enumerate(records):
-                    if rec.get("input_text", "").strip() == text:
+                    if rec.get("input_text", "").strip() == match_text:
                         existing_idx = i
                         break
+                
+                # 如果 input_text 为空且没有找到匹配记录，尝试更新最近一条记录
+                # （用户在未输入文案的情况下编辑标题/话题，应更新最新记录而非新建）
+                if existing_idx < 0 and not text and records:
+                    # 检查最近一条记录的 input_text 是否也为空
+                    if not records[0].get("input_text", "").strip():
+                        existing_idx = 0
                 
                 if existing_idx >= 0:
                     # 更新现有记录
@@ -2281,13 +2213,13 @@ def build_ui():
             """恢复选中的工作台记录"""
             try:
                 if not record_idx_str:
-                    return [gr.update()] * 23 + [_hint_html("warning", "无效的记录索引")]
+                    return [gr.update()] * 25 + [_hint_html("warning", "无效的记录索引")]
                 
                 record_idx = int(record_idx_str)
                 records = _load_workspace_records()
                 
                 if record_idx < 0 or record_idx >= len(records):
-                    return [gr.update()] * 23 + [_hint_html("error", "记录不存在")]
+                    return [gr.update()] * 25 + [_hint_html("error", "记录不存在")]
                 
                 rec = records[record_idx]
                 
@@ -2387,6 +2319,9 @@ def build_ui():
                     gr.update(value=rec.get("sub_kw_enable", False)),     # sub_kw_enable
                     gr.update(value=rec.get("sub_hi_scale", 1.5)),        # sub_hi_scale
                     gr.update(value=rec.get("sub_kw_text", "")),          # sub_kw_text
+                    # 发布参数
+                    gr.update(value=rec.get("douyin_title", "")),           # douyin_title
+                    gr.update(value=rec.get("douyin_topics", "")),          # douyin_topics
                     _hint_html("ok", f"已恢复记录：{rec.get('record_name', rec.get('time', '未知'))}")
                 ]
                 
@@ -2395,7 +2330,7 @@ def build_ui():
                 
                 return result
             except Exception as e:
-                return [gr.update()] * 23 + [_hint_html("error", f"恢复失败: {str(e)}")]
+                return [gr.update()] * 25 + [_hint_html("error", f"恢复失败: {str(e)}")]
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, spd, tp, tk, temp, nb, rp, mmt,
@@ -2472,6 +2407,7 @@ def build_ui():
                         sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                         sub_bg_color_val, sub_bg_opacity_val,
                         sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
+                        douyin_title_val, douyin_topics_val,
                         progress=gr.Progress()):
             """TTS合成并自动保存工作台状态"""
             # 先执行TTS
@@ -2493,7 +2429,8 @@ def build_ui():
                 sub_font_val, sub_size_val, sub_pos_val,
                 sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                 sub_bg_color_val, sub_bg_opacity_val,
-                sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val
+                sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
+                douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val
             )
             
             # 返回所有需要更新的组件
@@ -2519,7 +2456,8 @@ def build_ui():
                 sub_font, sub_size, sub_pos,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
-                sub_kw_enable, sub_hi_scale, sub_kw_text
+                sub_kw_enable, sub_hi_scale, sub_kw_text,
+                douyin_title, douyin_topics
             ],
             outputs=[output_audio, audio_for_ls, sub_text,
                     workspace_record_hint, workspace_record_dropdown])
@@ -2836,6 +2774,7 @@ def build_ui():
                              # 保存需要的其他参数
                              inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                              avatar_sel, out_aud,
+                             douyin_title_val, douyin_topics_val,
                              progress=gr.Progress()):
             """生成字幕并自动保存工作台状态"""
             # 先生成字幕
@@ -2860,7 +2799,8 @@ def build_ui():
                 sub_fnt, sub_sz, sub_ps,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op,
-                sub_kw_en, sub_hi_sc, sub_kw_txt
+                sub_kw_en, sub_hi_sc, sub_kw_txt,
+                douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val
             )
             
             # 返回字幕视频，需要设置 visible=True 和 show_download_button=True
@@ -2884,7 +2824,8 @@ def build_ui():
                 sub_title_outline_color, sub_title_margin_top,
                 # 保存需要的参数
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
-                avatar_select, output_audio
+                avatar_select, output_audio,
+                douyin_title, douyin_topics
             ],
             outputs=[sub_video, sub_hint,
                     workspace_record_hint, workspace_record_dropdown]
@@ -2968,7 +2909,7 @@ def build_ui():
             prompt = f"""请完成以下三个任务：
 
 任务一：将以下文案改写得更加生动、吸引人，保持原意但提升表达效果。
-要求：保持原文的核心信息和长度，使用更生动的词汇和表达方式，让文案更有感染力和吸引力。
+要求：必须保留原文的所有段落和完整内容，不要删减、合并或缩短，保持和原文相近的字数和段落数。使用更生动的词汇和表达方式，让文案更有感染力和吸引力。
 
 任务二：根据文案内容，生成一个吸引人的短视频标题（不超过30字，吸引眼球、引发好奇）。
 
@@ -2994,14 +2935,27 @@ def build_ui():
                 new_title = ""
                 new_topics = ""
                 
+                # 解析多行文案：文案可能跨越多行，直到遇到"标题："或"话题："
+                in_text_block = False
+                text_lines = []
                 for line in lines:
-                    line = line.strip()
-                    if line.startswith("文案：") or line.startswith("文案:"):
-                        new_text = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    elif line.startswith("标题：") or line.startswith("标题:"):
-                        new_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    elif line.startswith("话题：") or line.startswith("话题:"):
-                        new_topics = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    stripped = line.strip()
+                    if stripped.startswith("文案：") or stripped.startswith("文案:"):
+                        first_line = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        if first_line:
+                            text_lines.append(first_line)
+                        in_text_block = True
+                    elif stripped.startswith("标题：") or stripped.startswith("标题:"):
+                        in_text_block = False
+                        new_title = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif stripped.startswith("话题：") or stripped.startswith("话题:"):
+                        in_text_block = False
+                        new_topics = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif in_text_block and stripped:
+                        text_lines.append(stripped)
+                
+                if text_lines:
+                    new_text = "\n".join(text_lines)
                 
                 # 如果没解析到文案（可能AI没严格按格式），用整个结果作为改写文案
                 if new_text == original_text and not any(
@@ -3064,125 +3018,327 @@ def build_ui():
                 return current_title, current_topics, _hint_html("error", "❌ AI优化失败，未返回内容")
         
         # 绑定AI改写按钮（一次API调用同时改写文案+生成标题+生成标签）
+        def _rewrite_and_save(original_text,
+                              # 保存需要的参数
+                              prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                              avatar_sel, aud_for_ls, out_aud, out_vid,
+                              sub_vid,
+                              sub_fnt, sub_sz, sub_ps,
+                              sub_col, sub_hi, sub_out, sub_out_sz,
+                              sub_bg_col, sub_bg_op,
+                              sub_kw_en, sub_hi_sc, sub_kw_txt):
+            """改写文案并同步返回给字幕，同时保存工作台记录"""
+            try:
+                new_text, title, topics, hint = _rewrite_text_with_deepseek(original_text)
+            except Exception as e:
+                new_text = original_text
+                title, topics = "", ""
+                hint = _hint_html("error", f"AI改写异常: {e}")
+            
+            # 保存工作台状态（使用改写后的文案）
+            # search_key=original_text → 按原文查找已有记录并替换，避免重复创建
+            try:
+                save_hint, dropdown_update = _auto_save_workspace(
+                    new_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                    avatar_sel, aud_for_ls, out_aud, out_vid,
+                    new_text, sub_vid,
+                    sub_fnt, sub_sz, sub_ps,
+                    sub_col, sub_hi, sub_out, sub_out_sz,
+                    sub_bg_col, sub_bg_op,
+                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                    douyin_title_val=title, douyin_topics_val=topics,
+                    search_key=original_text
+                )
+            except Exception as e:
+                print(f"[AI改写] 保存工作台失败: {e}")
+                traceback.print_exc()
+                save_hint = _hint_html("error", f"保存工作台失败: {e}")
+                dropdown_update = gr.update()
+            
+            return new_text, title, topics, hint, new_text, save_hint, dropdown_update
         rewrite_btn.click(
-            _rewrite_text_with_deepseek,
-            inputs=[input_text],
-            outputs=[input_text, douyin_title, douyin_topics, tts_hint])
+            _rewrite_and_save,
+            inputs=[input_text,
+                    # 保存需要的参数
+                    prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                    avatar_select, audio_for_ls, output_audio, output_video,
+                    sub_video,
+                    sub_font, sub_size, sub_pos,
+                    sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                    sub_bg_color, sub_bg_opacity,
+                    sub_kw_enable, sub_hi_scale, sub_kw_text],
+            outputs=[input_text, douyin_title, douyin_topics, tts_hint, sub_text,
+                    workspace_record_hint, workspace_record_dropdown])
         
-        # 字幕弹窗内AI改写按钮
-        sub_rewrite_btn.click(
-            _rewrite_text_with_deepseek,
-            inputs=[sub_text_modal],
-            outputs=[sub_text_modal, douyin_title, douyin_topics, sub_rewrite_hint])
         
         # 清空提示
         input_text.change(lambda: "", outputs=[tts_hint])
         
-        # 绑定AI优化按钮
+        # 绑定AI优化按钮（优化后同时保存工作台）
+        def _optimize_and_save(current_title, current_topics, video_text,
+                               # 保存需要的参数
+                               prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                               avatar_sel, aud_for_ls, out_aud, out_vid,
+                               sub_txt, sub_vid,
+                               sub_fnt, sub_sz, sub_ps,
+                               sub_col, sub_hi, sub_out, sub_out_sz,
+                               sub_bg_col, sub_bg_op,
+                               sub_kw_en, sub_hi_sc, sub_kw_txt):
+            new_title, new_topics, hint = _optimize_title_with_deepseek(current_title, current_topics, video_text)
+            try:
+                save_hint, dropdown_update = _auto_save_workspace(
+                    video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                    avatar_sel, aud_for_ls, out_aud, out_vid,
+                    sub_txt, sub_vid,
+                    sub_fnt, sub_sz, sub_ps,
+                    sub_col, sub_hi, sub_out, sub_out_sz,
+                    sub_bg_col, sub_bg_op,
+                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                    douyin_title_val=new_title, douyin_topics_val=new_topics
+                )
+            except Exception as e:
+                print(f"[AI优化] 保存工作台失败: {e}")
+                save_hint = _hint_html("error", f"保存工作台失败: {e}")
+                dropdown_update = gr.update()
+            return new_title, new_topics, hint, save_hint, dropdown_update
         optimize_btn.click(
-            _optimize_title_with_deepseek,
-            inputs=[douyin_title, douyin_topics, input_text],
-            outputs=[douyin_title, douyin_topics, douyin_hint])
+            _optimize_and_save,
+            inputs=[douyin_title, douyin_topics, input_text,
+                    # 保存需要的参数
+                    prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                    avatar_select, audio_for_ls, output_audio, output_video,
+                    sub_text, sub_video,
+                    sub_font, sub_size, sub_pos,
+                    sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                    sub_bg_color, sub_bg_opacity,
+                    sub_kw_enable, sub_hi_scale, sub_kw_text],
+            outputs=[douyin_title, douyin_topics, douyin_hint,
+                    workspace_record_hint, workspace_record_dropdown])
+        
+        # 手动编辑视频标题/话题时自动保存工作台
+        def _on_title_topics_change(title_val, topics_val,
+                                    inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                                    avatar_sel, aud_for_ls, out_aud, out_vid,
+                                    sub_txt, sub_vid,
+                                    sub_fnt, sub_sz, sub_ps,
+                                    sub_col, sub_hi, sub_out, sub_out_sz,
+                                    sub_bg_col, sub_bg_op,
+                                    sub_kw_en, sub_hi_sc, sub_kw_txt):
+            try:
+                # 只有标题或话题非空时才保存（避免清空时触发无用保存）
+                if not (title_val or "").strip() and not (topics_val or "").strip():
+                    return gr.update(), gr.update()
+                return _auto_save_workspace(
+                    inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                    avatar_sel, aud_for_ls, out_aud, out_vid,
+                    sub_txt, sub_vid,
+                    sub_fnt, sub_sz, sub_ps,
+                    sub_col, sub_hi, sub_out, sub_out_sz,
+                    sub_bg_col, sub_bg_op,
+                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                    douyin_title_val=title_val, douyin_topics_val=topics_val
+                )
+            except Exception as e:
+                print(f"[标题话题自动保存] 失败: {e}")
+                traceback.print_exc()
+                return gr.update(), gr.update()
+        _title_topics_save_inputs = [
+            douyin_title, douyin_topics,
+            input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+            avatar_select, audio_for_ls, output_audio, output_video,
+            sub_text, sub_video,
+            sub_font, sub_size, sub_pos,
+            sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+            sub_bg_color, sub_bg_opacity,
+            sub_kw_enable, sub_hi_scale, sub_kw_text
+        ]
+        _title_topics_save_outputs = [workspace_record_hint, workspace_record_dropdown]
+        douyin_title.change(_on_title_topics_change,
+            inputs=_title_topics_save_inputs, outputs=_title_topics_save_outputs)
+        douyin_topics.change(_on_title_topics_change,
+            inputs=_title_topics_save_inputs, outputs=_title_topics_save_outputs)
         
         # 抖音发布
-        def _do_douyin_publish(sub_video, output_video, title_text, topics_text, progress=gr.Progress()):
-            """发布视频到抖音 - 优先使用字幕视频，如果没有则使用最终合成视频"""
+        def _publish_overlay_html(step_name, step_detail="", is_done=False, is_error=False):
+            """生成发布进度居中浮层 HTML"""
+            if is_done:
+                return ""  # 完成后清空浮层，由最终结果替代
+            if is_error:
+                return ""  # 错误时清空浮层
+            return (
+                f'<div style="background:linear-gradient(135deg,#1e293b,#0f172a);'
+                f'border:2px solid #6366f1;border-radius:16px;'
+                f'padding:28px 24px;margin:8px 0;'
+                f'box-shadow:0 8px 32px rgba(99,102,241,.25);'
+                f'text-align:center;">'
+                # 旋转动画
+                f'<div style="width:48px;height:48px;border:4px solid rgba(99,102,241,.2);'
+                f'border-top-color:#6366f1;border-radius:50%;'
+                f'animation:zdai-publish-spin .8s linear infinite;'
+                f'margin:0 auto 16px;"></div>'
+                # 当前步骤
+                f'<div style="font-size:16px;font-weight:800;color:#e2e8f0;'
+                f'font-family:Microsoft YaHei,sans-serif;margin-bottom:6px;">'
+                f'{step_name}</div>'
+                # 步骤详情
+                f'<div style="font-size:13px;color:#94a3b8;'
+                f'font-family:Microsoft YaHei,sans-serif;margin-bottom:16px;">'
+                f'{step_detail}</div>'
+                # 请勿操作警告
+                f'<div style="display:inline-flex;align-items:center;gap:8px;'
+                f'background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);'
+                f'border-radius:8px;padding:8px 16px;">'
+                f'<span style="font-size:16px;">⚠️</span>'
+                f'<span style="font-size:12px;color:#fbbf24;font-weight:600;'
+                f'font-family:Microsoft YaHei,sans-serif;">'
+                f'发布进行中，请勿操作页面</span>'
+                f'</div>'
+                f'<style>@keyframes zdai-publish-spin{{to{{transform:rotate(360deg)}}}}</style>'
+                f'</div>'
+            )
+
+        def _do_platform_publish(sub_video, output_video, title_text, topics_text, platforms, progress=gr.Progress()):
+            """发布视频到选中的平台 - 优先使用字幕视频（生成器，实时显示进度）"""
+            # ── 前置校验 ──
+            if not platforms:
+                yield _hint_html("warning", "⚠️ 请至少选择一个发布平台")
+                return
+
+            missing_deps = []
             try:
-                # 检查依赖是否安装
-                missing_deps = []
-                try:
-                    import selenium
-                except ImportError:
-                    missing_deps.append("selenium")
-                
-                try:
-                    import requests
-                except ImportError:
-                    missing_deps.append("requests")
-                
-                if missing_deps:
-                    deps_str = "、".join(missing_deps)
-                    return _hint_html("error", 
-                            f"❌ 缺少依赖：{deps_str}<br><br>"
-                            "请运行以下命令安装：<br>"
-                            "1. 双击运行「安装抖音发布依赖.bat」<br>"
-                            "或<br>"
-                            f"2. 手动运行：pip install {' '.join(missing_deps)}")
-                
-                # 导入抖音发布模块
-                import lib_douyin_publish as douyin_pub
-                
-                # 优先使用字幕视频，如果没有则使用最终合成视频
-                video_to_use = None
-                video_type = ""
-                
-                # 解析字幕视频路径
-                if sub_video:
-                    if isinstance(sub_video, dict):
-                        sub_video_path = (sub_video.get("video") or {}).get("path") or sub_video.get("path") or sub_video.get("value") or ""
-                    else:
-                        sub_video_path = str(sub_video) if sub_video else ""
-                    
-                    if sub_video_path and os.path.exists(sub_video_path):
-                        video_to_use = sub_video_path
-                        video_type = "字幕视频"
-                
-                # 如果没有字幕视频，使用最终合成视频
-                if not video_to_use and output_video:
-                    if isinstance(output_video, dict):
-                        output_video_path = (output_video.get("video") or {}).get("path") or output_video.get("path") or output_video.get("value") or ""
-                    else:
-                        output_video_path = str(output_video) if output_video else ""
-                    
-                    if output_video_path and os.path.exists(output_video_path):
-                        video_to_use = output_video_path
-                        video_type = "合成视频"
-                
-                if not video_to_use:
-                    return _hint_html("warning", "⚠️ 请先生成视频（可以是最终合成视频或字幕视频）")
-                
-                # 解析话题
-                topics = []
-                if topics_text:
-                    topics = [t.strip() for t in re.split(r'[,，、\s]+', topics_text.strip()) if t.strip()]
-                
-                # 创建发布器
-                publisher = douyin_pub.DouyinPublisher()
-                
-                # 进度回调
-                def progress_cb(pct, msg):
-                    progress(pct / 100, desc=msg)
-                
-                # 发布
-                success, message = publisher.publish(
-                    video_to_use,
-                    title_text or "精彩视频",
-                    topics,
-                    progress_callback=progress_cb
-                )
-                
+                import selenium
+            except ImportError:
+                missing_deps.append("selenium")
+            try:
+                import requests
+            except ImportError:
+                missing_deps.append("requests")
+            if missing_deps:
+                deps_str = "、".join(missing_deps)
+                yield _hint_html("error",
+                        f"❌ 缺少依赖：{deps_str}<br><br>"
+                        "请运行以下命令安装：<br>"
+                        "1. 双击运行「安装抖音发布依赖.bat」<br>"
+                        "或<br>"
+                        f"2. 手动运行：pip install {' '.join(missing_deps)}")
+                return
+
+            # 解析视频路径
+            video_to_use = None
+            video_type = ""
+            if sub_video:
+                if isinstance(sub_video, dict):
+                    sub_video_path = (sub_video.get("video") or {}).get("path") or sub_video.get("path") or sub_video.get("value") or ""
+                else:
+                    sub_video_path = str(sub_video) if sub_video else ""
+                if sub_video_path and os.path.exists(sub_video_path):
+                    video_to_use = sub_video_path
+                    video_type = "字幕视频"
+            if not video_to_use and output_video:
+                if isinstance(output_video, dict):
+                    output_video_path = (output_video.get("video") or {}).get("path") or output_video.get("path") or output_video.get("value") or ""
+                else:
+                    output_video_path = str(output_video) if output_video else ""
+                if output_video_path and os.path.exists(output_video_path):
+                    video_to_use = output_video_path
+                    video_type = "合成视频"
+            if not video_to_use:
+                yield _hint_html("warning", "⚠️ 请先生成视频（可以是最终合成视频或字幕视频）")
+                return
+
+            topics = []
+            if topics_text:
+                topics = [t.strip() for t in re.split(r'[,，、\s]+', topics_text.strip()) if t.strip()]
+
+            # ── 逐平台发布 ──
+            all_results = []
+            for platform_name in platforms:
+                yield _publish_overlay_html(f"准备发布到{platform_name}...", "正在初始化发布流程")
+
+                q = _queue.Queue()
+                result = {"success": False, "message": ""}
+
+                def _run_publish(pname=platform_name):
+                    try:
+                        if pname == "抖音":
+                            import lib_douyin_publish as douyin_pub
+                            publisher = douyin_pub.DouyinPublisher()
+                        elif pname == "视频号":
+                            import lib_shipinhao_publish as sph_pub
+                            publisher = sph_pub.ShipinhaoPublisher()
+                        else:
+                            result["success"] = False
+                            result["message"] = f"{pname} 平台暂未支持"
+                            q.put(("done",))
+                            return
+
+                        def step_cb(name, detail):
+                            q.put(("step", name, detail))
+
+                        def progress_cb(pct, msg):
+                            q.put(("progress", pct, msg))
+
+                        s, m = publisher.publish(
+                            video_to_use,
+                            title_text or "精彩视频",
+                            topics,
+                            progress_callback=progress_cb,
+                            step_callback=step_cb
+                        )
+                        result["success"] = s
+                        result["message"] = m
+                    except Exception as e:
+                        result["success"] = False
+                        result["message"] = str(e)
+                    finally:
+                        q.put(("done",))
+
+                threading.Thread(target=_run_publish, daemon=True).start()
+
+                current_step = f"准备发布到{platform_name}..."
+                current_detail = "正在初始化发布流程"
+                while True:
+                    try:
+                        item = q.get(timeout=0.5)
+                        if item[0] == "done":
+                            break
+                        elif item[0] == "step":
+                            current_step = f"[{platform_name}] {item[1]}"
+                            current_detail = item[2]
+                            yield _publish_overlay_html(current_step, current_detail)
+                        elif item[0] == "progress":
+                            pct, msg = item[1], item[2]
+                            progress(pct / 100, desc=f"[{platform_name}] {msg}")
+                            yield _publish_overlay_html(f"[{platform_name}] {msg}", f"进度 {pct}%")
+                    except _queue.Empty:
+                        yield _publish_overlay_html(current_step, current_detail)
+
+                all_results.append((platform_name, result["success"], result["message"]))
+
+            # ── 汇总结果 ──
+            result_parts = []
+            has_error = False
+            for pname, success, msg in all_results:
                 if success:
-                    return _hint_html("ok", f"✅ {message}<br>发布的视频：{video_type}")
+                    result_parts.append(f"✅ {pname}：{msg}")
                 else:
-                    return _hint_html("error", f"❌ {message}")
-                    
-            except Exception as e:
-                traceback.print_exc()
-                error_msg = str(e)
-                
-                # 友好的错误提示
-                if "chromedriver" in error_msg.lower() or "chrome" in error_msg.lower():
-                    return _hint_html("error", 
-                            "❌ Chrome 浏览器驱动问题<br><br>"
-                            "请尝试：<br>"
-                            "1. 双击运行「安装抖音发布依赖.bat」<br>"
-                            "2. 确保已安装 Chrome 浏览器<br>"
-                            "3. 重启程序")
-                else:
-                    return _hint_html("error", f"❌ 发布失败: {error_msg[:300]}")
-        
-        douyin_btn.click(_do_douyin_publish,
-            inputs=[sub_video, output_video, douyin_title, douyin_topics],
+                    has_error = True
+                    if "chromedriver" in msg.lower() or "chrome" in msg.lower():
+                        result_parts.append(f"❌ {pname}：Chrome 浏览器驱动问题")
+                    else:
+                        result_parts.append(f"❌ {pname}：{msg[:150]}")
+
+            result_html = "<br>".join(result_parts)
+            if video_type:
+                result_html += f"<br><br>发布的视频：{video_type}"
+
+            if has_error:
+                yield _hint_html("warning", result_html)
+            else:
+                yield _hint_html("ok", result_html)
+
+        douyin_btn.click(_do_platform_publish,
+            inputs=[sub_video, output_video, douyin_title, douyin_topics, publish_platforms],
             outputs=[douyin_hint])
 
         # 视频合成
@@ -3268,6 +3424,7 @@ def build_ui():
                           sub_col, sub_hi, sub_out, sub_out_sz,
                           sub_bg_col, sub_bg_op,
                           sub_kw_en, sub_hi_sc, sub_kw_txt,
+                          douyin_title_val, douyin_topics_val,
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
             # 先合成视频（ls_wrap 是生成器，需要逐步 yield）
@@ -3324,7 +3481,8 @@ def build_ui():
                     sub_fnt, sub_sz, sub_ps,
                     sub_col, sub_hi, sub_out, sub_out_sz,
                     sub_bg_col, sub_bg_op,
-                    sub_kw_en, sub_hi_sc, sub_kw_txt
+                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                    douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val
                 )
                 
                 # 最后一次 yield，包含保存结果
@@ -3342,114 +3500,13 @@ def build_ui():
                 sub_font, sub_size, sub_pos,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
-                sub_kw_enable, sub_hi_scale, sub_kw_text
+                sub_kw_enable, sub_hi_scale, sub_kw_text,
+                douyin_title, douyin_topics
             ],
             outputs=[output_video, ls_detail_html,
                     workspace_record_hint, workspace_record_dropdown])
 
-        # 历史操作
-        def _do_refresh():
-            return gr.update(choices=_hist_choices(), value=None), _hist_info_html()
-        refresh_hist_btn.click(_do_refresh, outputs=[hist_dropdown, hist_info])
-
-        open_folder_btn.click(
-            lambda: (
-                subprocess.Popen(["explorer", OUTPUT_DIR],
-                    creationflags=subprocess.CREATE_NO_WINDOW)
-                if sys.platform == "win32" else None
-            ),
-            outputs=[])
-
-        # 清空历史：显示确认弹窗
-        clear_hist_btn.click(
-            lambda: gr.update(visible=True),
-            outputs=[clear_confirm_group])
-
-        # 取消
-        cancel_clear_btn.click(
-            lambda: gr.update(visible=False),
-            outputs=[clear_confirm_group])
-
-        # 仅移除记录条目（不删文件）
-        def _clear_records_only():
-            try:
-                if os.path.exists(HISTORY_FILE):
-                    os.remove(HISTORY_FILE)
-            except Exception:
-                pass
-            return (gr.update(visible=False),
-                    gr.update(choices=[], value=None),
-                    '<div style="font-size:12px;color:#94a3b8;padding:8px 0">记录已清空，视频文件仍保留在磁盘上。</div>')
-
-        clear_records_btn.click(
-            _clear_records_only,
-            outputs=[clear_confirm_group, hist_dropdown, hist_info])
-
-        # 彻底删除（连同文件）
-        def _clear_all_with_files():
-            deleted, failed = 0, 0
-            deleted_paths = set()
-
-            # 第一步：从 history.json 中读取所有记录路径
-            try:
-                if os.path.exists(HISTORY_FILE):
-                    with open(HISTORY_FILE, 'r', encoding='utf-8') as hf:
-                        hist = json.load(hf)
-                    for item in hist:
-                        vp = item.get("video_path", "")
-                        if not vp:
-                            continue
-                        # 兼容正反斜杠
-                        vp = os.path.normpath(vp)
-                        deleted_paths.add(vp)
-                        try:
-                            if os.path.exists(vp):
-                                os.remove(vp)
-                                deleted += 1
-                        except Exception:
-                            failed += 1
-                    os.remove(HISTORY_FILE)
-            except Exception:
-                pass
-
-            # 第二步：扫描 OUTPUT_DIR，删除所有 lipsync_ / converted_ / tts_ 文件
-            try:
-                prefixes = ("lipsync_", "converted_", "in_v_", "in_a_")
-                for fname in os.listdir(OUTPUT_DIR):
-                    if any(fname.startswith(p) for p in prefixes):
-                        fpath = os.path.normpath(os.path.join(OUTPUT_DIR, fname))
-                        if fpath not in deleted_paths:
-                            try:
-                                os.remove(fpath)
-                                deleted += 1
-                                deleted_paths.add(fpath)
-                            except Exception:
-                                failed += 1
-            except Exception:
-                pass
-
-            info_msg = (f'<div style="font-size:12px;color:#94a3b8;padding:8px 0">'
-                        f'已彻底清空，共删除 <b>{deleted}</b> 个文件'
-                        f'{f"，{failed} 个删除失败（可能已被占用）" if failed else ""}。</div>')
-            return (gr.update(visible=False),
-                    gr.update(choices=[], value=None),
-                    info_msg,
-                    None)
-
-        clear_all_files_btn.click(
-            _clear_all_with_files,
-            outputs=[clear_confirm_group, hist_dropdown, hist_info, hist_video])
-
-        def _load_hist(p):
-            if not p: return gr.update(value=None), ""
-            if not os.path.exists(p):
-                return gr.update(value=None), '<div style="font-size:12px;color:#dc2626">❌ 文件不存在</div>'
-            sz   = round(os.path.getsize(p)/1048576, 1)
-            info = f'<div style="font-size:12px;color:#16a34a;padding:4px 0">✅ {os.path.basename(p)} ({sz} MB)</div>'
-            return gr.update(value=p, show_download_button=True), info
-        hist_dropdown.change(_load_hist, inputs=[hist_dropdown], outputs=[hist_video, hist_info])
-
-        # ══════════════════════════════════════════════════════════════
+        # ══════════════════════════════════════════════════════════
         #  工作台记录事件绑定
         # ══════════════════════════════════════════════════════════════
         
@@ -3475,6 +3532,7 @@ def build_ui():
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
+                douyin_title, douyin_topics,
                 workspace_record_hint
             ])
         
@@ -3521,7 +3579,7 @@ def build_ui():
             outputs=[input_text, extract_hint]
         )
 
-        # 页面加载时自动刷新工作台记录列表和历史记录，并初始化WebSocket连接
+        # 页面加载时自动刷新工作台记录列表，并初始化WebSocket连接
         def _init_load():
             # 后台初始化文案提取器的WebSocket连接
             try:
@@ -3531,13 +3589,9 @@ def build_ui():
             except Exception as e:
                 safe_print(f"[TextExtractor] 初始化失败: {e}")
             
-            return (
-                gr.update(choices=_get_workspace_record_choices()),
-                gr.update(choices=_hist_choices(), value=None),
-                _hist_info_html()
-            )
+            return gr.update(choices=_get_workspace_record_choices())
         
-        app.load(_init_load, outputs=[workspace_record_dropdown, hist_dropdown, hist_info])
+        app.load(_init_load, outputs=[workspace_record_dropdown])
 
         return app
 
@@ -3564,6 +3618,7 @@ def _license_gate():
     # 2) 需要登录 — 弹出 tkinter 对话框
     try:
         import tkinter as tk
+        from PIL import Image, ImageTk, ImageDraw
     except ImportError:
         safe_print("[LICENSE] tkinter not available, skip")
         return True
@@ -3845,33 +3900,147 @@ def _license_gate():
     action_box.pack(fill="x", padx=20, pady=(0, 18))
     tk.Frame(action_box, bg="#e5e7eb", height=1).pack(fill="x", pady=(0, 12))
 
-    # 自定义主按钮（固定高度 + Label 居中，彻底绕开系统按钮字体裁切）
+    # 自定义主按钮（使用PIL创建圆角渐变按钮）
     btn_state = {"enabled": False}
-
-    btn_shell = tk.Frame(action_box, bg="#a5b4fc", height=80, cursor="arrow", relief="flat", bd=0)
-    btn_shell.pack(fill="x")
-    btn_shell.pack_propagate(False)
-
-    btn_inner = tk.Frame(btn_shell, bg="#a5b4fc", relief="flat", bd=0)
-    btn_inner.pack(fill="both", expand=True)
-
-    btn_label = tk.Label(
-        btn_inner,
-        text="登录启动",
-        font=("Microsoft YaHei", 16, "bold"),
-        bg="#a5b4fc",
-        fg="#eef2ff",
-        bd=0
+    
+    # 按钮尺寸
+    btn_width = 460
+    btn_height = 56
+    corner_radius = 10
+    
+    def create_rounded_gradient_button(width, height, radius, color1, color2, shadow=False):
+        """创建圆角渐变按钮图片"""
+        img_height = height + 6 if shadow else height
+        img = Image.new('RGBA', (width, img_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        if shadow:
+            # 绘制阴影
+            shadow_img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+            shadow_draw = ImageDraw.Draw(shadow_img)
+            shadow_draw.rounded_rectangle([0, 0, width, height], radius=radius, fill=(0, 0, 0, 30))
+            img.paste(shadow_img, (2, 5), shadow_img)
+        
+        # 绘制渐变背景
+        gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        gradient_draw = ImageDraw.Draw(gradient)
+        for y in range(height):
+            ratio = y / height
+            r = int(color1[0] + (color2[0] - color1[0]) * ratio)
+            g = int(color1[1] + (color2[1] - color1[1]) * ratio)
+            b = int(color1[2] + (color2[2] - color1[2]) * ratio)
+            gradient_draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
+        
+        # 创建圆角蒙版
+        mask = Image.new('L', (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rounded_rectangle([0, 0, width, height], radius=radius, fill=255)
+        
+        # 应用圆角蒙版
+        gradient.putalpha(mask)
+        img.paste(gradient, (0, 0), gradient)
+        
+        return img
+    
+    # 禁用状态颜色 (淡紫色)
+    disabled_color1 = (165, 180, 252)  # #a5b4fc
+    disabled_color2 = (196, 181, 253)  # #c4b5fd
+    
+    # 启用状态颜色 (紫色渐变)
+    normal_color1 = (99, 102, 241)   # #6366f1
+    normal_color2 = (124, 58, 237)   # #7c3aed
+    
+    # 悬停状态颜色 (更亮的紫色)
+    hover_color1 = (129, 140, 248)   # #818cf8
+    hover_color2 = (139, 92, 246)    # #8b5cf6
+    
+    # 点击状态颜色 (更深的紫色)
+    active_color1 = (79, 70, 229)    # #4f46e5
+    active_color2 = (109, 40, 217)   # #6d28d9
+    
+    # 创建按钮图片
+    btn_disabled_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, disabled_color1, disabled_color2, shadow=False)
+    btn_normal_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, normal_color1, normal_color2, shadow=True)
+    btn_hover_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, hover_color1, hover_color2, shadow=True)
+    btn_active_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, active_color1, active_color2, shadow=False)
+    
+    # 转换为Tkinter图片
+    btn_disabled_tk = ImageTk.PhotoImage(btn_disabled_img)
+    btn_normal_tk = ImageTk.PhotoImage(btn_normal_img)
+    btn_hover_tk = ImageTk.PhotoImage(btn_hover_img)
+    btn_active_tk = ImageTk.PhotoImage(btn_active_img)
+    
+    # 按钮容器
+    btn_container = tk.Frame(action_box, bg="#ffffff", height=70)
+    btn_container.pack(fill="x")
+    btn_container.pack_propagate(False)
+    
+    btn_canvas = tk.Canvas(btn_container, bg="#ffffff", highlightthickness=0, height=70, width=btn_width)
+    btn_canvas.pack()
+    
+    # 保持引用防止被垃圾回收
+    btn_canvas.btn_images = [btn_disabled_tk, btn_normal_tk, btn_hover_tk, btn_active_tk]
+    
+    # 在Canvas上绘制按钮背景
+    btn_x, btn_y = 0, 5
+    btn_bg_id = btn_canvas.create_image(btn_x, btn_y, image=btn_disabled_tk, anchor="nw", tags="btn_bg")
+    
+    # 绘制按钮文字
+    text_id = btn_canvas.create_text(
+        btn_x + btn_width // 2,
+        btn_y + btn_height // 2,
+        text="🚀  登录启动",
+        font=("Microsoft YaHei", 15, "bold"),
+        fill="#eef2ff",
+        tags="btn_text"
     )
-    btn_label.place(relx=0.5, rely=0.5, anchor="center")
-
+    
+    # 创建透明的点击区域
+    click_area = btn_canvas.create_rectangle(
+        btn_x, btn_y, btn_x + btn_width, btn_y + btn_height,
+        fill="", outline="", tags="click_area"
+    )
+    
+    is_pressed = [False]
+    
     def _btn_click(_e=None):
         if btn_state["enabled"]:
             _do_login()
 
-    for _w in (btn_shell, btn_inner, btn_label):
-        _w.bind("<Button-1>", _btn_click)
-
+    # 绑定点击事件
+    def _on_btn_enter(e):
+        if btn_state["enabled"] and not is_pressed[0]:
+            btn_canvas.itemconfig(btn_bg_id, image=btn_hover_tk)
+        btn_canvas.config(cursor="hand2" if btn_state["enabled"] else "arrow")
+    
+    def _on_btn_leave(e):
+        if btn_state["enabled"]:
+            btn_canvas.itemconfig(btn_bg_id, image=btn_normal_tk)
+        else:
+            btn_canvas.itemconfig(btn_bg_id, image=btn_disabled_tk)
+        btn_canvas.config(cursor="")
+        is_pressed[0] = False
+    
+    def _on_btn_press(e):
+        if btn_state["enabled"]:
+            is_pressed[0] = True
+            btn_canvas.itemconfig(btn_bg_id, image=btn_active_tk)
+            btn_canvas.move(text_id, 0, 2)
+    
+    def _on_btn_release(e):
+        if btn_state["enabled"]:
+            is_pressed[0] = False
+            btn_canvas.itemconfig(btn_bg_id, image=btn_hover_tk)
+            btn_canvas.coords(text_id, btn_x + btn_width // 2, btn_y + btn_height // 2)
+            _btn_click()
+    
+    # 绑定事件到点击区域和文字
+    for tag in ("click_area", "btn_text"):
+        btn_canvas.tag_bind(tag, "<Enter>", _on_btn_enter)
+        btn_canvas.tag_bind(tag, "<Leave>", _on_btn_leave)
+        btn_canvas.tag_bind(tag, "<ButtonPress-1>", _on_btn_press)
+        btn_canvas.tag_bind(tag, "<ButtonRelease-1>", _on_btn_release)
+    
     subline = tk.Label(
         action_box,
         text="激活即表示您理解：软件提供技术能力，不对平台规则变化、审核结果、封禁、经营损失等负责。",
@@ -3883,17 +4052,14 @@ def _license_gate():
     )
     subline.pack(anchor="w", pady=(8, 0))
 
-    def _paint_btn(bg: str, fg: str, cursor: str):
-        btn_shell.configure(bg=bg, cursor=cursor)
-        btn_inner.configure(bg=bg, cursor=cursor)
-        btn_label.configure(bg=bg, fg=fg, cursor=cursor)
-
     def _set_btn_enabled(enabled: bool):
         btn_state["enabled"] = bool(enabled)
         if enabled:
-            _paint_btn("#4f46e5", "#ffffff", "hand2")
+            btn_canvas.itemconfig(btn_bg_id, image=btn_normal_tk)
+            btn_canvas.itemconfig(text_id, fill="#ffffff")
         else:
-            _paint_btn("#a5b4fc", "#eef2ff", "arrow")
+            btn_canvas.itemconfig(btn_bg_id, image=btn_disabled_tk)
+            btn_canvas.itemconfig(text_id, fill="#eef2ff")
 
     def _sync_login_btn(*_):
         try:
@@ -3926,24 +4092,6 @@ def _license_gate():
             root.after(600, root.destroy)
         else:
             msg_label.config(text=str(msg), fg="#ef4444")
-
-    def _btn_hover_in(e=None):
-        try:
-            if btn_state["enabled"]:
-                _paint_btn("#4338ca", "#ffffff", "hand2")
-        except Exception:
-            pass
-
-    def _btn_hover_out(e=None):
-        try:
-            if btn_state["enabled"]:
-                _paint_btn("#4f46e5", "#ffffff", "hand2")
-        except Exception:
-            pass
-
-    for _w in (btn_shell, btn_inner, btn_label):
-        _w.bind("<Enter>", _btn_hover_in)
-        _w.bind("<Leave>", _btn_hover_out)
 
     def _entry_focus_in(e):
         try:

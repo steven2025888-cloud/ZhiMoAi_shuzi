@@ -306,7 +306,7 @@ def show_update_dialog(update_info, is_force):
         
         tk.Label(
             warning_frame,
-            text="⚠ 此版本为强制更新，必须更新后才能继续使用",
+            text="[警告] 此版本为强制更新，必须更新后才能继续使用",
             font=("Microsoft YaHei", 9, "bold"),
             bg="#fef2f2",
             fg="#dc2626"
@@ -745,7 +745,7 @@ class AppApi:
                     style = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                     style = (style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
                     u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-                    print(f"[API] ✓ 窗口已隐藏至托盘 (hwnd={hwnd})")
+                    print(f"[API] [OK] 窗口已隐藏至托盘 (hwnd={hwnd})")
                 except Exception as e:
                     print(f"[API] ctypes 失败: {e}")
                     # 兜底：尝试 pywebview 原生
@@ -754,14 +754,14 @@ class AppApi:
                         try: w.minimize()
                         except Exception: pass
             else:
-                print("[API] ✗ 未找到主窗口 HWND，等待后重试...")
+                print("[API] [ERROR] 未找到主窗口 HWND，等待后重试...")
                 time.sleep(1.5)
                 hwnd2 = _get_main_hwnd()
                 if hwnd2:
                     try:
                         import ctypes
                         ctypes.windll.user32.ShowWindow(hwnd2, 0)
-                        print(f"[API] ✓ 重试成功 (hwnd={hwnd2})")
+                        print(f"[API] [OK] 重试成功 (hwnd={hwnd2})")
                     except Exception as e:
                         print(f"[API] 重试失败: {e}")
 
@@ -868,7 +868,7 @@ def _start_tray_icon():
                         u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
                         u32.ShowWindow(hwnd, 9)          # SW_RESTORE = 9
                         u32.SetForegroundWindow(hwnd)
-                        print(f"[TRAY] ✓ 窗口已恢复 (hwnd={hwnd})")
+                        print(f"[TRAY] [OK] 窗口已恢复 (hwnd={hwnd})")
                     except Exception as e:
                         print(f"[TRAY] ctypes 恢复失败: {e}")
                         w = _webview_win[0]
@@ -974,7 +974,7 @@ def show_error_window(title: str, msg: str):
     W, H = 560, 340
     sw, sh = err.winfo_screenwidth(), err.winfo_screenheight()
     err.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
-    tk.Label(err, text=f"⚠  {title}", font=("Microsoft YaHei", 12, "bold"),
+    tk.Label(err, text=f"[警告]  {title}", font=("Microsoft YaHei", 12, "bold"),
              bg="#ffffff", fg="#dc2626").pack(anchor="w", padx=16, pady=(16,4))
     box = scrolledtext.ScrolledText(err, font=("Consolas", 9), bg="#fef2f2", fg="#7f1d1d",
                                     wrap="word", bd=0, relief="flat", padx=8, pady=8)
@@ -1313,6 +1313,7 @@ if __name__ == "__main__":
         try:
             import tkinter as tk
             from tkinter import ttk
+            from PIL import Image, ImageTk, ImageDraw
             
             machine_code = lic.get_machine_code()
             result = {"passed": False}
@@ -1441,7 +1442,7 @@ if __name__ == "__main__":
 
             # 卡密输入区域（玻璃态卡片）
             card_y = 300
-            card_h = 380  # 增加高度以容纳按钮
+            card_h = 420  # 增加高度以容纳所有内容
             
             # 卡片多层阴影效果
             canvas.create_rectangle(44, card_y+6, w-44, card_y+card_h+6,
@@ -1465,8 +1466,8 @@ if __name__ == "__main__":
             label_frame = tk.Frame(card_frame, bg="#ffffff")
             label_frame.pack(fill="x", pady=(0, 16))
             
-            tk.Label(label_frame, text="🔐", 
-                     font=("Segoe UI Emoji", 16),
+            tk.Label(label_frame, text="[KEY]", 
+                     font=("Microsoft YaHei", 12, "bold"),
                      bg="#ffffff", fg="#6366f1").pack(side="left", padx=(0, 8))
             tk.Label(label_frame, text="卡密激活", 
                      font=("Microsoft YaHei", 13, "bold"),
@@ -1518,7 +1519,7 @@ if __name__ == "__main__":
                 expire_time = info.get("expire_time", "")
                 status_bg = "#ecfdf5"
                 status_border = "#6ee7b7"
-                status_icon = "✓"
+                status_icon = "[OK]"
                 status_icon_color = "#10b981"
                 if expire_time:
                     status_text = f"已保存的卡密 · 有效期至 {expire_time}"
@@ -1528,7 +1529,7 @@ if __name__ == "__main__":
             elif status == "expired":
                 status_bg = "#fef3c7"
                 status_border = "#fcd34d"
-                status_icon = "⚠"
+                status_icon = "[!]"
                 status_icon_color = "#f59e0b"
                 status_text = "卡密已过期，请重新输入"
                 status_text_color = "#92400e"
@@ -1649,77 +1650,142 @@ if __name__ == "__main__":
             link_label.bind("<Enter>", on_link_enter)
             link_label.bind("<Leave>", on_link_leave)
 
-            # 登录按钮 - 优化UI：圆角、阴影、更好的视觉效果
-            btn_container = tk.Frame(card_frame, bg="#ffffff", height=60)
+            # 登录按钮 - 使用PIL创建圆角渐变按钮
+            btn_width = 400
+            btn_height = 54
+            corner_radius = 10
+            
+            def create_rounded_gradient_button(width, height, radius, color1, color2, shadow=False):
+                """创建圆角渐变按钮图片"""
+                img_height = height + 6 if shadow else height
+                img = Image.new('RGBA', (width, img_height), (0, 0, 0, 0))
+                
+                if shadow:
+                    shadow_img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+                    shadow_draw = ImageDraw.Draw(shadow_img)
+                    shadow_draw.rounded_rectangle([0, 0, width, height], radius=radius, fill=(0, 0, 0, 30))
+                    img.paste(shadow_img, (2, 5), shadow_img)
+                
+                gradient = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+                gradient_draw = ImageDraw.Draw(gradient)
+                for y in range(height):
+                    ratio = y / height
+                    r = int(color1[0] + (color2[0] - color1[0]) * ratio)
+                    g = int(color1[1] + (color2[1] - color1[1]) * ratio)
+                    b = int(color1[2] + (color2[2] - color1[2]) * ratio)
+                    gradient_draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
+                
+                mask = Image.new('L', (width, height), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                mask_draw.rounded_rectangle([0, 0, width, height], radius=radius, fill=255)
+                gradient.putalpha(mask)
+                img.paste(gradient, (0, 0), gradient)
+                return img
+            
+            normal_color1 = (99, 102, 241)
+            normal_color2 = (124, 58, 237)
+            hover_color1 = (129, 140, 248)
+            hover_color2 = (139, 92, 246)
+            active_color1 = (79, 70, 229)
+            active_color2 = (109, 40, 217)
+            disabled_color1 = (148, 163, 184)
+            disabled_color2 = (148, 163, 184)
+            
+            btn_normal_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, normal_color1, normal_color2, shadow=True)
+            btn_hover_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, hover_color1, hover_color2, shadow=True)
+            btn_active_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, active_color1, active_color2, shadow=False)
+            btn_disabled_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, disabled_color1, disabled_color2, shadow=False)
+            
+            btn_normal_tk = ImageTk.PhotoImage(btn_normal_img)
+            btn_hover_tk = ImageTk.PhotoImage(btn_hover_img)
+            btn_active_tk = ImageTk.PhotoImage(btn_active_img)
+            btn_disabled_tk = ImageTk.PhotoImage(btn_disabled_img)
+            
+            btn_container = tk.Frame(card_frame, bg="#ffffff", height=70)
             btn_container.pack(fill="x", pady=(10, 0))
             btn_container.pack_propagate(False)
             
-            # 创建按钮 - 字体12px，圆角效果
-            login_btn = tk.Button(
-                btn_container,
-                text="🚀 登录启动",
-                font=("Microsoft YaHei", 12, "bold"),
-                bg="#6366f1",
-                fg="#ffffff",
-                cursor="hand2",
-                relief="flat",
-                bd=0,
-                padx=24,
-                pady=22
-            )
-            login_btn.pack(fill="both", expand=True)
+            btn_canvas = tk.Canvas(btn_container, bg="#ffffff", highlightthickness=0, height=70, width=btn_width)
+            btn_canvas.pack()
+            btn_canvas.btn_images = [btn_normal_tk, btn_hover_tk, btn_active_tk, btn_disabled_tk]
             
-            # 按钮状态
-            btn_enabled = {"value": True}
+            btn_x, btn_y = 0, 5
+            btn_bg_id = btn_canvas.create_image(btn_x, btn_y, image=btn_normal_tk, anchor="nw", tags="btn_bg")
+            text_id = btn_canvas.create_text(
+                btn_x + btn_width // 2,
+                btn_y + btn_height // 2,
+                text="登录启动",
+                font=("Microsoft YaHei", 14, "bold"),
+                fill="#ffffff",
+                tags="btn_text"
+            )
+            click_area = btn_canvas.create_rectangle(
+                btn_x, btn_y, btn_x + btn_width, btn_y + btn_height,
+                fill="", outline="", tags="click_area"
+            )
+            
+            btn_state = {"enabled": True, "pressed": False}
             
             def _do_login():
-                # 检查协议是否勾选
                 if not agreement_var.get():
-                    msg_label.config(text="⚠ 请先阅读并同意《平台与AI功能使用协议》", fg="#f59e0b")
+                    msg_label.config(text="[警告] 请先阅读并同意《平台与AI功能使用协议》", fg="#f59e0b")
                     return
-                    
                 key = key_entry.get().strip()
                 if not key:
-                    msg_label.config(text="⚠ 请输入卡密", fg="#f59e0b")
+                    msg_label.config(text="[警告] 请输入卡密", fg="#f59e0b")
+                    return
+                if not btn_state["enabled"]:
                     return
                 
-                if not btn_enabled["value"]:
-                    return
-                
-                # 禁用按钮和输入框
-                btn_enabled["value"] = False
-                login_btn.config(state="disabled", text="⏳ 验证中...", bg="#94a3b8", cursor="arrow")
+                btn_state["enabled"] = False
+                btn_canvas.itemconfig(btn_bg_id, image=btn_disabled_tk)
+                btn_canvas.itemconfig(text_id, text="验证中...")
                 key_entry.config(state="disabled")
-                msg_label.config(text="🔄 正在验证卡密，请稍候...", fg="#6366f1")
+                msg_label.config(text="正在验证卡密，请稍候...", fg="#6366f1")
                 root.update()
                 
-                # 验证卡密
                 ok, msg = lic.validate_online(key)
                 if ok:
-                    msg_label.config(text="✓ 激活成功！正在启动程序...", fg="#22c55e")
-                    login_btn.config(text="✓ 启动中...", bg="#10b981")
+                    msg_label.config(text="[OK] 激活成功！正在启动程序...", fg="#22c55e")
+                    btn_canvas.itemconfig(text_id, text="[OK] 启动中...")
                     result["passed"] = True
                     root.after(1200, root.destroy)
                 else:
-                    msg_label.config(text=f"✗ {msg}", fg="#ef4444")
-                    btn_enabled["value"] = True
-                    login_btn.config(state="normal", text="🚀 登录启动", bg="#6366f1", cursor="hand2")
+                    msg_label.config(text=f"[ERROR] {msg}", fg="#ef4444")
+                    btn_state["enabled"] = True
+                    btn_canvas.itemconfig(btn_bg_id, image=btn_normal_tk)
+                    btn_canvas.itemconfig(text_id, text="登录启动")
                     key_entry.config(state="normal")
             
-            # 绑定点击事件
-            login_btn.config(command=_do_login)
+            def _on_btn_enter(e):
+                if btn_state["enabled"] and not btn_state["pressed"]:
+                    btn_canvas.itemconfig(btn_bg_id, image=btn_hover_tk)
+                btn_canvas.config(cursor="hand2" if btn_state["enabled"] else "arrow")
             
-            # 鼠标悬停效果
-            def on_enter(event):
-                if btn_enabled["value"]:
-                    login_btn.config(bg="#4f46e5")
+            def _on_btn_leave(e):
+                if btn_state["enabled"]:
+                    btn_canvas.itemconfig(btn_bg_id, image=btn_normal_tk)
+                btn_canvas.config(cursor="")
+                btn_state["pressed"] = False
             
-            def on_leave(event):
-                if btn_enabled["value"]:
-                    login_btn.config(bg="#6366f1")
+            def _on_btn_press(e):
+                if btn_state["enabled"]:
+                    btn_state["pressed"] = True
+                    btn_canvas.itemconfig(btn_bg_id, image=btn_active_tk)
+                    btn_canvas.move(text_id, 0, 2)
             
-            login_btn.bind("<Enter>", on_enter)
-            login_btn.bind("<Leave>", on_leave)
+            def _on_btn_release(e):
+                if btn_state["enabled"]:
+                    btn_state["pressed"] = False
+                    btn_canvas.itemconfig(btn_bg_id, image=btn_hover_tk)
+                    btn_canvas.coords(text_id, btn_x + btn_width // 2, btn_y + btn_height // 2)
+                    _do_login()
+            
+            for tag in ("click_area", "btn_text"):
+                btn_canvas.tag_bind(tag, "<Enter>", _on_btn_enter)
+                btn_canvas.tag_bind(tag, "<Leave>", _on_btn_leave)
+                btn_canvas.tag_bind(tag, "<ButtonPress-1>", _on_btn_press)
+                btn_canvas.tag_bind(tag, "<ButtonRelease-1>", _on_btn_release)
 
             key_entry.bind("<Return>", lambda e: _do_login())
             key_entry.focus_set()
@@ -1760,7 +1826,7 @@ if __name__ == "__main__":
         cleanup()
         sys.exit(1)
 
-    print("[LICENSE] 激活验证通过 ✓")
+    print("[LICENSE] 激活验证通过 [OK]")
 
     try:
         root, status_var = build_splash()
@@ -1854,9 +1920,9 @@ if __name__ == "__main__":
                     hb = u32.LoadImageW(None, ico, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
                     u32.SendMessageW(hwnd, WM_SETICON, 0, hs)   # ICON_SMALL
                     u32.SendMessageW(hwnd, WM_SETICON, 1, hb)   # ICON_BIG
-                    print(f"[ICON] ✓ 图标设置成功")
+                    print(f"[ICON] [OK] 图标设置成功")
                 except Exception as e:
-                    print(f"[ICON] ✗ {e}")
+                    print(f"[ICON] [ERROR] {e}")
 
         threading.Thread(target=_set_icon_later, daemon=True).start()
 

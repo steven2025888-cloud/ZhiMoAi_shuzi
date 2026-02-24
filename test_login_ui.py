@@ -124,74 +124,148 @@ def create_login_window():
                    variable=agreement_var, font=("Microsoft YaHei", 9),
                    bg="#ffffff", fg="#64748b").pack(anchor="w", pady=(0, 15))
 
-    # 登录按钮 - 渐变效果
-    btn_container = tk.Frame(card_frame, bg="#ffffff", height=70)
+    # 登录按钮 - 使用PIL创建渐变圆角按钮
+    btn_container = tk.Frame(card_frame, bg="#ffffff", height=75)
     btn_container.pack(fill="x", pady=(15, 0))
     btn_container.pack_propagate(False)
     
-    btn_canvas = tk.Canvas(btn_container, bg="#ffffff", highlightthickness=0, height=70)
+    btn_canvas = tk.Canvas(btn_container, bg="#ffffff", highlightthickness=0, height=75)
     btn_canvas.pack(fill="both", expand=True)
     
-    # 阴影
-    btn_canvas.create_rectangle(8, 8, 412, 62, fill="#cbd5e1", outline="", tags="shadow")
-    
-    # 渐变背景
     btn_width = 400
     btn_height = 54
     btn_x = 10
-    btn_y = 5
+    btn_y = 8
+    corner_radius = 12
     
-    for i in range(btn_width):
-        ratio = i / btn_width
-        r = int(99 + (139 - 99) * ratio)
-        g = int(102 + (92 - 102) * ratio)
-        b = int(241 + (246 - 241) * ratio)
-        color = f'#{r:02x}{g:02x}{b:02x}'
-        btn_canvas.create_line(btn_x + i, btn_y, btn_x + i, btn_y + btn_height,
-                              fill=color, tags="btn_bg")
+    def create_rounded_gradient_button(width, height, radius, color1, color2, shadow=False):
+        """创建圆角渐变按钮图片"""
+        # 创建带透明通道的图片
+        img = Image.new('RGBA', (width, height + 6 if shadow else height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # 绘制阴影
+        if shadow:
+            shadow_offset = 4
+            shadow_color = (0, 0, 0, 40)
+            draw.rounded_rectangle(
+                [2, shadow_offset, width - 2, height + shadow_offset],
+                radius=radius,
+                fill=shadow_color
+            )
+        
+        # 绘制渐变背景
+        y_start = 0
+        for y in range(height):
+            ratio = y / height
+            r = int(color1[0] + (color2[0] - color1[0]) * ratio)
+            g = int(color1[1] + (color2[1] - color1[1]) * ratio)
+            b = int(color1[2] + (color2[2] - color1[2]) * ratio)
+            draw.line([(0, y_start + y), (width, y_start + y)], fill=(r, g, b, 255))
+        
+        # 创建圆角蒙版
+        mask = Image.new('L', (width, height), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rounded_rectangle([0, 0, width, height], radius=radius, fill=255)
+        
+        # 应用蒙版
+        gradient_part = img.crop((0, 0, width, height))
+        result = Image.new('RGBA', (width, height + 6 if shadow else height), (0, 0, 0, 0))
+        
+        if shadow:
+            # 先绘制阴影
+            shadow_img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+            shadow_draw = ImageDraw.Draw(shadow_img)
+            shadow_draw.rounded_rectangle([0, 0, width, height], radius=radius, fill=(0, 0, 0, 35))
+            result.paste(shadow_img, (2, 6), shadow_img)
+        
+        # 应用圆角蒙版到渐变
+        gradient_part.putalpha(mask)
+        result.paste(gradient_part, (0, 0), gradient_part)
+        
+        return result
     
-    # 按钮
-    login_btn = tk.Button(
-        btn_canvas,
+    # 普通状态颜色 (紫色渐变)
+    normal_color1 = (99, 102, 241)   # #6366f1
+    normal_color2 = (124, 58, 237)   # #7c3aed
+    
+    # 悬停状态颜色 (更亮的紫色)
+    hover_color1 = (129, 140, 248)   # #818cf8
+    hover_color2 = (139, 92, 246)    # #8b5cf6
+    
+    # 点击状态颜色 (更深的紫色)
+    active_color1 = (79, 70, 229)    # #4f46e5
+    active_color2 = (109, 40, 217)   # #6d28d9
+    
+    # 创建按钮图片
+    btn_normal_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, normal_color1, normal_color2, shadow=True)
+    btn_hover_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, hover_color1, hover_color2, shadow=True)
+    btn_active_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, active_color1, active_color2, shadow=False)
+    
+    # 转换为Tkinter图片
+    btn_normal_tk = ImageTk.PhotoImage(btn_normal_img)
+    btn_hover_tk = ImageTk.PhotoImage(btn_hover_img)
+    btn_active_tk = ImageTk.PhotoImage(btn_active_img)
+    
+    # 保持引用防止被垃圾回收
+    btn_canvas.btn_images = [btn_normal_tk, btn_hover_tk, btn_active_tk]
+    
+    # 在Canvas上绘制按钮背景
+    btn_bg_id = btn_canvas.create_image(btn_x, btn_y, image=btn_normal_tk, anchor="nw", tags="btn_bg")
+    
+    # 绘制按钮文字
+    text_id = btn_canvas.create_text(
+        btn_x + btn_width // 2,
+        btn_y + btn_height // 2,
         text="🚀  登录启动",
         font=("Microsoft YaHei", 14, "bold"),
-        bg="#6366f1",
-        fg="#ffffff",
-        cursor="hand2",
-        relief="flat",
-        bd=0,
-        command=lambda: print("登录按钮被点击")
+        fill="#ffffff",
+        tags="btn_text"
     )
-    btn_canvas.create_window(btn_width//2 + btn_x, btn_height//2 + btn_y,
-                            window=login_btn, width=btn_width, height=btn_height)
     
-    # 悬停效果
+    # 创建透明的点击区域
+    click_area = btn_canvas.create_rectangle(
+        btn_x, btn_y, btn_x + btn_width, btn_y + btn_height,
+        fill="", outline="", tags="click_area"
+    )
+    
+    # 悬停和点击效果
+    is_pressed = [False]
+    
     def on_enter(e):
-        btn_canvas.delete("btn_bg")
-        for i in range(btn_width):
-            ratio = i / btn_width
-            r = int(79 + (107 - 79) * ratio)
-            g = int(70 + (70 - 70) * ratio)
-            b = int(229 + (230 - 229) * ratio)
-            color = f'#{r:02x}{g:02x}{b:02x}'
-            btn_canvas.create_line(btn_x + i, btn_y, btn_x + i, btn_y + btn_height,
-                                  fill=color, tags="btn_bg")
-        btn_canvas.tag_lower("btn_bg")
+        if not is_pressed[0]:
+            btn_canvas.itemconfig(btn_bg_id, image=btn_hover_tk)
+        btn_canvas.config(cursor="hand2")
     
     def on_leave(e):
-        btn_canvas.delete("btn_bg")
-        for i in range(btn_width):
-            ratio = i / btn_width
-            r = int(99 + (139 - 99) * ratio)
-            g = int(102 + (92 - 102) * ratio)
-            b = int(241 + (246 - 241) * ratio)
-            color = f'#{r:02x}{g:02x}{b:02x}'
-            btn_canvas.create_line(btn_x + i, btn_y, btn_x + i, btn_y + btn_height,
-                                  fill=color, tags="btn_bg")
-        btn_canvas.tag_lower("btn_bg")
+        btn_canvas.itemconfig(btn_bg_id, image=btn_normal_tk)
+        btn_canvas.config(cursor="")
+        is_pressed[0] = False
     
-    login_btn.bind("<Enter>", on_enter)
-    login_btn.bind("<Leave>", on_leave)
+    def on_press(e):
+        is_pressed[0] = True
+        btn_canvas.itemconfig(btn_bg_id, image=btn_active_tk)
+        # 文字下移模拟按压效果
+        btn_canvas.move(text_id, 0, 2)
+    
+    def on_release(e):
+        is_pressed[0] = False
+        btn_canvas.itemconfig(btn_bg_id, image=btn_hover_tk)
+        # 文字恢复位置
+        btn_canvas.coords(text_id, btn_x + btn_width // 2, btn_y + btn_height // 2)
+        print("登录按钮被点击")
+    
+    # 绑定事件到点击区域
+    btn_canvas.tag_bind("click_area", "<Enter>", on_enter)
+    btn_canvas.tag_bind("click_area", "<Leave>", on_leave)
+    btn_canvas.tag_bind("click_area", "<ButtonPress-1>", on_press)
+    btn_canvas.tag_bind("click_area", "<ButtonRelease-1>", on_release)
+    
+    # 同时绑定到文字，确保点击文字也能触发
+    btn_canvas.tag_bind("btn_text", "<Enter>", on_enter)
+    btn_canvas.tag_bind("btn_text", "<Leave>", on_leave)
+    btn_canvas.tag_bind("btn_text", "<ButtonPress-1>", on_press)
+    btn_canvas.tag_bind("btn_text", "<ButtonRelease-1>", on_release)
 
     root.mainloop()
 
