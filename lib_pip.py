@@ -114,6 +114,49 @@ def _split_into_sentences(words):
     return sentences
 
 
+def find_keyword_time_in_words(words, keyword):
+    """
+    在 word-level 时间戳中精确定位关键词的所有出现位置。
+    不依赖分句，直接在拼接后的完整文本中查找关键词，
+    并映射回对应 word 的时间戳。
+
+    words:   [{"word": str, "start": float, "end": float}, ...]
+    keyword: 要查找的关键词字符串
+
+    返回: [(kw_start_time, kw_end_time), ...]  按时间顺序
+    """
+    if not words or not keyword:
+        return []
+
+    # 拼接所有 word 文本，记录每个字符对应的 word 索引
+    full_text = ""
+    char_to_word = []
+    for wi, w in enumerate(words):
+        wt = w.get("word", "").strip()
+        for c in wt:
+            char_to_word.append(wi)
+            full_text += c
+
+    if not full_text:
+        return []
+
+    results = []
+    search_from = 0
+    while True:
+        pos = full_text.find(keyword, search_from)
+        if pos == -1:
+            break
+        end_pos = pos + len(keyword) - 1
+        if end_pos < len(char_to_word):
+            start_wi = char_to_word[pos]
+            end_wi   = char_to_word[end_pos]
+            results.append((float(words[start_wi]["start"]),
+                            float(words[end_wi]["end"])))
+        search_from = pos + 1
+
+    return results
+
+
 # ═══════════════════════════════════════════════
 # 关键词匹配
 # ═══════════════════════════════════════════════
@@ -538,50 +581,62 @@ def apply_pip(main_video, audio_path, text, progress_cb=None):
         _safe_print("[PIP] 无法获取时间戳")
         return None
 
-    # 3. 分句
-    _prog(0.30, "分析文案句子...")
-    sentences = _split_into_sentences(words)
-    if not sentences:
-        _safe_print("[PIP] 分句为空")
-        return None
-
-    _safe_print(f"[PIP] 共 {len(sentences)} 个句子:")
-    for si, (stxt, sstart, send) in enumerate(sentences):
-        _safe_print(f"  句{si}: [{sstart:.1f}-{send:.1f}s] {stxt[:40]}")
-
-    # 4. 关键词匹配
-    _prog(0.40, "匹配关键词...")
+    # 3. 精确定位关键词在音频时间轴中的位置（词级别，不依赖分句）
+    _prog(0.30, "定位关键词时间戳...")
     _safe_print(f"[PIP] 待匹配关键词: {list(keywords_map.keys())}")
-    matches = match_keywords_to_sentences(sentences, keywords_map)
 
-    # 如果 Whisper 转录文本中未匹配到关键词，回退到用原始文案生成时间戳再匹配
+    full_words_text = "".join(w.get("word", "").strip() for w in words)
+    _safe_print(f"[PIP] 音频识别文本: {full_words_text[:80]}...")
+
+    matches = []  # [(kw, folder, kw_end_time, context_text), ...]
+    for kw, folder in keywords_map.items():
+        positions = find_keyword_time_in_words(words, kw)
+        for kw_start_t, kw_end_t in positions:
+            pos = full_words_text.find(kw)
+            ctx_s = max(0, pos - 5) if pos >= 0 else 0
+            ctx_e = min(len(full_words_text), pos + len(kw) + 10) if pos >= 0 else 0
+            context = full_words_text[ctx_s:ctx_e] if ctx_e > ctx_s else kw
+            matches.append((kw, folder, kw_end_t, context))
+            _safe_print(f"[PIP] 定位到关键词「{kw}」: {kw_start_t:.1f}s-{kw_end_t:.1f}s 上下文: ...{context}...")
+
+    # 如果 Whisper 转录文本中未定位到关键词，回退到用原始文案
     if not matches and whisper_ok:
-        _safe_print("[PIP] Whisper 转录文本中未匹配关键词，尝试用原始文案重新匹配...")
+        _safe_print("[PIP] Whisper 文本中未定位到关键词，尝试用原始文案定位...")
         try:
             dur = _get_duration(main_video)
             fallback_words = _text_to_words(text, dur)
             if fallback_words:
-                sentences = _split_into_sentences(fallback_words)
-                _safe_print(f"[PIP] 原始文案分句 {len(sentences)} 个:")
-                for si, (stxt, sstart, send) in enumerate(sentences):
-                    _safe_print(f"  句{si}: [{sstart:.1f}-{send:.1f}s] {stxt[:40]}")
-                if sentences:
-                    matches = match_keywords_to_sentences(sentences, keywords_map)
-                    if matches:
-                        _safe_print(f"[PIP] 原始文案回退匹配成功，匹配到 {len(matches)} 个片段")
-                    else:
-                        _safe_print("[PIP] 原始文案回退匹配也失败")
+                for kw, folder in keywords_map.items():
+                    positions = find_keyword_time_in_words(fallback_words, kw)
+                    for kw_start_t, kw_end_t in positions:
+                        matches.append((kw, folder, kw_end_t, kw))
+                        _safe_print(f"[PIP] 原始文案定位到「{kw}」: {kw_start_t:.1f}s-{kw_end_t:.1f}s")
+                if matches:
+                    _safe_print(f"[PIP] 原始文案回退定位成功")
+                else:
+                    _safe_print("[PIP] 原始文案回退定位也失败")
         except Exception as e:
-            _safe_print(f"[PIP] 原始文案回退匹配失败: {e}")
+            _safe_print(f"[PIP] 原始文案回退定位失败: {e}")
             import traceback; traceback.print_exc()
 
     if not matches:
-        _safe_print("[PIP] 没有匹配到任何关键词")
+        _safe_print("[PIP] 没有定位到任何关键词")
         return None
 
-    _safe_print(f"[PIP] 匹配到 {len(matches)} 个画中画片段:")
-    for kw, folder, start, end, txt in matches:
-        _safe_print(f"  关键词「{kw}」 {start:.1f}s-{end:.1f}s ({end-start:.1f}s) 文本: {txt[:30]}...")
+    # 按时间排序，合并过近的匹配（2秒内视为同一位置）
+    matches.sort(key=lambda x: x[2])
+    merged_matches = []
+    for m in matches:
+        if merged_matches and m[2] - merged_matches[-1][2] < 2.0:
+            if len(m[0]) > len(merged_matches[-1][0]):
+                merged_matches[-1] = m
+        else:
+            merged_matches.append(m)
+    matches = merged_matches
+
+    _safe_print(f"[PIP] 最终定位 {len(matches)} 个画中画位置:")
+    for kw, folder, kw_end_t, ctx in matches:
+        _safe_print(f"  关键词「{kw}」→ 画中画从 {kw_end_t:.1f}s 开始")
 
     # 5. 获取主视频分辨率和时长
     target_w, target_h = get_video_resolution(main_video)
@@ -592,8 +647,8 @@ def apply_pip(main_video, audio_path, text, progress_cb=None):
     pip_segments = []  # [(pip_concat_video, start, end), ...]
     ts = int(time.time())
 
-    for idx, (kw, folder, kw_start, kw_end, txt) in enumerate(matches):
-        _safe_print(f"[PIP] 处理片段 {idx+1}: 关键词「{kw}」 句子=[{kw_start:.1f}s-{kw_end:.1f}s] 文本: {txt[:30]}")
+    for idx, (kw, folder, kw_end_t, ctx) in enumerate(matches):
+        _safe_print(f"[PIP] 处理片段 {idx+1}: 关键词「{kw}」 画中画起点={kw_end_t:.1f}s")
 
         # 扫描该关键词文件夹中的视频
         videos = scan_pip_videos(folder)
@@ -606,15 +661,15 @@ def apply_pip(main_video, audio_path, text, progress_cb=None):
         # 计算画中画素材总可用时长
         total_pip_avail = sum(d for _, d in videos)
 
-        # 画中画从关键词句子结束后开始，持续时长为素材视频时长
-        remaining = main_dur - kw_end
+        # 画中画从关键词结束时刻开始，持续时长为素材视频时长
+        remaining = main_dur - kw_end_t
         if remaining < 1.0:
-            _safe_print(f"[PIP] 关键词「{kw}」句子后剩余时间不足 ({remaining:.1f}s)，跳过")
+            _safe_print(f"[PIP] 关键词「{kw}」后剩余时间不足 ({remaining:.1f}s)，跳过")
             continue
 
         target_dur = min(total_pip_avail, remaining)
-        pip_start = kw_end
-        pip_end = kw_end + target_dur
+        pip_start = kw_end_t
+        pip_end = kw_end_t + target_dur
         _safe_print(f"[PIP] 画中画窗口: {pip_start:.1f}s - {pip_end:.1f}s ({target_dur:.1f}s)")
 
         # 选取合适的片段组合
