@@ -3266,6 +3266,15 @@ def build_ui():
                         elif pname == "视频号":
                             import lib_shipinhao_publish as sph_pub
                             publisher = sph_pub.ShipinhaoPublisher()
+                        elif pname == "哔哩哔哩":
+                            import lib_bilibili_publish as bilibili_pub
+                            publisher = bilibili_pub.BilibiliPublisher()
+                        elif pname == "小红书":
+                            import lib_xiaohongshu_publish as xhs_pub
+                            publisher = xhs_pub.XiaohongshuPublisher()
+                        elif pname == "快手":
+                            import lib_kuaishou_publish as ks_pub
+                            publisher = ks_pub.KuaishouPublisher()
                         else:
                             result["success"] = False
                             result["message"] = f"{pname} 平台暂未支持"

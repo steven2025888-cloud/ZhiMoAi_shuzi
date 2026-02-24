@@ -75,6 +75,9 @@ Source: "{#SourceRoot}\lib_voice.pyc";            DestDir: "{app}"; Flags: ignor
 Source: "{#SourceRoot}\lib_subtitle.pyc";         DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\lib_license.pyc";          DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\lib_douyin_publish.pyc";   DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\lib_bilibili_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\lib_shipinhao_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\lib_xiaohongshu_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\lib_meta_store.pyc";       DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\ws_worker.pyc";            DestDir: "{app}"; Flags: ignoreversion
 

@@ -19,6 +19,9 @@ PYTHON_FILES = [
     "lib_subtitle.py",
     "lib_license.py",
     "lib_douyin_publish.py",
+    "lib_bilibili_publish.py",
+    "lib_shipinhao_publish.py",
+    "lib_xiaohongshu_publish.py",
     "lib_meta_store.py",
     "ws_worker.py",
 ]
