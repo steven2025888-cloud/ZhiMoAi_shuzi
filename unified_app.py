@@ -195,12 +195,12 @@ def _build_ls_env():
     env["TORCH_HOME"] = os.path.join(LATENTSYNC_DIR, "checkpoints")  # torch模型缓存
     env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
     env["PATH"]       = ";".join([ls_env, os.path.join(ls_env, "Library","bin"), fb, env.get("PATH","")])
-    # 移除 TTS 的缓存目录（避免指向 TTS 的 hf_cache），但保留离线模式
+    # 移除 TTS 的缓存目录（避免指向 TTS 的 hf_cache）
     for k in ("TRANSFORMERS_CACHE", "HUGGINGFACE_HUB_CACHE"):
         env.pop(k, None)
-    # 模型已本地缓存，设为离线模式避免联网检查（网络被清代理后会卡住）
-    env["HF_HUB_OFFLINE"] = "1"
-    env["TRANSFORMERS_OFFLINE"] = "1"
+    # 移除全局设置的离线模式，允许 LatentSync 从 HuggingFace 下载/验证模型
+    for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        env.pop(k, None)
     return env
 
 
@@ -431,6 +431,13 @@ def _release_tts_gpu():
 def _restore_tts_gpu():
     """确保 TTS 模型已加载到 GPU（如已卸载则从磁盘重新加载）"""
     global tts, _tts_on_gpu
+    
+    # 如果是在线版，不需要恢复TTS模型
+    tts_mode = os.getenv('TTS_MODE', 'local')
+    if tts_mode == 'online':
+        safe_print("[GPU] 在线版模式，跳过 TTS 模型恢复")
+        return
+    
     if tts is not None and _tts_on_gpu:
         return
     # tts 已被卸载，需要从磁盘重新加载
@@ -1458,11 +1465,25 @@ def build_ui():
 
                             # ── 模式A: 文字转语音 ──
                             with gr.Group(visible=True) as tts_mode_group:
+                                # ── TTS 模式切换 ──
+                                tts_mode_switch = gr.Radio(
+                                    label="TTS 模式",
+                                    choices=["💻 本地版", "☁️ 在线版"],
+                                    value="💻 本地版" if os.getenv('TTS_MODE', 'local') == 'local' else "☁️ 在线版",
+                                    elem_classes="voice-style-radio")
+                                gr.HTML(
+                                    '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
+                                    '💻 <b>本地版</b>：使用本机 GPU 处理，需要较高配置<br>'
+                                    '☁️ <b>在线版</b>：使用云端服务器处理，无需高配置显卡</div>'
+                                )
+                                
                                 gr.HTML('<div class="section-label">🎙 音色选择</div>')
                                 with gr.Row():
+                                    # 根据当前TTS模式过滤音色列表
+                                    current_mode = os.getenv('TTS_MODE', 'local')
                                     voice_select = gr.Dropdown(
                                         label="从音色库选择",
-                                        choices=_vc.get_choices() if _LIBS_OK else [],
+                                        choices=_vc.get_choices(current_mode) if _LIBS_OK else [],
                                         value=None, interactive=True, scale=4)
                                     voice_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
                                                                   variant="secondary")
@@ -1812,46 +1833,52 @@ def build_ui():
                 with gr.Row(elem_classes="workspace"):
 
                     # 左列：上传
-                    with gr.Column(scale=1, elem_classes="panel"):
+                    with gr.Column(scale=1):
+                        # 标题在外面，有独立背景
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">＋</div>'
                             '<span class="step-title">添加数字人</span>'
                             '</div>'
                         )
-                        av_upload = gr.File(
-                            label="上传视频（MP4 / AVI / MOV / WMV）",
-                            file_types=["video"], type="filepath")
-                        av_upload_preview = gr.Video(
-                            label="预览", height=150, interactive=False, visible=False)
-                        av_name = gr.Textbox(
-                            label="数字人名称",
-                            placeholder="为此数字人起一个名字...", max_lines=1)
-                        av_save_btn  = gr.Button("💾  保存", variant="primary", size="lg")
-                        av_save_hint = gr.HTML(value="")
-                        gr.HTML(
-                            '<div style="font-size:11px;color:#94a3b8;line-height:2;margin-top:10px;">'
-                            '💡 保存后可在工作台直接选用<br>'
-                            '📁 存储于 <b>avatars/</b> 目录</div>'
-                        )
-                        # 隐藏的删除控件（由列表按钮触发）
-                        av_del_dd   = gr.Textbox(visible=False, value="")
-                        av_del_btn  = gr.Button("删除", visible=False)
-                        av_del_hint = gr.HTML(value="")
+                        # 内容在白色panel里
+                        with gr.Column(elem_classes="panel"):
+                            av_upload = gr.File(
+                                label="上传视频（MP4 / AVI / MOV / WMV）",
+                                file_types=["video"], type="filepath")
+                            av_upload_preview = gr.Video(
+                                label="预览", height=150, interactive=False, visible=False)
+                            av_name = gr.Textbox(
+                                label="数字人名称",
+                                placeholder="为此数字人起一个名字...", max_lines=1)
+                            av_save_btn  = gr.Button("💾  保存", variant="primary", size="lg")
+                            av_save_hint = gr.HTML(value="")
+                            gr.HTML(
+                                '<div style="font-size:11px;color:#94a3b8;line-height:2;margin-top:10px;">'
+                                '💡 保存后可在工作台直接选用<br>'
+                                '📁 存储于 <b>avatars/</b> 目录</div>'
+                            )
+                            # 隐藏的删除控件（由列表按钮触发）
+                            av_del_dd   = gr.Textbox(visible=False, value="")
+                            av_del_btn  = gr.Button("删除", visible=False)
+                            av_del_hint = gr.HTML(value="")
 
                     # 右列：画廊（行内🗑）+ JS桥接隐藏输入 + 预览
-                    with gr.Column(scale=2, elem_classes="panel"):
+                    with gr.Column(scale=2):
+                        # 标题在外面，有独立背景
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">📋</div>'
                             '<span class="step-title">数字人库</span>'
                             '</div>'
                         )
-                        av_gallery = gr.HTML(
-                            value=_av.render_gallery("av-del-input", "av-prev-trigger") if _LIBS_OK else "")
-                        # JS桥接：卡片上的🗑按钮写入此隐藏textbox触发删除
-                        with gr.Row(elem_id="av-del-input-row"):
-                            av_del_js_input = gr.Textbox(
+                        # 内容在白色panel里
+                        with gr.Column(elem_classes="panel"):
+                            av_gallery = gr.HTML(
+                                value=_av.render_gallery("av-del-input", "av-prev-trigger") if _LIBS_OK else "")
+                            # JS桥接：卡片上的🗑按钮写入此隐藏textbox触发删除
+                            with gr.Row(elem_id="av-del-input-row"):
+                                av_del_js_input = gr.Textbox(
                                 elem_id="av-del-input", value="", interactive=True)
                         # JS桥接：卡片点击写入此隐藏textbox触发预览
                         with gr.Row(elem_id="av-prev-trigger-row"):
@@ -1868,65 +1895,71 @@ def build_ui():
                 with gr.Row(elem_classes="workspace"):
 
                     # 左列：上传
-                    with gr.Column(scale=1, elem_classes="panel"):
+                    with gr.Column(scale=1):
+                        # 标题在外面，有独立背景
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);">＋</div>'
                             '<span class="step-title">添加音色</span>'
                             '</div>'
                         )
-                        # ── 版本选择 ──
-                        vc_source = gr.Radio(
-                            label="音色版本",
-                            choices=["💻 本地版（本机处理）", "☁️ 在线版（云端处理）"],
-                            value="💻 本地版（本机处理）",
-                            elem_classes="voice-style-radio")
-                        gr.HTML(
-                            '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
-                            '💻 <b>本地版</b>：使用本机 GPU 处理，需要较高配置<br>'
-                            '☁️ <b>在线版</b>：使用云端服务器处理，无需高配置显卡</div>'
-                        )
-                        vc_upload = gr.Audio(
-                            label="上传参考音频（3-10秒 WAV/MP3）",
-                            sources=["upload"], type="filepath")
-                        vc_name = gr.Textbox(
-                            label="音色名称",
-                            placeholder="为此音色起一个名字...", max_lines=1)
-                        vc_save_btn  = gr.Button("💾  保存", variant="primary", size="lg")
-                        vc_save_hint = gr.HTML(value="")
-                        gr.HTML(
-                            '<div style="font-size:11px;color:#94a3b8;line-height:2;margin-top:10px;">'
-                            '💡 保存后可在工作台直接选用<br>'
-                            '💻 本地版存储于 <b>voices/</b> 目录<br>'
-                            '☁️ 在线版存储在云端服务器</div>'
-                        )
-                        # ── 同步在线音色按钮 ──
-                        vc_sync_btn = gr.Button("🔄 同步在线音色", variant="secondary", size="sm")
-                        vc_del_dd   = gr.Textbox(visible=False, value="")
-                        vc_del_btn  = gr.Button("删除", visible=False)
-                        vc_del_hint = gr.HTML(value="")
+                        # 内容在白色panel里
+                        with gr.Column(elem_classes="panel"):
+                            # ── 版本选择 ──
+                            vc_source = gr.Radio(
+                                label="音色版本",
+                                choices=["💻 本地版（本机处理）", "☁️ 在线版（云端处理）"],
+                                value="💻 本地版（本机处理）",
+                                elem_classes="voice-style-radio")
+                            gr.HTML(
+                                '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
+                                '💻 <b>本地版</b>：使用本机 GPU 处理，需要较高配置<br>'
+                                '☁️ <b>在线版</b>：使用云端服务器处理，无需高配置显卡</div>'
+                            )
+                            vc_upload = gr.Audio(
+                                label="上传参考音频（3-10秒 WAV/MP3）",
+                                sources=["upload"], type="filepath")
+                            vc_name = gr.Textbox(
+                                label="音色名称",
+                                placeholder="为此音色起一个名字...", max_lines=1)
+                            vc_save_btn  = gr.Button("💾  保存", variant="primary", size="lg")
+                            vc_save_hint = gr.HTML(value="")
+                            gr.HTML(
+                                '<div style="font-size:11px;color:#94a3b8;line-height:2;margin-top:10px;">'
+                                '💡 保存后可在工作台直接选用<br>'
+                                '💻 本地版存储于 <b>voices/</b> 目录<br>'
+                                '☁️ 在线版存储在云端服务器</div>'
+                            )
+                            # ── 同步在线音色按钮 ──
+                            vc_sync_btn = gr.Button("🔄 同步在线音色", variant="secondary", size="sm")
+                            vc_del_dd   = gr.Textbox(visible=False, value="")
+                            vc_del_btn  = gr.Button("删除", visible=False)
+                            vc_del_hint = gr.HTML(value="")
 
                     # 右列：画廊（行内🗑）+ JS桥接 + 试听
-                    with gr.Column(scale=2, elem_classes="panel"):
+                    with gr.Column(scale=2):
+                        # 标题在外面，有独立背景
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);">📋</div>'
                             '<span class="step-title">音色库</span>'
                             '</div>'
                         )
-                        vc_gallery = gr.HTML(
-                            value=_vc.render_gallery("vc-del-input", "vc-prev-trigger") if _LIBS_OK else "")
-                        with gr.Row(elem_id="vc-del-input-row"):
-                            vc_del_js_input = gr.Textbox(
-                                elem_id="vc-del-input", value="", interactive=True)
-                        # JS桥接：卡片点击写入此隐藏textbox触发试听
-                        with gr.Row(elem_id="vc-prev-trigger-row"):
-                            vc_prev_js_input = gr.Textbox(
-                                elem_id="vc-prev-trigger", value="", interactive=True)
-                        vc_del_real_hint = gr.HTML(value="")
-                        gr.HTML('<div class="divider"></div>')
-                        gr.HTML('<div class="section-label">🔊 试听（点击上方卡片）</div>')
-                        vc_prev_audio = gr.Audio(label="", interactive=False)
+                        # 内容在白色panel里
+                        with gr.Column(elem_classes="panel"):
+                            vc_gallery = gr.HTML(
+                                value=_vc.render_gallery("vc-del-input", "vc-prev-trigger") if _LIBS_OK else "")
+                            with gr.Row(elem_id="vc-del-input-row"):
+                                vc_del_js_input = gr.Textbox(
+                                    elem_id="vc-del-input", value="", interactive=True)
+                            # JS桥接：卡片点击写入此隐藏textbox触发试听
+                            with gr.Row(elem_id="vc-prev-trigger-row"):
+                                vc_prev_js_input = gr.Textbox(
+                                    elem_id="vc-prev-trigger", value="", interactive=True)
+                            vc_del_real_hint = gr.HTML(value="")
+                            gr.HTML('<div class="divider"></div>')
+                            gr.HTML('<div class="section-label">🔊 试听（点击上方卡片）</div>')
+                            vc_prev_audio = gr.Audio(label="", interactive=False)
 
             # ── Tab 5：批量任务 ──────────────────────────────
             with gr.Tab("⚡  批量任务"):
@@ -2821,6 +2854,78 @@ def build_ui():
         voice_refresh_btn.click(
             lambda: gr.update(choices=_vc.get_choices() if _LIBS_OK else []),
             outputs=[voice_select])
+        
+        # ── TTS 模式切换事件 ──
+        def _on_tts_mode_switch(mode_choice):
+            """切换TTS模式：更新环境变量、音色列表，并在需要时加载模型"""
+            global tts, _tts_on_gpu
+            
+            # 解析模式
+            mode = "local" if "本地版" in mode_choice else "online"
+            
+            # 更新环境变量
+            os.environ['TTS_MODE'] = mode
+            
+            # 保存到.env文件
+            env_path = os.path.join(BASE_DIR, '.env')
+            try:
+                env_lines = []
+                mode_found = False
+                
+                if os.path.exists(env_path):
+                    with open(env_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.startswith('TTS_MODE='):
+                                env_lines.append(f'TTS_MODE={mode}\n')
+                                mode_found = True
+                            else:
+                                env_lines.append(line)
+                
+                if not mode_found:
+                    env_lines.append(f'TTS_MODE={mode}\n')
+                
+                with open(env_path, 'w', encoding='utf-8') as f:
+                    f.writelines(env_lines)
+                
+                safe_print(f"[TTS_MODE] 已切换到: {mode}")
+            except Exception as e:
+                safe_print(f"[TTS_MODE] 保存失败: {e}")
+            
+            # 如果切换到本地版且模型未加载，则加载模型
+            if mode == "local" and tts is None:
+                try:
+                    safe_print("[TTS_MODE] 检测到切换到本地版，开始加载 IndexTTS2 模型...")
+                    model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
+                    if os.path.exists(model_dir):
+                        original_cwd = os.getcwd()
+                        os.chdir(INDEXTTS_DIR)
+                        try:
+                            from indextts.infer_v2 import IndexTTS2
+                            tts = IndexTTS2(model_dir=model_dir,
+                                          cfg_path=os.path.join(model_dir, "config.yaml"), 
+                                          use_fp16=True)
+                            _tts_on_gpu = True
+                            safe_print("[TTS_MODE] IndexTTS2 模型加载完成")
+                        finally:
+                            os.chdir(original_cwd)
+                    else:
+                        safe_print("[TTS_MODE] 模型目录不存在，无法加载")
+                except Exception as e:
+                    safe_print(f"[TTS_MODE] 模型加载失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # 更新音色列表（根据模式过滤）
+            filter_mode = mode  # "local" 或 "online"
+            new_choices = _vc.get_choices(filter_mode) if _LIBS_OK else []
+            
+            return gr.update(choices=new_choices, value=None)
+        
+        tts_mode_switch.change(
+            _on_tts_mode_switch,
+            inputs=[tts_mode_switch],
+            outputs=[voice_select]
+        )
 
         # ── 数字人库事件 ──
         def _on_avatar_select(name):

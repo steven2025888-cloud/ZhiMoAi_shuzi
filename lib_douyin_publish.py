@@ -1,29 +1,42 @@
 # -*- coding: utf-8 -*-
-# lib_douyin_publish.py - 抖音自动发布模块
+"""
+lib_douyin_publish.py - 抖音自动发布模块
+
+基于 PublishBase 基类实现抖音视频发布功能。
+"""
 
 import os
-import sys
+import platform
 import time
 import traceback
-import requests
 import zipfile
-import platform
-from selenium import webdriver
+from typing import Callable, List, Optional, Tuple
+
+import requests
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
+# 导入基类
+try:
+    from lib_publish_base import PublishBase
+except ImportError:
+    # 如果基类不可用，则使用空基类
+    class PublishBase:
+        pass
+
+# ============================================================
+# 常量配置
+# ============================================================
 DOUYIN_UPLOAD_URL = "https://creator.douyin.com/creator-micro/content/upload"
 DOUYIN_HOME_URL = "https://creator.douyin.com/"
 
 # ChromeDriver 下载地址
 CHROMEDRIVER_BASE_URL = "https://chromedriver.storage.googleapis.com"
-CHROMEDRIVER_LATEST_URL = "https://chromedriver.storage.googleapis.com/LATEST_RELEASE"
+CHROMEDRIVER_LATEST_URL = f"{CHROMEDRIVER_BASE_URL}/LATEST_RELEASE"
 
 
 def get_chrome_version():

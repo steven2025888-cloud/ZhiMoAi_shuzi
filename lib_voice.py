@@ -1,16 +1,26 @@
 # -*- coding: utf-8 -*-
-# lib_voice.py — 音色库管理（支持本地版和在线版）
+"""
+lib_voice.py — 音色库管理
 
-import os
+支持本地版和在线版音色管理。
+"""
+
 import json
-import time
+import os
 import re
 import shutil
+import time
+from typing import Dict, List, Optional, Tuple, Any
+
+from voice_api import API_BASE_URL
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 导入统一的API配置
-from voice_api import API_BASE_URL
+
+# ============================================================
+# 常量
+# ============================================================
+META_SAVE_RETRIES = 3
 
 
 class VoiceStore:
@@ -21,88 +31,121 @@ class VoiceStore:
         self.meta_path = os.path.join(self.store_dir, "meta.json")
         os.makedirs(self.store_dir, exist_ok=True)
     
-    def load_meta(self) -> list:
-        if os.path.exists(self.meta_path):
-            try:
-                with open(self.meta_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return []
+    # ============================================================
+    # 元数据存储
+    # ============================================================
+    def load_meta(self) -> List[Dict[str, Any]]:
+        """加载元数据"""
+        if not os.path.exists(self.meta_path):
+            return []
+        try:
+            with open(self.meta_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
     
-    def save_meta(self, data: list):
+    def save_meta(self, data: List[Dict[str, Any]]) -> bool:
+        """保存元数据，带重试和验证"""
         content = json.dumps(data, ensure_ascii=False, indent=2)
-        for attempt in range(3):
+        
+        for attempt in range(META_SAVE_RETRIES):
             try:
                 with open(self.meta_path, 'w', encoding='utf-8') as f:
                     f.write(content)
                     f.flush()
                     os.fsync(f.fileno())
+                
+                # 验证保存结果
                 with open(self.meta_path, 'r', encoding='utf-8') as f:
                     if len(json.load(f)) == len(data):
-                        return
-            except Exception as e:
-                print(f"[save_meta] attempt {attempt+1} fail: {e}")
+                        return True
+            except (IOError, json.JSONDecodeError) as e:
+                print(f"[save_meta] 第{attempt + 1}次尝试失败: {e}")
                 time.sleep(0.1)
+        
+        return False
     
-    def get_choices(self) -> list:
-        """返回音色选项列表，带版本标识"""
-        meta = self.load_meta()
+    # ============================================================
+    # 查询方法
+    # ============================================================
+    def _get_valid_items(self) -> List[Dict[str, Any]]:
+        """获取所有有效的音色项"""
         items = []
-        for m in meta:
+        for m in self.load_meta():
             source = m.get("source", "local")
-            name = m.get("name", "")
             if source == "online":
-                # 在线版：不需要本地文件
                 items.append(m)
             else:
-                # 本地版：检查文件是否存在
                 path = m.get("path", "")
                 if path and os.path.exists(path):
                     items.append(m)
+        return items
+    
+    def _format_display_name(self, item: Dict[str, Any]) -> str:
+        """格式化显示名称"""
+        name = item.get("name", "")
+        source = item.get("source", "local")
+        return f"☁️ {name}" if source == "online" else f"💻 {name}"
+    
+    def _parse_display_name(self, display_name: str) -> str:
+        """从显示名称提取实际名称"""
+        if not display_name or display_name.startswith("（"):
+            return ""
+        # 去掉前缀标识
+        for prefix in ("☁️ ", "💻 "):
+            if display_name.startswith(prefix):
+                return display_name[len(prefix):]
+        return display_name
+    
+    def get_choices(self, filter_mode: str = None) -> List[str]:
+        """返回音色选项列表，带版本标识
+        
+        Args:
+            filter_mode: 过滤模式，'local'只显示本地音色，'online'只显示在线音色，None显示全部
+        """
+        items = self._get_valid_items()
+        
+        # 根据模式过滤
+        if filter_mode == "local":
+            items = [m for m in items if m.get("source", "local") == "local"]
+        elif filter_mode == "online":
+            items = [m for m in items if m.get("source", "local") == "online"]
         
         if items:
-            choices = []
-            for m in items:
-                source = m.get("source", "local")
-                name = m.get("name", "")
-                if source == "online":
-                    choices.append(f"☁️ {name}")
-                else:
-                    choices.append(f"💻 {name}")
-            return choices
+            return [self._format_display_name(m) for m in items]
+        
+        # 根据模式返回不同的提示
+        if filter_mode == "local":
+            return ["（暂无本地音色，请先添加）"]
+        elif filter_mode == "online":
+            return ["（暂无在线音色，请先上传）"]
         return ["（暂无音色，请先添加）"]
     
-    def get_voice_info(self, display_name: str) -> dict:
+    def get_voice_info(self, display_name: str) -> Optional[Dict[str, Any]]:
         """根据显示名称获取音色完整信息"""
-        if not display_name or display_name.startswith("（"):
+        clean_name = self._parse_display_name(display_name)
+        if not clean_name:
             return None
-        # 去掉前缀标识
-        clean_name = display_name
-        if display_name.startswith("☁️ "):
-            clean_name = display_name[3:]
-        elif display_name.startswith("💻 "):
-            clean_name = display_name[3:]
         
         for m in self.load_meta():
             if m.get("name") == clean_name:
                 return m
         return None
     
-    def get_path(self, display_name: str):
+    def get_path(self, display_name: str) -> Optional[str]:
         """获取本地版音色的文件路径"""
         info = self.get_voice_info(display_name)
         if info and info.get("source", "local") == "local":
-            p = info.get("path", "")
-            return p if os.path.exists(p) else None
+            path = info.get("path", "")
+            return path if os.path.exists(path) else None
         return None
     
     def is_online(self, display_name: str) -> bool:
         """判断音色是否为在线版"""
         info = self.get_voice_info(display_name)
-        return info and info.get("source") == "online"
+        return bool(info and info.get("source") == "online")
     
-    def get_online_model_id(self, display_name: str) -> int:
+    def get_online_model_id(self, display_name: str) -> Optional[int]:
         """获取在线版音色的 model_id"""
         info = self.get_voice_info(display_name)
         if info and info.get("source") == "online":

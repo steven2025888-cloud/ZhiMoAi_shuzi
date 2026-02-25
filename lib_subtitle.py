@@ -1,106 +1,153 @@
 # -*- coding: utf-8 -*-
-# lib_subtitle.py — 字幕生成与烧录引擎（关键词高亮版）
+"""
+lib_subtitle.py — 字幕生成与烧录引擎
 
-import os, sys, re, json, time, subprocess, shutil
+支持：
+- Whisper 语音识别
+- ASS 字幕生成
+- 关键词高亮
+- ffmpeg 字幕烧录
+"""
 
-BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from typing import Callable, List, Optional, Dict, Any
+
+# ============================================================
+# 常量配置
+# ============================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONTS_DIR = os.path.join(BASE_DIR, "fonts")
-os.makedirs(FONTS_DIR, exist_ok=True)
-
-LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
-_FFMPEG_DIR = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-_FFMPEG  = os.path.join(_FFMPEG_DIR, "ffmpeg.exe")
-_FFPROBE = os.path.join(_FFMPEG_DIR, "ffprobe.exe")
-if not os.path.exists(_FFMPEG):
-    _FFMPEG  = shutil.which("ffmpeg")  or "ffmpeg"
-    _FFPROBE = shutil.which("ffprobe") or "ffprobe"
-
 OUTPUT_DIR = os.path.join(BASE_DIR, "unified_outputs")
+
+# 确保目录存在
+os.makedirs(FONTS_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-_WIN  = sys.platform == "win32"
+# FFmpeg 路径配置
+_LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
+_FFMPEG_DIR = os.path.join(_LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
+_FFMPEG = os.path.join(_FFMPEG_DIR, "ffmpeg.exe")
+_FFPROBE = os.path.join(_FFMPEG_DIR, "ffprobe.exe")
+
+if not os.path.exists(_FFMPEG):
+    _FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
+    _FFPROBE = shutil.which("ffprobe") or "ffprobe"
+
+# Windows 无窗口标志
+_WIN = sys.platform == "win32"
 _NWIN = subprocess.CREATE_NO_WINDOW if _WIN else 0
 
+# 字幕结束标点
+SENTENCE_ENDS = {"。", "！", "？", ".", "!", "?", "；", ";", "，", ",", "、"}
 
-# ═══════════════════════════════════════════════
+# 默认颜色
+DEFAULT_TEXT_COLOR = "#FFFFFF"
+DEFAULT_HI_COLOR = "#FFD700"
+DEFAULT_OUTLINE_COLOR = "#000000"
+DEFAULT_BG_COLOR = "#000000"
+
+
+# ============================================================
 # 字体工具
-# ═══════════════════════════════════════════════
-def get_font_choices():
+# ============================================================
+def get_font_choices() -> List[str]:
     """获取字体选择列表，第一项为系统字体"""
-    exts = {".ttf", ".otf", ".TTF", ".OTF"}
+    font_exts = {".ttf", ".otf", ".TTF", ".OTF"}
     try:
-        names = [os.path.splitext(f)[0]
-                 for f in sorted(os.listdir(FONTS_DIR))
-                 if os.path.splitext(f)[1] in exts]
-    except Exception:
+        names = [
+            os.path.splitext(f)[0]
+            for f in sorted(os.listdir(FONTS_DIR))
+            if os.path.splitext(f)[1] in font_exts
+        ]
+    except OSError:
         names = []
-    
-    # 第一项始终是系统字体
-    result = ["系统字体"]
-    if names:
-        result.extend(names)
-    return result
+    return ["系统字体"] + names
 
 
-# ═══════════════════════════════════════════════
+# ============================================================
 # 颜色工具
-# ═══════════════════════════════════════════════
+# ============================================================
 def normalize_color(raw: str, fallback: str = "#ffffff") -> str:
-    """确保颜色是 #RRGGBB 格式，兼容各种输入"""
+    """
+    确保颜色是 #RRGGBB 格式
+    
+    Args:
+        raw: 原始颜色值
+        fallback: 默认颜色
+        
+    Returns:
+        规范化的颜色值 #RRGGBB
+    """
     if not raw or not isinstance(raw, str):
         return fallback
+    
     raw = raw.strip().lstrip("#")
-    # 去掉 Gradio 可能追加的 alpha 信息 (8位)
+    
+    # 去掉 Gradio 可能追加的 alpha (8位)
     if len(raw) == 8:
         raw = raw[:6]
+    
+    # 短形式 #RGB -> #RRGGBB
     if len(raw) == 3:
         raw = "".join(c * 2 for c in raw)
+    
+    # 验证是否为合法十六进制
     if len(raw) == 6:
         try:
-            int(raw, 16)   # 验证是合法16进制
-            return "#" + raw.upper()
+            int(raw, 16)
+            return f"#{raw.upper()}"
         except ValueError:
             pass
+    
     return fallback
 
 
 def _hex2ass(hex_color: str) -> str:
-    """#RRGGBB  →  &H00BBGGRR&（ASS BGR 字节序）"""
-    c = normalize_color(hex_color, "#ffffff").lstrip("#")
+    """将 #RRGGBB 转换为 ASS BGR 格式 &H00BBGGRR&"""
+    c = normalize_color(hex_color, DEFAULT_TEXT_COLOR).lstrip("#")
     r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
     return f"&H00{b:02X}{g:02X}{r:02X}&"
 
 
 def _hex2ass_alpha(hex_color: str, opacity: int = 0) -> str:
-    """#RRGGBB + opacity(0~100) → &HAABBGGRR&
-    opacity: 0=全透明, 100=不透明
-    ASS alpha: 00=不透明, FF=全透明 (与直觉相反)
     """
-    c = normalize_color(hex_color, "#000000").lstrip("#")
+    将 #RRGGBB + 透明度转换为 ASS 格式 &HAABBGGRR&
+    
+    Args:
+        hex_color: 颜色值
+        opacity: 不透明度 0=全透明, 100=完全不透明
+    """
+    c = normalize_color(hex_color, DEFAULT_BG_COLOR).lstrip("#")
     r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    # ASS alpha: 00=不透明, FF=全透明
     alpha = int(255 * (1 - max(0, min(100, opacity)) / 100))
     return f"&H{alpha:02X}{b:02X}{g:02X}{r:02X}&"
 
 
-# ═══════════════════════════════════════════════
+# ============================================================
 # ASS 时间格式
-# ═══════════════════════════════════════════════
-def _ass_time(s: float) -> str:
-    s  = max(0.0, float(s))
-    h  = int(s // 3600)
-    m  = int((s % 3600) // 60)
-    sc = s % 60
-    cs = int(round((sc - int(sc)) * 100))
-    if cs >= 100:
-        cs = 99
-    return f"{h}:{m:02d}:{int(sc):02d}.{cs:02d}"
+# ============================================================
+def _ass_time(seconds: float) -> str:
+    """将秒数转换为 ASS 时间格式 h:mm:ss.cc"""
+    seconds = max(0.0, float(seconds))
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    cs = min(99, int(round((s - int(s)) * 100)))
+    return f"{h}:{m:02d}:{int(s):02d}.{cs:02d}"
 
 
-# ═══════════════════════════════════════════════
+# ============================================================
 # 关键词工具
-# ═══════════════════════════════════════════════
-def parse_keywords(kw_str: str) -> list:
-    """把逗号/空格分隔的关键词字符串解析成列表"""
+# ============================================================
+def parse_keywords(kw_str: str) -> List[str]:
+    """把分隔符分隔的关键词字符串解析成列表"""
     if not kw_str or not kw_str.strip():
         return []
     # 支持中英文逗号、顿号、空格
@@ -108,13 +155,10 @@ def parse_keywords(kw_str: str) -> list:
     return [p.strip() for p in parts if p.strip()]
 
 
-def _is_keyword(word: str, keywords: list) -> bool:
-    """判断一个 token 是否属于关键词（支持子串匹配）"""
-    w = word.strip()
-    for kw in keywords:
-        if kw and kw in w:
-            return True
-    return False
+def _is_keyword(word: str, keywords: List[str]) -> bool:
+    """判断词是否包含关键词（子串匹配）"""
+    word = word.strip()
+    return any(kw and kw in word for kw in keywords)
 
 
 # ═══════════════════════════════════════════════
