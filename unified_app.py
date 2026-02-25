@@ -334,6 +334,9 @@ def auto_load_model():
     """根据 TTS 模式选择决定是否加载 IndexTTS2 模型"""
     global tts
     
+    # 重新加载.env文件，确保获取最新的TTS_MODE
+    load_env_file()
+    
     # 读取 TTS 模式选择（local 或 online）
     tts_mode = os.getenv('TTS_MODE', 'local')
     safe_print(f"[MODEL] TTS 模式: {tts_mode}")
@@ -1466,10 +1469,13 @@ def build_ui():
                             # ── 模式A: 文字转语音 ──
                             with gr.Group(visible=True) as tts_mode_group:
                                 # ── TTS 模式切换 ──
+                                # 重新读取.env确保获取最新值
+                                load_env_file()
+                                current_tts_mode = os.getenv('TTS_MODE', 'local')
                                 tts_mode_switch = gr.Radio(
                                     label="TTS 模式",
                                     choices=["💻 本地版", "☁️ 在线版"],
-                                    value="💻 本地版" if os.getenv('TTS_MODE', 'local') == 'local' else "☁️ 在线版",
+                                    value="💻 本地版" if current_tts_mode == 'local' else "☁️ 在线版",
                                     elem_classes="voice-style-radio")
                                 gr.HTML(
                                     '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
@@ -1480,10 +1486,9 @@ def build_ui():
                                 gr.HTML('<div class="section-label">🎙 音色选择</div>')
                                 with gr.Row():
                                     # 根据当前TTS模式过滤音色列表
-                                    current_mode = os.getenv('TTS_MODE', 'local')
                                     voice_select = gr.Dropdown(
                                         label="从音色库选择",
-                                        choices=_vc.get_choices(current_mode) if _LIBS_OK else [],
+                                        choices=_vc.get_choices(current_tts_mode) if _LIBS_OK else [],
                                         value=None, interactive=True, scale=4)
                                     voice_refresh_btn = gr.Button("⟳", scale=1, min_width=40,
                                                                   variant="secondary")
