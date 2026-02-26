@@ -1,0 +1,12 @@
+[MODEL] TTS 模式: online
+[MODEL] 当前为在线版，跳过 IndexTTS2 模型加载
+[TextExtractor] 后台线程已启动
+[TextExtractor] WebSocket 连接已在后台初始化
+[TextExtractor] WebSocket 连接成功
+[SUBTITLE] _do_subtitle: kw_enable=True, kw_str='开源,轻量级,P2P共享网络,共享带宽,远程连接'
+[SUBTITLE] burn_subtitles: kw_enable=True, kw_str='开源,轻量级,P2P共享网络,共享带宽,远程连接', keywords=['开源', '轻量级', 'P2P共享网络', '共享带宽', '远程连接']
+[SUBTITLE] video resolution: 720x1280
+[SUBTITLE] kw_enable=True, keywords=['开源', '轻量级', 'P2P共享网络', '共享带宽', '远程连接'], kws=['开源', '轻量级', 'P2P共享网络', '共享带宽', '远程连接']
+[SUBTITLE] title_color raw='#FFD700' -> normalized='#FFD700' -> ass='&H0000D7FF&', t_fs=48
+[SUBTITLE] Generated 12 events, kws=['开源', '轻量级', 'P2P共享网络', '共享带宽', '远程连接'], input_words=175, sentences=12
+[SUBTITLE] ASS debug copy saved to: D:\ZhiMoAi_shuzi\unified_outputs\debug_last_subtitle.ass
