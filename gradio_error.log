@@ -1,5 +1,0 @@
-[MODEL] TTS 模式: online
-[MODEL] 当前为在线版，跳过 IndexTTS2 模型加载
-[TextExtractor] 后台线程已启动
-[TextExtractor] WebSocket 连接已在后台初始化
-[TextExtractor] WebSocket 连接成功

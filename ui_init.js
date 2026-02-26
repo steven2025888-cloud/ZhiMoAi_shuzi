@@ -532,7 +532,7 @@
         });
     })();
     
-    /* ── 12. 全局强制退出快捷键（Ctrl+Shift+Q）── */
+    /* ── 12. 全局强制退出快捷键（Ctrl+Shift+Q）和F5刷新 ── */
     document.addEventListener('keydown', function(e) {
         // Ctrl+Shift+Q 强制退出
         if (e.ctrlKey && e.shiftKey && e.key === 'Q') {
@@ -546,6 +546,11 @@
                     console.error('[EXIT] 强制退出失败:', err);
                 }
             }
+        }
+        // F5 刷新页面
+        if (e.key === 'F5') {
+            e.preventDefault();
+            window.location.reload();
         }
     });
     

@@ -77,6 +77,10 @@ OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
 WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+MUSIC_DATABASE_FILE = os.path.join(BASE_DIR, "music_database.json")
+BGM_CACHE_DIR = os.path.join(BASE_DIR, "bgm_cache")  # 独立的BGM缓存目录
+os.makedirs(BGM_CACHE_DIR, exist_ok=True)
+
 HF_CACHE_DIR = os.path.abspath(os.path.join(INDEXTTS_DIR, "checkpoints", "hf_cache"))
 os.makedirs(HF_CACHE_DIR, exist_ok=True)
 for _e, _v in [
@@ -115,6 +119,8 @@ import logging
 logging.getLogger("h11").setLevel(logging.CRITICAL)
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+
+import random
 
 tts = None
 APP_NAME = "织梦AI大模型"
@@ -759,6 +765,236 @@ def convert_video_for_browser(video_path, progress=gr.Progress()):
         return out if p.returncode == 0 and os.path.exists(out) else video_path
     except Exception:
         return video_path
+
+
+def _load_music_database():
+    if not os.path.exists(MUSIC_DATABASE_FILE):
+        return {}
+    try:
+        with open(MUSIC_DATABASE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _pick_random_bgm(selected_types):
+    db = _load_music_database()
+    if not selected_types:
+        selected_types = list(db.keys())
+    if not selected_types:
+        raise gr.Error("背景音乐库为空")
+    pool = []
+    for t in selected_types:
+        items = db.get(t) or []
+        if isinstance(items, list):
+            pool.extend([it for it in items if isinstance(it, dict) and it.get("url") and it.get("filename")])
+    if not pool:
+        raise gr.Error("所选类型下没有可用音乐")
+    return random.choice(pool)
+
+
+def _safe_bgm_cache_path(filename: str) -> str:
+    name = (filename or "").strip()
+    if not name:
+        name = f"bgm_{int(time.time())}.mp3"
+    name = os.path.basename(name)
+    name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff\-_. ()]", "_", name)
+    return os.path.join(BGM_CACHE_DIR, name)
+
+
+def download_bgm_if_needed(url: str, filename: str, progress=gr.Progress()):
+    path = _safe_bgm_cache_path(filename)
+    if os.path.exists(path) and os.path.getsize(path) > 1024:
+        return path
+
+    progress(0.1, desc="🎵 AI正在匹配最佳音乐...")
+    try:
+        import requests  # type: ignore
+    except ImportError:
+        requests = None
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+    }
+
+    def _looks_like_html(file_path: str) -> bool:
+        try:
+            with open(file_path, "rb") as f:
+                head = f.read(256).lstrip()
+            if not head:
+                return True
+            low = head[:64].lower()
+            return low.startswith(b"<!doctype") or low.startswith(b"<html") or low.startswith(b"<head")
+        except Exception:
+            return False
+
+    def _download_via_requests():
+        if requests is None:
+            return False
+        last_err = None
+        for _attempt in range(3):
+            try:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+                with requests.get(url, headers=headers, stream=True, allow_redirects=True, timeout=(15, 60)) as r:
+                    # 有些资源站会返回非标准状态码（如567），浏览器仍可下载
+                    # 这里不使用 raise_for_status，而是以“最终文件是否有效”作为成功标准
+                    with open(path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=1024 * 256):
+                            if chunk:
+                                f.write(chunk)
+                if os.path.exists(path) and os.path.getsize(path) > 1024 and (not _looks_like_html(path)):
+                    return True
+                last_err = Exception(f"http_status={getattr(r, 'status_code', 'unknown')}, invalid_file")
+            except Exception as e:
+                last_err = e
+            time.sleep(0.6)
+        if last_err:
+            raise last_err
+        return False
+
+    def _download_via_urllib():
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                with open(path, "wb") as f:
+                    while True:
+                        chunk = resp.read(1024 * 256)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+            return os.path.exists(path) and os.path.getsize(path) > 1024 and (not _looks_like_html(path))
+        except Exception:
+            return False
+
+    def _download_via_powershell():
+        # Windows 兜底：走系统网络栈，行为更接近浏览器
+        try:
+            if sys.platform != "win32":
+                return False
+            u = url.replace("'", "''")
+            p = path.replace("'", "''")
+            cmd = (
+                "$ProgressPreference='SilentlyContinue';"
+                "try { "
+                f"Invoke-WebRequest -UseBasicParsing -Uri '{u}' -OutFile '{p}' -Headers @{{'User-Agent'='{headers['User-Agent']}'}}; "
+                "exit 0 } catch { exit 1 }"
+            )
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            r = subprocess.run([
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd
+            ], capture_output=True, text=True, creationflags=flags, timeout=120)
+            if r.returncode != 0:
+                return False
+            return os.path.exists(path) and os.path.getsize(path) > 1024 and (not _looks_like_html(path))
+        except Exception:
+            return False
+
+    if requests is not None:
+        try:
+            _download_via_requests()
+        except Exception:
+            # ignore, fallback below
+            pass
+
+    if os.path.exists(path) and os.path.getsize(path) > 1024 and (not _looks_like_html(path)):
+        return path
+
+    progress(0.2, desc="🎵 AI智能音乐加载中...")
+    if _download_via_urllib():
+        return path
+    if _download_via_powershell():
+        return path
+
+    raise gr.Error(f"音乐资源加载失败: {url}")
+
+
+def prepare_random_bgm_and_download(types_val, progress=gr.Progress(), max_tries=6):
+    """从所选类型中随机挑选可用音乐并下载。下载失败自动换曲重试。"""
+    tried = set()
+    last_err = None
+    max_tries = int(max_tries or 6)
+    for i in range(max_tries):
+        item = _pick_random_bgm(types_val)
+        url = item.get("url") or ""
+        title = item.get("title") or ""
+        filename = item.get("filename") or (title + ".mp3")
+
+        key = url + "|" + filename
+        if key in tried:
+            continue
+        tried.add(key)
+
+        try:
+            progress(0.05 + (i / max(1, max_tries)) * 0.25, desc=f"准备BGM：{title[:18]}...")
+            local_path = download_bgm_if_needed(url, filename, progress=progress)
+            shown = (title or os.path.basename(local_path)).strip()
+            return item, local_path, shown
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise gr.Error(f"准备背景音乐失败（已尝试{len(tried)}首）: {last_err}")
+
+
+def mix_bgm_into_video(video_path: str, bgm_path: str, bgm_volume: float, progress=gr.Progress()):
+    if not video_path or not os.path.exists(video_path):
+        raise gr.Error("请先生成视频（步骤3或步骤4）")
+    if not bgm_path or not os.path.exists(bgm_path):
+        raise gr.Error("请先选择背景音乐")
+
+    ffmpeg_bin = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin", "ffmpeg.exe")
+    if not os.path.exists(ffmpeg_bin):
+        ffmpeg_bin = "ffmpeg"
+
+    vol = float(bgm_volume or 1.0)
+    vol = max(0.0, min(3.0, vol))
+
+    ts = int(time.time())
+    out = os.path.join(OUTPUT_DIR, f"video_bgm_{ts}.mp4")
+
+    progress(0.2, desc="合成背景音乐...")
+    filter_complex = f"[1:a]volume={vol}[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[a]"
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-i", video_path,
+        "-stream_loop", "-1",
+        "-i", bgm_path,
+        "-filter_complex", filter_complex,
+        "-map", "0:v",
+        "-map", "[a]",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        "-movflags", "+faststart",
+        out
+    ]
+
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           creationflags=flags, timeout=600)
+        if p.returncode != 0:
+            err = (p.stderr or p.stdout or "").strip()
+            raise gr.Error("背景音乐合成失败: " + (err[:400] if err else "ffmpeg error"))
+    except gr.Error:
+        raise
+    except Exception as e:
+        raise gr.Error(f"背景音乐合成失败: {e}")
+
+    if not os.path.exists(out) or os.path.getsize(out) < 1024:
+        raise gr.Error("背景音乐合成失败：输出文件不存在")
+    progress(1.0, desc="完成")
+    return out
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1696,7 +1932,7 @@ def build_ui():
                                         value="系统字体",
                                         interactive=True, scale=3)
                                     sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
-                                                         value=32, step=2, scale=3)
+                                                         value=38, step=2, scale=3)
                                     sub_pos = gr.Radio(label="位置", choices=["上","中","下"],
                                                        value="下", scale=2,
                                                        elem_classes="sub-pos-radio")
@@ -1721,25 +1957,21 @@ def build_ui():
                                     # ══ 左侧：颜色与样式 + 关键词高亮 ══
                                     with gr.Column(scale=1, min_width=260):
                                         gr.HTML('<div class="sub-modal-section">🎨 颜色与样式</div>')
-                                        with gr.Row():
-                                            sub_color_txt = gr.ColorPicker(
-                                                label="字幕颜色", value="#FFFFFF", scale=1)
-                                            sub_hi_txt = gr.ColorPicker(
-                                                label="高亮颜色", value="#FFD700", scale=1)
-                                        with gr.Row():
-                                            sub_outline_txt = gr.ColorPicker(
-                                                label="描边颜色", value="#000000", scale=1,
-                                                elem_id="sub-outline-color")
-                                            sub_outline_size = gr.Slider(
-                                                label="描边宽度 px", minimum=0, maximum=10,
-                                                value=6, step=1, scale=1)
-                                        with gr.Row():
-                                            sub_bg_color = gr.ColorPicker(
-                                                label="背景颜色", value="#000000", scale=1)
-                                            sub_bg_opacity = gr.Slider(
-                                                label="背景透明度", minimum=0, maximum=100,
-                                                value=0, step=5, scale=1,
-                                                info="0=全透明 100=不透明")
+                                        sub_color_txt = gr.ColorPicker(
+                                            label="字幕颜色", value="#FFFFFF")
+                                        sub_hi_txt = gr.ColorPicker(
+                                            label="高亮颜色", value="#FFD700")
+                                        sub_outline_txt = gr.ColorPicker(
+                                            label="描边颜色", value="#000000",
+                                            elem_id="sub-outline-color")
+                                        sub_outline_size = gr.Slider(
+                                            label="描边宽度 px", minimum=0, maximum=10,
+                                            value=6, step=1)
+                                        # 背景颜色隐藏（不再使用）
+                                        sub_bg_color = gr.ColorPicker(
+                                            value="#000000", visible=False)
+                                        sub_bg_opacity = gr.Slider(
+                                            value=0, visible=False)
                                         gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">🌟 关键词高亮</div>')
                                         with gr.Row():
                                             sub_kw_enable = gr.Checkbox(
@@ -1753,23 +1985,39 @@ def build_ui():
                                                 label="关键词（逗号分隔）",
                                                 placeholder="如：便宜,优质,推荐,限时  — 多个词用逗号隔开",
                                                 max_lines=1, scale=1)
-                                    # ══ 右侧：标题设置 + 字幕内容 ══
+                                        
+                                        gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">📍 位置微调</div>')
+                                        sub_pos_offset = gr.Slider(
+                                            label="垂直偏移 px（正数向上，负数向下）",
+                                            minimum=-200, maximum=200,
+                                            value=0, step=5,
+                                            info="在基础位置上微调"
+                                        )
+                                    # ══ 右侧：AI优化 + 标题设置 + 字幕内容 ══
                                     with gr.Column(scale=1, min_width=260):
-                                        gr.HTML('<div class="sub-modal-section">📌 标题设置</div>')
+                                        gr.HTML('<div class="sub-modal-section">✨ AI优化字幕</div>')
+                                        gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-bottom:8px;">AI智能优化字幕标题和关键词高亮</div>')
+                                        subtitle_ai_optimize_btn = gr.Button("✨ AI优化字幕", variant="secondary", size="sm")
+                                        
+                                        gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">📌 标题设置</div>')
                                         sub_title_text = gr.Textbox(
                                             label="标题内容",
                                             placeholder="输入标题文字，留空则不显示标题",
                                             max_lines=1)
                                         with gr.Row():
+                                            sub_title_font_size = gr.Slider(
+                                                label="标题字号", minimum=12, maximum=96,
+                                                value=48, step=1, scale=2)
                                             sub_title_duration = gr.Slider(
                                                 label="显示时长(秒)", minimum=1, maximum=30,
                                                 value=5, step=1, scale=2)
+                                        with gr.Row():
                                             sub_title_margin_top = gr.Slider(
                                                 label="距顶部距离 px", minimum=0, maximum=200,
                                                 value=30, step=5, scale=2)
                                         with gr.Row():
                                             sub_title_color = gr.ColorPicker(
-                                                label="标题颜色", value="#FFFFFF", scale=1)
+                                                label="标题颜色", value="#FFD700", scale=1)
                                             sub_title_outline_color = gr.ColorPicker(
                                                 label="标题描边颜色", value="#000000", scale=1)
                                         gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">📝 字幕内容</div>')
@@ -1799,16 +2047,48 @@ def build_ui():
                         with gr.Column(elem_classes="panel", visible=False, elem_id="sub-video-panel") as sub_video_panel:
                             sub_video = gr.Video(label="🎬 字幕版视频", height=280,
                                                  interactive=False)
-                        
-                        # 步骤5：发布平台（下方）
+
+                        # 步骤5：BGM背景音乐
                         gr.HTML(
                             '<div class="step-header">'
                             '<div class="step-num">5</div>'
+                            '<span class="step-title">BGM背景音乐</span>'
+                            '</div>'
+                        )
+                        with gr.Column(elem_classes="panel"):
+                            bgm_enable = gr.Checkbox(label="🎵 启用背景音乐", value=False, elem_classes="kw-checkbox")
+                            
+                            bgm_types = gr.CheckboxGroup(
+                                label="背景音乐类型",
+                                choices=list(_load_music_database().keys()),
+                                value=[],
+                            )
+                            bgm_volume = gr.Slider(
+                                label="背景音乐音量",
+                                minimum=0.0, maximum=2.0, value=0.3, step=0.05
+                            )
+                            with gr.Row():
+                                bgm_change_btn = gr.Button("🔄 更换BGM", variant="secondary", size="sm")
+                                bgm_mix_btn = gr.Button("🎬 AI选择BGM", variant="primary", size="sm")
+                                bgm_custom_btn = gr.UploadButton("📁 上传自定义BGM", file_types=["audio"], variant="secondary", size="sm")
+                            # 隐藏的自定义BGM组件（用于内部逻辑）
+                            bgm_custom_upload = gr.Audio(visible=False, type="filepath")
+                            bgm_selected = gr.Textbox(visible=False, value="")
+                            bgm_audio_preview = gr.Audio(label="试听BGM", interactive=False, visible=False)
+                            bgm_hint = gr.HTML(value="")
+                            bgm_path_hidden = gr.Textbox(visible=False, value="")
+                            bgm_state = gr.State(value={"path": "", "title": ""})
+                            bgm_video = gr.Video(label="🎬 带BGM视频", height=280, interactive=False)
+
+                        # 步骤6：发布平台（下方）
+                        gr.HTML(
+                            '<div class="step-header">'
+                            '<div class="step-num">6</div>'
                             '<span class="step-title">发布平台</span>'
                             '</div>'
                         )
                         with gr.Column(elem_classes="panel"):
-                            gr.HTML('<div style="font-size:13px;color:#64748b;margin-bottom:12px;">优先发布字幕视频，如无字幕则发布合成视频</div>')
+                            gr.HTML('<div style="font-size:13px;color:#64748b;margin-bottom:12px;">优先发布带BGM视频，其次字幕视频，如无字幕则发布合成视频</div>')
                             
                             publish_platforms = gr.CheckboxGroup(
                                 label="选择发布平台",
@@ -2300,7 +2580,7 @@ def build_ui():
             try:
                 if os.path.exists(WORKSPACE_RECORDS_FILE):
                     os.remove(WORKSPACE_RECORDS_FILE)
-                return gr.update(choices=[], value=None), _hint_html("ok", "✅ 已清空所有工作台记录")
+                return gr.update(choices=[], value=None), _hint_html("ok", "已清空所有工作台记录")
             except Exception as e:
                 return gr.update(), _hint_html("error", f"清空失败: {e}")
 
@@ -2309,12 +2589,14 @@ def build_ui():
                                 output_audio_val, output_video_val,
                                 sub_text_val, sub_video_val,
                                 # 字幕参数
-                                sub_font_val, sub_size_val, sub_pos_val,
+                                sub_font_val, sub_size_val, sub_pos_val, sub_pos_offset_val,
                                 sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                                 sub_bg_color_val, sub_bg_opacity_val,
                                 sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
                                 # 发布参数
                                 douyin_title_val="", douyin_topics_val="",
+                                # 字幕标题参数
+                                sub_title_text_val="",
                                 # 可选：用于 AI 改写场景，按原文查找已有记录并替换
                                 search_key=None):
             """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建
@@ -2329,6 +2611,9 @@ def build_ui():
                     f.write(f"  audio_for_ls_val type: {type(audio_for_ls_val)}, value: {audio_for_ls_val}\n")
                     f.write(f"  output_video_val type: {type(output_video_val)}, value: {output_video_val}\n")
                     f.write(f"  sub_text_val: {sub_text_val}\n")
+                    f.write(f"  sub_title_text_val: {sub_title_text_val}\n")
+                    f.write(f"  sub_kw_enable_val: {sub_kw_enable_val}\n")
+                    f.write(f"  sub_kw_text_val: {sub_kw_text_val}\n")
                 
                 # 辅助函数：从 Gradio Audio 组件值中提取文件路径
                 def extract_audio_path(val):
@@ -2401,8 +2686,9 @@ def build_ui():
                     "sub_video": to_json_safe(sub_video_val),
                     # 字幕参数
                     "sub_font": to_json_safe(sub_font_val),
-                    "sub_size": to_json_safe(sub_size_val) or 32,
+                    "sub_size": to_json_safe(sub_size_val) or 38,
                     "sub_pos": to_json_safe(sub_pos_val) or "下",
+                    "sub_pos_offset": to_json_safe(sub_pos_offset_val) or 0,
                     "sub_color": to_json_safe(sub_color_val) or "#FFFFFF",
                     "sub_hi_color": to_json_safe(sub_hi_val) or "#FFD700",
                     "sub_outline_color": to_json_safe(sub_outline_val) or "#000000",
@@ -2412,6 +2698,8 @@ def build_ui():
                     "sub_kw_enable": bool(sub_kw_enable_val) if sub_kw_enable_val is not None else False,
                     "sub_hi_scale": to_json_safe(sub_hi_scale_val) or 1.5,
                     "sub_kw_text": to_json_safe(sub_kw_text_val),
+                    # 字幕标题
+                    "sub_title_text": to_json_safe(sub_title_text_val),
                     # 发布参数
                     "douyin_title": to_json_safe(douyin_title_val),
                     "douyin_topics": to_json_safe(douyin_topics_val),
@@ -2460,13 +2748,13 @@ def build_ui():
             """恢复选中的工作台记录"""
             try:
                 if not record_idx_str:
-                    return [gr.update()] * 25 + [_hint_html("warning", "无效的记录索引")]
+                    return [gr.update()] * 27 + [_hint_html("warning", "无效的记录索引")]
                 
                 record_idx = int(record_idx_str)
                 records = _load_workspace_records()
                 
                 if record_idx < 0 or record_idx >= len(records):
-                    return [gr.update()] * 25 + [_hint_html("error", "记录不存在")]
+                    return [gr.update()] * 27 + [_hint_html("error", "记录不存在")]
                 
                 rec = records[record_idx]
                 
@@ -2503,9 +2791,15 @@ def build_ui():
                         choices = choices_func() if callable(choices_func) else []
                         if value in choices:
                             return value
-                    except Exception:
-                        pass
-                    return None
+                        else:
+                            # 如果值不在列表中，记录日志但返回None（不报错）
+                            with open(debug_file, "a", encoding="utf-8") as f:
+                                f.write(f"  警告: 音色 '{value}' 不在当前列表中，可能是TTS模式不匹配\n")
+                            return None
+                    except Exception as e:
+                        with open(debug_file, "a", encoding="utf-8") as f:
+                            f.write(f"  safe_dropdown_value 异常: {e}\n")
+                        return None
                 
                 # 获取音频文件路径（即使文件不存在也恢复路径，让用户知道之前的文件）
                 output_audio_path = rec.get("output_audio", "")
@@ -2532,6 +2826,9 @@ def build_ui():
                     f.write(f"    output_audio_value: {output_audio_value}\n")
                     f.write(f"    audio_for_ls_value: {audio_for_ls_value}\n")
                     f.write(f"    sub_text: {rec.get('sub_text', '')}\n")
+                    f.write(f"    sub_title_text: {rec.get('sub_title_text', '')}\n")
+                    f.write(f"    sub_kw_enable: {rec.get('sub_kw_enable', False)}\n")
+                    f.write(f"    sub_kw_text: {rec.get('sub_kw_text', '')}\n")
                 
                 # 获取字幕视频路径
                 sub_video_path = rec.get("sub_video", "")
@@ -2541,10 +2838,13 @@ def build_ui():
                     sub_video_update = gr.update(visible=False)
                 
                 # 返回所有需要更新的组件值
+                # 获取当前TTS模式，用于过滤音色列表
+                current_tts_mode = os.getenv('TTS_MODE', 'local')
+                
                 result = [
                     gr.update(value=rec.get("input_text", "")),           # input_text
                     gr.update(value=safe_file_value(rec.get("prompt_audio"))),  # prompt_audio
-                    gr.update(value=safe_dropdown_value(rec.get("voice_select"), lambda: _vc.get_choices() if _LIBS_OK else [])),  # voice_select
+                    gr.update(value=safe_dropdown_value(rec.get("voice_select"), lambda: _vc.get_choices(current_tts_mode) if _LIBS_OK else [])),  # voice_select - 使用当前模式过滤
                     gr.update(value=rec.get("audio_mode", "文字转语音")), # audio_mode
                     gr.update(value=safe_file_value(rec.get("direct_audio"))),  # direct_audio
                     gr.update(value=safe_dropdown_value(rec.get("avatar_select"), lambda: _av.get_choices() if _LIBS_OK else [])),  # avatar_select
@@ -2555,8 +2855,9 @@ def build_ui():
                     sub_video_update,                                      # sub_video - 带 visible 控制
                     # 字幕参数
                     gr.update(value=rec.get("sub_font", "")),             # sub_font
-                    gr.update(value=rec.get("sub_size", 32)),             # sub_size
+                    gr.update(value=rec.get("sub_size", 38)),             # sub_size
                     gr.update(value=rec.get("sub_pos", "下")),            # sub_pos
+                    gr.update(value=rec.get("sub_pos_offset", 0)),        # sub_pos_offset
                     gr.update(value=rec.get("sub_color", "#FFFFFF")),     # sub_color_txt
                     gr.update(value=rec.get("sub_hi_color", "#FFD700")),  # sub_hi_txt
                     gr.update(value=rec.get("sub_outline_color", "#000000")), # sub_outline_txt
@@ -2566,6 +2867,8 @@ def build_ui():
                     gr.update(value=rec.get("sub_kw_enable", False)),     # sub_kw_enable
                     gr.update(value=rec.get("sub_hi_scale", 1.5)),        # sub_hi_scale
                     gr.update(value=rec.get("sub_kw_text", "")),          # sub_kw_text
+                    # 字幕标题
+                    gr.update(value=rec.get("sub_title_text", "")),        # sub_title_text
                     # 发布参数
                     gr.update(value=rec.get("douyin_title", "")),           # douyin_title
                     gr.update(value=rec.get("douyin_topics", "")),          # douyin_topics
@@ -2577,7 +2880,7 @@ def build_ui():
                 
                 return result
             except Exception as e:
-                return [gr.update()] * 25 + [_hint_html("error", f"恢复失败: {str(e)}")]
+                return [gr.update()] * 27 + [_hint_html("error", f"恢复失败: {str(e)}")]
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, voice_name, spd, tp, tk, temp, nb, rp, mmt,
@@ -2658,10 +2961,11 @@ def build_ui():
                         # 保存需要的其他参数
                         audio_mode_val, direct_aud, avatar_sel,
                         out_vid, sub_vid,
-                        sub_font_val, sub_size_val, sub_pos_val,
+                        sub_font_val, sub_size_val, sub_pos_val, sub_pos_offset_val,
                         sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                         sub_bg_color_val, sub_bg_opacity_val,
                         sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
+                        sub_title_text_val,
                         douyin_title_val, douyin_topics_val,
                         progress=gr.Progress()):
             """合成并自动保存工作台状态"""
@@ -2681,11 +2985,12 @@ def build_ui():
                 text, pa, voice_sel, audio_mode_val, direct_aud, avatar_sel,
                 audio_for_ls_path, audio_path, out_vid,
                 sub_text_val, sub_vid,
-                sub_font_val, sub_size_val, sub_pos_val,
+                sub_font_val, sub_size_val, sub_pos_val, sub_pos_offset_val,
                 sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                 sub_bg_color_val, sub_bg_opacity_val,
                 sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
-                douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val
+                douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
+                sub_title_text_val=sub_title_text_val
             )
             
             # 返回所有需要更新的组件
@@ -2708,10 +3013,11 @@ def build_ui():
                 # 保存需要的参数
                 audio_mode, direct_audio_upload, avatar_select,
                 output_video, sub_video,
-                sub_font, sub_size, sub_pos,
+                sub_font, sub_size, sub_pos, sub_pos_offset,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
+                sub_title_text,
                 douyin_title, douyin_topics
             ],
             outputs=[output_audio, audio_for_ls, sub_text,
@@ -2772,18 +3078,142 @@ def build_ui():
             inputs=[output_video, audio_for_ls, input_text],
             outputs=[output_video, pip_hint])
 
+        # ── AI优化字幕函数（只优化字幕标题和关键词）──
+        def _optimize_subtitle_with_deepseek(video_text):
+            """使用DeepSeek AI优化字幕标题和关键词"""
+            if not video_text or not video_text.strip():
+                return "", "", False, _hint_html("warning", "请先输入视频文本内容")
+            
+            prompt = f"""请根据以下视频文本内容，完成两个任务：
+
+任务一：生成一个简短的字幕标题（不超过15字，概括视频主题）
+任务二：从文本中提取3-5个最重要的关键词（用于字幕高亮显示），用逗号分隔
+
+视频文本内容：
+{video_text[:300]}
+
+请严格按照以下格式输出，不要添加其他内容：
+标题：[你的标题]
+关键词：[关键词1,关键词2,关键词3]"""
+            
+            result, error = _call_deepseek_api(prompt)
+            
+            if error:
+                return "", "", False, _hint_html("error", error)
+            
+            if result:
+                # 解析返回结果
+                lines = result.strip().split('\n')
+                new_title = ""
+                new_keywords = ""
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("标题：") or line.startswith("标题:"):
+                        new_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif line.startswith("关键词：") or line.startswith("关键词:"):
+                        new_keywords = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                
+                # 如果有关键词，自动开启关键词高亮
+                kw_enable = bool(new_keywords.strip())
+                
+                return new_title, new_keywords, kw_enable, _hint_html("ok", "AI优化完成！已生成字幕标题和关键词")
+            else:
+                return "", "", False, _hint_html("error", "AI优化失败，未返回内容")
+
         # ── 字幕高级设置弹窗 ──
         sub_settings_open_btn.click(
             lambda txt: (gr.update(visible=True), gr.update(value=txt)),
             inputs=[sub_text],
             outputs=[sub_settings_modal, sub_text_modal])
+        
+        def _close_sub_settings_and_save(sub_text_modal_val,
+                                         inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                                         avatar_sel, aud_for_ls, out_aud, out_vid,
+                                         sub_vid,
+                                         sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                                         sub_col, sub_hi, sub_out, sub_out_sz,
+                                         sub_bg_col, sub_bg_op,
+                                         sub_kw_en, sub_hi_sc, sub_kw_txt,
+                                         sub_title_txt,
+                                         douyin_title_val, douyin_topics_val):
+            """关闭高级设置弹窗并保存到工作台"""
+            try:
+                save_hint, dropdown_update = _auto_save_workspace(
+                    inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                    avatar_sel, aud_for_ls, out_aud, out_vid,
+                    sub_text_modal_val, sub_vid,
+                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                    sub_col, sub_hi, sub_out, sub_out_sz,
+                    sub_bg_col, sub_bg_op,
+                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                    douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
+                    sub_title_text_val=sub_title_txt
+                )
+            except Exception as e:
+                save_hint = _hint_html("error", f"保存失败: {e}")
+                dropdown_update = gr.update()
+            return gr.update(visible=False), gr.update(value=sub_text_modal_val), save_hint, dropdown_update
+        
         sub_settings_close_btn.click(
-            lambda txt: (gr.update(visible=False), gr.update(value=txt)),
-            inputs=[sub_text_modal],
-            outputs=[sub_settings_modal, sub_text])
+            _close_sub_settings_and_save,
+            inputs=[sub_text_modal,
+                    input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                    avatar_select, audio_for_ls, output_audio, output_video,
+                    sub_video,
+                    sub_font, sub_size, sub_pos, sub_pos_offset,
+                    sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                    sub_bg_color, sub_bg_opacity,
+                    sub_kw_enable, sub_hi_scale, sub_kw_text,
+                    sub_title_text,
+                    douyin_title, douyin_topics],
+            outputs=[sub_settings_modal, sub_text,
+                    workspace_record_hint, workspace_record_dropdown])
         sub_settings_cancel_btn.click(
             lambda: gr.update(visible=False),
             outputs=[sub_settings_modal])
+        
+        # ── AI优化字幕按钮（只优化字幕标题和关键词，并保存到工作台）──
+        def _subtitle_ai_optimize_and_save(video_text,
+                                           prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                                           avatar_sel, aud_for_ls, out_aud, out_vid,
+                                           sub_txt, sub_vid,
+                                           sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                                           sub_col, sub_hi, sub_out, sub_out_sz,
+                                           sub_bg_col, sub_bg_op,
+                                           sub_kw_en, sub_hi_sc, sub_kw_txt,
+                                           douyin_title_val, douyin_topics_val):
+            new_title, new_keywords, kw_enable, hint = _optimize_subtitle_with_deepseek(video_text)
+            try:
+                save_hint, dropdown_update = _auto_save_workspace(
+                    video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                    avatar_sel, aud_for_ls, out_aud, out_vid,
+                    sub_txt, sub_vid,
+                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                    sub_col, sub_hi, sub_out, sub_out_sz,
+                    sub_bg_col, sub_bg_op,
+                    kw_enable, sub_hi_sc, new_keywords,
+                    douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
+                    sub_title_text_val=new_title
+                )
+            except Exception as e:
+                save_hint = _hint_html("error", f"保存失败: {e}")
+                dropdown_update = gr.update()
+            return new_title, new_keywords, kw_enable, hint, save_hint, dropdown_update
+        subtitle_ai_optimize_btn.click(
+            _subtitle_ai_optimize_and_save,
+            inputs=[input_text,
+                    prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                    avatar_select, audio_for_ls, output_audio, output_video,
+                    sub_text, sub_video,
+                    sub_font, sub_size, sub_pos, sub_pos_offset,
+                    sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                    sub_bg_color, sub_bg_opacity,
+                    sub_kw_enable, sub_hi_scale, sub_kw_text,
+                    douyin_title, douyin_topics],
+            outputs=[sub_title_text, sub_kw_text, sub_kw_enable, tts_hint,
+                    workspace_record_hint, workspace_record_dropdown]
+        )
 
         # ── 语音风格预设
         _VOICE_PRESETS = {
@@ -3059,13 +3489,13 @@ def build_ui():
 
         # ── 字幕生成 ──
         def _do_subtitle(vid, aud, text,
-                         font, size, pos,
+                         font, size, pos, pos_offset,
                          color_txt, hi_txt, outline_txt, outline_size,
                          bg_color, bg_opacity,
                          kw_enable, kw_str, hi_scale,
                          title_text="", title_duration=5,
-                         title_color="#FFFFFF", title_outline_color="#000000",
-                         title_margin_top=30,
+                         title_color="#FFD700", title_outline_color="#000000",
+                         title_margin_top=30, title_font_size=48,
                          progress=gr.Progress()):
             if not _LIBS_OK:
                 return gr.update(visible=False), _hint_html("error","扩展模块未加载")
@@ -3079,6 +3509,9 @@ def build_ui():
                 return gr.update(visible=False), _hint_html("warning","请先完成视频合成再添加字幕")
 
             aud_path = str(aud) if (aud and isinstance(aud, str)) else None
+            
+            # 调试日志
+            print(f"[SUBTITLE] _do_subtitle: kw_enable={kw_enable}, kw_str='{kw_str}'")
 
             def _cb(pct, msg): progress(pct, desc=msg)
             try:
@@ -3086,7 +3519,7 @@ def build_ui():
                     vid_path, aud_path, text or "",
                     font, size,
                     color_txt, hi_txt, outline_txt, int(outline_size or 0),
-                    pos,
+                    pos, int(pos_offset or 0),
                     kw_enable=bool(kw_enable),
                     kw_str=kw_str or "",
                     hi_scale=float(hi_scale or 1.5),
@@ -3094,24 +3527,25 @@ def build_ui():
                     bg_opacity=int(bg_opacity or 0),
                     title_text=title_text or "",
                     title_duration=int(title_duration or 5),
-                    title_color=title_color or "#FFFFFF",
+                    title_color=title_color or "#FFD700",
                     title_outline_color=title_outline_color or "#000000",
                     title_margin_top=int(title_margin_top or 30),
+                    title_font_size=int(title_font_size or 48),
                     progress_cb=_cb
                 )
                 return (out,
-                        _hint_html("ok", "✅ 字幕视频已生成: " + os.path.basename(out)))
+                        _hint_html("ok", "字幕视频已生成: " + os.path.basename(out)))
             except Exception as e:
                 traceback.print_exc()
                 return ("",
                         _hint_html("error", f"字幕生成失败: {str(e)[:300]}"))
 
         # 字幕按钮点击 - 直接在完成后保存
-        def subtitle_and_save(out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
+        def subtitle_and_save(out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps, sub_ps_off,
                              sub_col, sub_hi, sub_out, sub_out_sz,
                              sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
                              # 标题参数
-                             title_txt, title_dur, title_col, title_out_col, title_mt,
+                             title_txt, title_fs, title_dur, title_col, title_out_col, title_mt,
                              # 保存需要的其他参数
                              inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                              avatar_sel, out_aud,
@@ -3120,14 +3554,15 @@ def build_ui():
             """生成字幕并自动保存工作台状态"""
             # 先生成字幕
             sub_vid_path, sub_hnt = _do_subtitle(
-                out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps,
+                out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps, sub_ps_off,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
                 title_text=title_txt or "",
                 title_duration=int(title_dur or 5),
-                title_color=title_col or "#FFFFFF",
+                title_color=title_col or "#FFD700",
                 title_outline_color=title_out_col or "#000000",
                 title_margin_top=int(title_mt or 30),
+                title_font_size=int(title_fs or 48),
                 progress=progress
             )
             
@@ -3137,11 +3572,12 @@ def build_ui():
                 inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                 avatar_sel, aud_for_ls, aud_for_ls, out_vid,
                 sub_txt, sub_vid_path,
-                sub_fnt, sub_sz, sub_ps,
+                sub_fnt, sub_sz, sub_ps, sub_ps_off,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op,
                 sub_kw_en, sub_hi_sc, sub_kw_txt,
-                douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val
+                douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
+                sub_title_text_val=title_txt
             )
             
             # 返回字幕视频，需要设置 visible=True 和 show_download_button=True
@@ -3156,12 +3592,12 @@ def build_ui():
             subtitle_and_save,
             inputs=[
                 output_video, audio_for_ls,
-                sub_text, sub_font, sub_size, sub_pos,
+                sub_text, sub_font, sub_size, sub_pos, sub_pos_offset,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_kw_text, sub_hi_scale,
                 # 标题参数
-                sub_title_text, sub_title_duration, sub_title_color,
+                sub_title_text, sub_title_font_size, sub_title_duration, sub_title_color,
                 sub_title_outline_color, sub_title_margin_top,
                 # 保存需要的参数
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
@@ -3243,11 +3679,11 @@ def build_ui():
                 return None, f"❌ API调用失败: {str(e)}"
         
         def _rewrite_text_with_deepseek(original_text):
-            """使用DeepSeek AI改写文案,同时优化标题和生成话题标签(单次API调用节省算力)"""
+            """使用DeepSeek AI改写文案,同时优化标题、生成话题标签和关键词"""
             if not original_text or not original_text.strip():
-                return original_text, "", "", _hint_html("warning", "⚠️ 请先输入文本内容")
+                return original_text, "", "", "", False, _hint_html("warning", "请先输入文本内容")
             
-            prompt = f"""请完成以下三个任务：
+            prompt = f"""请完成以下四个任务：
 
 任务一：将以下文案改写得更加生动、吸引人，保持原意但提升表达效果。
 要求：必须保留原文的所有段落和完整内容，不要删减、合并或缩短，保持和原文相近的字数和段落数。使用更生动的词汇和表达方式，让文案更有感染力和吸引力。
@@ -3256,18 +3692,21 @@ def build_ui():
 
 任务三：根据文案内容，生成5个相关的热门话题标签，用逗号分隔。
 
+任务四：从文案中提取3-5个最重要的关键词（用于字幕高亮显示），用逗号分隔。
+
 原文案：
 {original_text}
 
 请严格按照以下格式输出，不要添加其他内容：
 文案：[改写后的完整文案]
 标题：[你的标题]
-话题：[话题1,话题2,话题3,话题4,话题5]"""
+话题：[话题1,话题2,话题3,话题4,话题5]
+关键词：[关键词1,关键词2,关键词3]"""
             
             result, error = _call_deepseek_api(prompt)
             
             if error:
-                return original_text, "", "", _hint_html("error", error)
+                return original_text, "", "", "", False, _hint_html("error", error)
             
             if result:
                 # 解析返回结果
@@ -3275,6 +3714,7 @@ def build_ui():
                 new_text = original_text
                 new_title = ""
                 new_topics = ""
+                new_keywords = ""
                 
                 # 解析多行文案：文案可能跨越多行，直到遇到"标题："或"话题："
                 in_text_block = False
@@ -3292,6 +3732,9 @@ def build_ui():
                     elif stripped.startswith("话题：") or stripped.startswith("话题:"):
                         in_text_block = False
                         new_topics = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif stripped.startswith("关键词：") or stripped.startswith("关键词:"):
+                        in_text_block = False
+                        new_keywords = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
                     elif in_text_block and stripped:
                         text_lines.append(stripped)
                 
@@ -3306,21 +3749,24 @@ def build_ui():
                     text_parts = []
                     for line in lines:
                         line = line.strip()
-                        if line.startswith(("标题：", "标题:", "话题：", "话题:")):
+                        if line.startswith(("标题：", "标题:", "话题：", "话题:", "关键词：", "关键词:")):
                             break
                         if line:
                             text_parts.append(line)
                     if text_parts:
                         new_text = "\n".join(text_parts)
                 
-                return new_text, new_title, new_topics, _hint_html("ok", "✅ AI改写完成！已同时生成标题和话题标签")
+                # 如果有关键词，自动开启关键词高亮
+                kw_enable = bool(new_keywords.strip())
+                
+                return new_text, new_title, new_topics, new_keywords, kw_enable, _hint_html("ok", "AI改写完成！已生成标题、话题和关键词")
             else:
-                return original_text, "", "", _hint_html("error", "❌ AI改写失败，未返回内容")
+                return original_text, "", "", "", False, _hint_html("error", "AI改写失败，未返回内容")
         
         def _optimize_title_with_deepseek(current_title, current_topics, video_text):
             """使用DeepSeek AI优化标题并生成话题标签"""
             if not video_text or not video_text.strip():
-                return current_title, current_topics, _hint_html("warning", "⚠️ 请先输入视频文本内容")
+                return current_title, current_topics, _hint_html("warning", "请先输入视频文本内容")
             
             prompt = f"""请根据以下视频文本内容，生成一个吸引人的抖音视频标题和5个相关话题标签。
 
@@ -3354,9 +3800,9 @@ def build_ui():
                     elif line.startswith("话题：") or line.startswith("话题:"):
                         new_topics = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                 
-                return new_title, new_topics, _hint_html("ok", "✅ AI优化完成！")
+                return new_title, new_topics, _hint_html("ok", "AI优化完成")
             else:
-                return current_title, current_topics, _hint_html("error", "❌ AI优化失败，未返回内容")
+                return current_title, current_topics, _hint_html("error", "AI优化失败，未返回内容")
         
         # 绑定AI改写按钮（一次API调用同时改写文案+生成标题+生成标签）
         def _rewrite_and_save(original_text,
@@ -3364,16 +3810,16 @@ def build_ui():
                               prmt_aud, voice_sel, audio_mode_val, direct_aud,
                               avatar_sel, aud_for_ls, out_aud, out_vid,
                               sub_vid,
-                              sub_fnt, sub_sz, sub_ps,
+                              sub_fnt, sub_sz, sub_ps, sub_ps_off,
                               sub_col, sub_hi, sub_out, sub_out_sz,
                               sub_bg_col, sub_bg_op,
                               sub_kw_en, sub_hi_sc, sub_kw_txt):
             """改写文案并同步返回给字幕，同时保存工作台记录"""
             try:
-                new_text, title, topics, hint = _rewrite_text_with_deepseek(original_text)
+                new_text, title, topics, new_keywords, kw_enable, hint = _rewrite_text_with_deepseek(original_text)
             except Exception as e:
                 new_text = original_text
-                title, topics = "", ""
+                title, topics, new_keywords, kw_enable = "", "", "", False
                 hint = _hint_html("error", f"AI改写异常: {e}")
             
             # 保存工作台状态（使用改写后的文案）
@@ -3383,11 +3829,12 @@ def build_ui():
                     new_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                     avatar_sel, aud_for_ls, out_aud, out_vid,
                     new_text, sub_vid,
-                    sub_fnt, sub_sz, sub_ps,
+                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
                     sub_col, sub_hi, sub_out, sub_out_sz,
                     sub_bg_col, sub_bg_op,
-                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                    kw_enable, sub_hi_sc, new_keywords,
                     douyin_title_val=title, douyin_topics_val=topics,
+                    sub_title_text_val=title,  # AI改写生成的标题也作为字幕标题
                     search_key=original_text
                 )
             except Exception as e:
@@ -3396,7 +3843,7 @@ def build_ui():
                 save_hint = _hint_html("error", f"保存工作台失败: {e}")
                 dropdown_update = gr.update()
             
-            return new_text, title, topics, hint, new_text, save_hint, dropdown_update
+            return new_text, title, topics, new_keywords, kw_enable, hint, new_text, title, save_hint, dropdown_update
         rewrite_btn.click(
             _rewrite_and_save,
             inputs=[input_text,
@@ -3404,11 +3851,11 @@ def build_ui():
                     prompt_audio, voice_select, audio_mode, direct_audio_upload,
                     avatar_select, audio_for_ls, output_audio, output_video,
                     sub_video,
-                    sub_font, sub_size, sub_pos,
+                    sub_font, sub_size, sub_pos, sub_pos_offset,
                     sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_hi_scale, sub_kw_text],
-            outputs=[input_text, douyin_title, douyin_topics, tts_hint, sub_text,
+            outputs=[input_text, douyin_title, douyin_topics, sub_kw_text, sub_kw_enable, tts_hint, sub_text, sub_title_text,
                     workspace_record_hint, workspace_record_dropdown])
         
         
@@ -3421,7 +3868,7 @@ def build_ui():
                                prmt_aud, voice_sel, audio_mode_val, direct_aud,
                                avatar_sel, aud_for_ls, out_aud, out_vid,
                                sub_txt, sub_vid,
-                               sub_fnt, sub_sz, sub_ps,
+                               sub_fnt, sub_sz, sub_ps, sub_ps_off,
                                sub_col, sub_hi, sub_out, sub_out_sz,
                                sub_bg_col, sub_bg_op,
                                sub_kw_en, sub_hi_sc, sub_kw_txt):
@@ -3431,11 +3878,12 @@ def build_ui():
                     video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                     avatar_sel, aud_for_ls, out_aud, out_vid,
                     sub_txt, sub_vid,
-                    sub_fnt, sub_sz, sub_ps,
+                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
                     sub_col, sub_hi, sub_out, sub_out_sz,
                     sub_bg_col, sub_bg_op,
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
-                    douyin_title_val=new_title, douyin_topics_val=new_topics
+                    douyin_title_val=new_title, douyin_topics_val=new_topics,
+                    sub_title_text_val=""  # AI优化标题不影响字幕标题
                 )
             except Exception as e:
                 print(f"[AI优化] 保存工作台失败: {e}")
@@ -3449,7 +3897,7 @@ def build_ui():
                     prompt_audio, voice_select, audio_mode, direct_audio_upload,
                     avatar_select, audio_for_ls, output_audio, output_video,
                     sub_text, sub_video,
-                    sub_font, sub_size, sub_pos,
+                    sub_font, sub_size, sub_pos, sub_pos_offset,
                     sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_hi_scale, sub_kw_text],
@@ -3461,10 +3909,11 @@ def build_ui():
                                     inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                                     avatar_sel, aud_for_ls, out_aud, out_vid,
                                     sub_txt, sub_vid,
-                                    sub_fnt, sub_sz, sub_ps,
+                                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
                                     sub_col, sub_hi, sub_out, sub_out_sz,
                                     sub_bg_col, sub_bg_op,
-                                    sub_kw_en, sub_hi_sc, sub_kw_txt):
+                                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                                    sub_title_txt):
             try:
                 # 只有标题或话题非空时才保存（避免清空时触发无用保存）
                 if not (title_val or "").strip() and not (topics_val or "").strip():
@@ -3473,11 +3922,12 @@ def build_ui():
                     inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                     avatar_sel, aud_for_ls, out_aud, out_vid,
                     sub_txt, sub_vid,
-                    sub_fnt, sub_sz, sub_ps,
+                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
                     sub_col, sub_hi, sub_out, sub_out_sz,
                     sub_bg_col, sub_bg_op,
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
-                    douyin_title_val=title_val, douyin_topics_val=topics_val
+                    douyin_title_val=title_val, douyin_topics_val=topics_val,
+                    sub_title_text_val=sub_title_txt
                 )
             except Exception as e:
                 print(f"[标题话题自动保存] 失败: {e}")
@@ -3488,10 +3938,11 @@ def build_ui():
             input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
             avatar_select, audio_for_ls, output_audio, output_video,
             sub_text, sub_video,
-            sub_font, sub_size, sub_pos,
+            sub_font, sub_size, sub_pos, sub_pos_offset,
             sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
             sub_bg_color, sub_bg_opacity,
-            sub_kw_enable, sub_hi_scale, sub_kw_text
+            sub_kw_enable, sub_hi_scale, sub_kw_text,
+            sub_title_text
         ]
         _title_topics_save_outputs = [workspace_record_hint, workspace_record_dropdown]
         douyin_title.change(_on_title_topics_change,
@@ -3538,11 +3989,11 @@ def build_ui():
                 f'</div>'
             )
 
-        def _do_platform_publish(sub_video, output_video, title_text, topics_text, platforms, progress=gr.Progress()):
+        def _do_platform_publish(bgm_video, sub_video, output_video, title_text, topics_text, platforms, progress=gr.Progress()):
             """发布视频到选中的平台 - 优先使用字幕视频（生成器，实时显示进度）"""
             # ── 前置校验 ──
             if not platforms:
-                yield _hint_html("warning", "⚠️ 请至少选择一个发布平台")
+                yield _hint_html("warning", "请至少选择一个发布平台")
                 return
 
             missing_deps = []
@@ -3564,17 +4015,28 @@ def build_ui():
                         f"2. 手动运行：pip install {' '.join(missing_deps)}")
                 return
 
-            # 解析视频路径
+            # 解析视频路径（优先：带BGM视频 > 字幕视频 > 合成视频）
             video_to_use = None
             video_type = ""
+
+            if bgm_video:
+                if isinstance(bgm_video, dict):
+                    bgm_video_path = (bgm_video.get("video") or {}).get("path") or bgm_video.get("path") or bgm_video.get("value") or ""
+                else:
+                    bgm_video_path = str(bgm_video) if bgm_video else ""
+                if bgm_video_path and os.path.exists(bgm_video_path):
+                    video_to_use = bgm_video_path
+                    video_type = "带BGM视频"
+
             if sub_video:
                 if isinstance(sub_video, dict):
                     sub_video_path = (sub_video.get("video") or {}).get("path") or sub_video.get("path") or sub_video.get("value") or ""
                 else:
                     sub_video_path = str(sub_video) if sub_video else ""
                 if sub_video_path and os.path.exists(sub_video_path):
-                    video_to_use = sub_video_path
-                    video_type = "字幕视频"
+                    if not video_to_use:
+                        video_to_use = sub_video_path
+                        video_type = "字幕视频"
             if not video_to_use and output_video:
                 if isinstance(output_video, dict):
                     output_video_path = (output_video.get("video") or {}).get("path") or output_video.get("path") or output_video.get("value") or ""
@@ -3584,7 +4046,7 @@ def build_ui():
                     video_to_use = output_video_path
                     video_type = "合成视频"
             if not video_to_use:
-                yield _hint_html("warning", "⚠️ 请先生成视频（可以是最终合成视频或字幕视频）")
+                yield _hint_html("warning", "请先生成视频（可以是最终合成视频或字幕视频）")
                 return
 
             topics = []
@@ -3688,8 +4150,150 @@ def build_ui():
                 yield _hint_html("ok", result_html)
 
         douyin_btn.click(_do_platform_publish,
-            inputs=[sub_video, output_video, douyin_title, douyin_topics, publish_platforms],
+            inputs=[bgm_video, sub_video, output_video, douyin_title, douyin_topics, publish_platforms],
             outputs=[douyin_hint])
+
+        def _mix_bgm_entry(enable_val, types_val, current_selected_val, bgm_path_val, bgm_state_val, vol_val, sub_vid, out_vid, progress=gr.Progress()):
+            if not enable_val:
+                raise gr.Error("请先启用背景音乐")
+
+            selected_label = ""
+            state_path = ""
+            state_title = ""
+            if isinstance(bgm_state_val, dict):
+                state_path = (bgm_state_val.get("path") or "").strip()
+                state_title = (bgm_state_val.get("title") or "").strip()
+
+            # 优先复用 State 中的已选音乐（避免重复点击时换歌）
+            if state_path and os.path.exists(state_path):
+                bgm_path_val = state_path
+                selected_label = state_title
+            else:
+                # 其次复用 textbox 里已有的本地路径
+                if isinstance(bgm_path_val, str):
+                    bgm_path_val = bgm_path_val.strip()
+                else:
+                    bgm_path_val = ""
+
+                if bgm_path_val and os.path.exists(bgm_path_val):
+                    selected_label = (current_selected_val or "").strip()
+                else:
+                    _, bgm_path_val, selected_label = prepare_random_bgm_and_download(types_val, progress=progress)
+
+            base_video = None
+            if sub_vid and isinstance(sub_vid, str) and os.path.exists(sub_vid):
+                base_video = sub_vid
+            elif out_vid and isinstance(out_vid, str) and os.path.exists(out_vid):
+                base_video = out_vid
+            else:
+                # 兼容 gradio dict
+                for v in (sub_vid, out_vid):
+                    if isinstance(v, dict):
+                        p = (v.get("video") or {}).get("path") or v.get("path") or v.get("value")
+                        if p and os.path.exists(p):
+                            base_video = p
+                            break
+            if not base_video:
+                raise gr.Error("请先生成视频（步骤3或步骤4）")
+            out = mix_bgm_into_video(base_video, bgm_path_val, float(vol_val or 1.0), progress=progress)
+            hint = _hint_html("ok", "背景音乐已合成到视频")
+            if selected_label:
+                hint = _hint_html("ok", f"已自动选择并合成BGM：{selected_label}")
+            shown = (selected_label or (current_selected_val or "")).strip()
+            new_state = {"path": bgm_path_val, "title": shown}
+            return (
+                out,
+                hint,
+                gr.update(value=shown),
+                gr.update(value=bgm_path_val),
+                gr.update(value=bgm_path_val, visible=True),
+                new_state,
+            )
+
+        def _change_bgm(types_val, bgm_state_val, progress=gr.Progress()):
+            cur_path = ""
+            cur_title = ""
+            if isinstance(bgm_state_val, dict):
+                cur_path = (bgm_state_val.get("path") or "").strip()
+                cur_title = (bgm_state_val.get("title") or "").strip()
+
+            # 尽量避免重复选到同一首
+            last_err = None
+            for _ in range(8):
+                try:
+                    item, local_path, shown = prepare_random_bgm_and_download(types_val, progress=progress)
+                    if local_path and cur_path and os.path.exists(cur_path) and os.path.abspath(local_path) == os.path.abspath(cur_path):
+                        continue
+                    if shown and cur_title and shown.strip() == cur_title.strip():
+                        continue
+                    new_state = {"path": local_path, "title": shown}
+                    return (
+                        gr.update(value=shown),
+                        gr.update(value=local_path),
+                        gr.update(value=local_path, visible=True),
+                        _hint_html("ok", f"已更换BGM：{shown}"),  # 移除了✅，_hint_html会自动添加
+                        new_state,
+                    )
+                except Exception as e:
+                    last_err = e
+                    continue
+            raise gr.Error(f"更换BGM失败: {last_err}")
+        
+        def _use_custom_bgm(custom_audio_path):
+            """使用自定义上传的BGM"""
+            if not custom_audio_path or not os.path.exists(custom_audio_path):
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    _hint_html("warning", "请先上传自定义BGM文件"),
+                    gr.update()
+                )
+            
+            # 复制到BGM缓存目录
+            import shutil
+            filename = os.path.basename(custom_audio_path)
+            cache_path = _safe_bgm_cache_path(filename)
+            
+            try:
+                shutil.copy2(custom_audio_path, cache_path)
+                new_state = {"path": cache_path, "title": f"自定义：{filename}"}
+                return (
+                    gr.update(value=f"自定义：{filename}"),
+                    gr.update(value=cache_path),
+                    gr.update(value=cache_path, visible=True),
+                    _hint_html("ok", f"已使用自定义BGM：{filename}"),
+                    new_state,
+                )
+            except Exception as e:
+                return (
+                    gr.update(),
+                    gr.update(),
+                    gr.update(),
+                    _hint_html("error", f"复制BGM文件失败：{e}"),
+                    gr.update()
+                )
+
+        bgm_change_btn.click(
+            _change_bgm,
+            inputs=[bgm_types, bgm_state],
+            outputs=[bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_hint, bgm_state]
+        )
+        
+        # 自定义BGM上传按钮
+        bgm_custom_btn.upload(
+            _use_custom_bgm,
+            inputs=[bgm_custom_btn],
+            outputs=[bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_hint, bgm_state]
+        )
+        
+        # BGM启用/禁用（不再需要显示/隐藏自定义上传，按钮始终可见）
+
+        bgm_mix_btn.click(
+            _mix_bgm_entry,
+            inputs=[bgm_enable, bgm_types, bgm_selected, bgm_path_hidden, bgm_state, bgm_volume, sub_video, output_video],
+            outputs=[bgm_video, bgm_hint, bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_state]
+        )
 
         # 视频合成
         def ls_wrap(avatar_name, auto_a, input_txt, quality_name="⚖️ 标准", progress=gr.Progress()):
@@ -3770,10 +4374,11 @@ def build_ui():
                           # 保存需要的其他参数
                           prmt_aud, voice_sel, audio_mode_val, direct_aud,
                           out_aud, sub_txt, sub_vid,
-                          sub_fnt, sub_sz, sub_ps,
+                          sub_fnt, sub_sz, sub_ps, sub_ps_off,
                           sub_col, sub_hi, sub_out, sub_out_sz,
                           sub_bg_col, sub_bg_op,
                           sub_kw_en, sub_hi_sc, sub_kw_txt,
+                          sub_title_txt,
                           douyin_title_val, douyin_topics_val,
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
@@ -3828,11 +4433,12 @@ def build_ui():
                     inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                     avatar_sel, aud_for_ls, aud_for_ls, video_path,
                     sub_txt, sub_vid,
-                    sub_fnt, sub_sz, sub_ps,
+                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
                     sub_col, sub_hi, sub_out, sub_out_sz,
                     sub_bg_col, sub_bg_op,
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
-                    douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val
+                    douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
+                    sub_title_text_val=sub_title_txt
                 )
                 
                 # 最后一次 yield，包含保存结果
@@ -3847,10 +4453,11 @@ def build_ui():
                 # 保存需要的参数
                 prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 output_audio, sub_text, sub_video,
-                sub_font, sub_size, sub_pos,
+                sub_font, sub_size, sub_pos, sub_pos_offset,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
+                sub_title_text,
                 douyin_title, douyin_topics
             ],
             outputs=[output_video, ls_detail_html,
@@ -3878,10 +4485,11 @@ def build_ui():
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 avatar_select, audio_for_ls, output_audio, output_video,
                 sub_text, sub_video,
-                sub_font, sub_size, sub_pos,
+                sub_font, sub_size, sub_pos, sub_pos_offset,
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
+                sub_title_text,
                 douyin_title, douyin_topics,
                 workspace_record_hint
             ])
