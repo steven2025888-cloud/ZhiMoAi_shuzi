@@ -20,11 +20,6 @@ def load_env_file():
 
 load_env_file()
 
-# ── LatentSync 常驻推理服务全局状态 ──
-_ls_server_proc = None       # 常驻子进程
-_ls_server_lock = threading.Lock()  # 保护服务启动/请求串行化
-_ls_server_ready = False     # 模型是否已加载完成
-
 # ── WebSocket 模块（用于提取文案功能）──
 try:
     import websockets
@@ -72,7 +67,7 @@ PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.tx
 LEGACY_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")  # 兼容旧版本
 INDEXTTS_DIR   = os.path.join(BASE_DIR, "_internal_tts")
-LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
+HEYGEM_DIR     = os.path.join(BASE_DIR, "heygem-win-50")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
 WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -90,9 +85,22 @@ for _e, _v in [
 ]:
     os.environ[_e] = _v
 
-LATENTSYNC_PYTHON = os.path.join(LATENTSYNC_DIR, "latents_env", "python.exe")
-LATENTSYNC_CKPT   = os.path.join(LATENTSYNC_DIR, "checkpoints", "latentsync_unet.pt")
-LATENTSYNC_CONFIG = os.path.join(LATENTSYNC_DIR, "configs", "unet", "stage2_efficient.yaml")
+HEYGEM_PYTHON = os.path.join(HEYGEM_DIR, "py39", "python.exe")
+HEYGEM_FFMPEG = os.path.join(HEYGEM_DIR, "py39", "ffmpeg", "bin")
+
+
+def _resolve_ffmpeg_exe():
+    p = os.path.join(HEYGEM_FFMPEG, "ffmpeg.exe")
+    if os.path.exists(p):
+        return p
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+
+def _resolve_ffprobe_exe():
+    p = os.path.join(HEYGEM_FFMPEG, "ffprobe.exe")
+    if os.path.exists(p):
+        return p
+    return shutil.which("ffprobe") or "ffprobe"
 
 # ── 视频合成质量预设 ──
 QUALITY_PRESETS = {
@@ -138,6 +146,69 @@ def safe_print(msg: str):
             pass
 
 
+def _simple_progress_html(stage: str, pct: int, elapsed_s: int = 0) -> str:
+    try:
+        pct = int(pct)
+    except Exception:
+        pct = 0
+    pct = max(0, min(100, pct))
+    bar = max(2, pct)
+    stage = (stage or "处理中").strip()
+    sub = f"用时 {int(elapsed_s)}s" if elapsed_s else ""
+    return (
+        '<div style="background:linear-gradient(135deg,#1e293b,#0f172a);'
+        'border:1.5px solid #6366f1;border-radius:12px;'
+        'padding:14px 16px 12px;margin:0 0 10px;'
+        'font-family:Microsoft YaHei,system-ui,sans-serif;'
+        'box-shadow:0 4px 16px rgba(99,102,241,.18);">'
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">'
+        f'<span style="font-size:13px;font-weight:800;color:#e2e8f0;">{stage}</span>'
+        f'<span style="margin-left:auto;font-size:14px;font-weight:900;color:#6366f1;">{pct}%</span>'
+        '</div>'
+        '<div style="background:rgba(99,102,241,.15);border-radius:6px;height:8px;overflow:hidden;">'
+        f'<div style="height:100%;width:{bar}%;background:linear-gradient(90deg,#6366f1,#8b5cf6);border-radius:6px;transition:width .25s;"></div>'
+        '</div>'
+        f'<div style="font-size:11px;color:#94a3b8;margin-top:8px;">{sub}</div>'
+        '</div>'
+    )
+
+
+def _dual_progress_html(stage: str, total_pct: int, step_label: str, step_pct: int, elapsed_s: int = 0) -> str:
+    """双进度条 HTML：总进度 + 当前步骤进度"""
+    total_pct = max(0, min(100, int(total_pct or 0)))
+    step_pct = max(0, min(100, int(step_pct or 0)))
+    total_bar = max(2, total_pct)
+    step_bar = max(2, step_pct)
+    stage = (stage or "处理中").strip()
+    step_label = (step_label or "").strip()
+    sub = f"用时 {int(elapsed_s)}s" if elapsed_s else ""
+    return (
+        '<div style="background:linear-gradient(135deg,#1e293b,#0f172a);'
+        'border:1.5px solid #6366f1;border-radius:12px;'
+        'padding:14px 16px 12px;margin:0 0 10px;'
+        'font-family:Microsoft YaHei,system-ui,sans-serif;'
+        'box-shadow:0 4px 16px rgba(99,102,241,.18);">'
+        # 总进度
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
+        f'<span style="font-size:13px;font-weight:800;color:#e2e8f0;">📊 总进度</span>'
+        f'<span style="margin-left:auto;font-size:14px;font-weight:900;color:#6366f1;">{total_pct}%</span>'
+        '</div>'
+        '<div style="background:rgba(99,102,241,.15);border-radius:6px;height:8px;overflow:hidden;margin-bottom:12px;">'
+        f'<div style="height:100%;width:{total_bar}%;background:linear-gradient(90deg,#6366f1,#8b5cf6);border-radius:6px;transition:width .25s;"></div>'
+        '</div>'
+        # 步骤进度
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
+        f'<span style="font-size:12px;font-weight:700;color:#94a3b8;">⚙️ {stage}{(" · " + step_label) if step_label else ""}</span>'
+        f'<span style="margin-left:auto;font-size:12px;font-weight:800;color:#22d3ee;">{step_pct}%</span>'
+        '</div>'
+        '<div style="background:rgba(34,211,238,.12);border-radius:6px;height:6px;overflow:hidden;">'
+        f'<div style="height:100%;width:{step_bar}%;background:linear-gradient(90deg,#22d3ee,#06b6d4);border-radius:6px;transition:width .25s;"></div>'
+        '</div>'
+        f'<div style="font-size:11px;color:#94a3b8;margin-top:8px;">{sub}</div>'
+        '</div>'
+    )
+
+
 # 从.env文件读取版本信息
 def _load_version_from_env():
     """从.env文件读取版本号和 build 号"""
@@ -160,6 +231,50 @@ def _load_version_from_env():
     return version, build
 
 APP_VERSION, APP_BUILD = _load_version_from_env()
+
+
+_heygem_warmup_started = False
+
+
+def _warmup_heygem():
+    global _heygem_warmup_started
+    if _heygem_warmup_started:
+        return
+    _heygem_warmup_started = True
+
+    def _run():
+        try:
+            if not os.path.exists(HEYGEM_PYTHON):
+                safe_print("[HEYGEM] python not found, skip warmup")
+                return
+            env = _build_heygem_env()
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            code = "import cy_app; cy_app.VideoProcessor(); print('HEYGEM_WARMUP_DONE', flush=True)"
+            p = subprocess.Popen([HEYGEM_PYTHON, "-c", code], cwd=HEYGEM_DIR, env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, encoding="utf-8", errors="replace",
+                                 creationflags=flags)
+            if p.stdout:
+                for _ in range(200):
+                    line = p.stdout.readline()
+                    if not line:
+                        if p.poll() is not None:
+                            break
+                        continue
+                    line = line.strip()
+                    if line:
+                        safe_print("[HEYGEM-WARMUP] " + line)
+            try:
+                p.wait(timeout=60)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        except Exception as e:
+            safe_print("[HEYGEM] warmup fail: " + str(e))
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -187,152 +302,6 @@ except Exception as e:
     print(f"[WARNING] 无法加载 ui_style.css: {e}")
     CUSTOM_CSS = ""
 
-
-
-# ══════════════════════════════════════════════════════════════
-#  LatentSync 常驻推理服务管理
-# ══════════════════════════════════════════════════════════════
-def _build_ls_env():
-    """构建 LatentSync 子进程所需的环境变量"""
-    env     = os.environ.copy()
-    ls_env  = os.path.join(LATENTSYNC_DIR, "latents_env")
-    fb      = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-    env["HF_HOME"]    = os.path.join(LATENTSYNC_DIR, "huggingface")
-    env["TORCH_HOME"] = os.path.join(LATENTSYNC_DIR, "checkpoints")  # torch模型缓存
-    env["PYTHONPATH"] = LATENTSYNC_DIR + os.pathsep + env.get("PYTHONPATH", "")
-    env["PATH"]       = ";".join([ls_env, os.path.join(ls_env, "Library","bin"), fb, env.get("PATH","")])
-    # 移除 TTS 的缓存目录（避免指向 TTS 的 hf_cache）
-    for k in ("TRANSFORMERS_CACHE", "HUGGINGFACE_HUB_CACHE"):
-        env.pop(k, None)
-    # 移除全局设置的离线模式，允许 LatentSync 从 HuggingFace 下载/验证模型
-    for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
-        env.pop(k, None)
-    return env
-
-
-def _copy_torch_cache_models():
-    """确保 torch hub 缓存中有必需的人脸检测模型文件"""
-    torch_cache_dir = os.path.join(LATENTSYNC_DIR, "checkpoints", "hub", "checkpoints")
-    os.makedirs(torch_cache_dir, exist_ok=True)
-    for model_file in ["s3fd-619a316812.pth", "2DFAN4-cd938726ad.zip"]:
-        source = os.path.join(LATENTSYNC_DIR, "checkpoints", "auxiliary", model_file)
-        target = os.path.join(torch_cache_dir, model_file)
-        if os.path.exists(source) and not os.path.exists(target):
-            try:
-                shutil.copy2(source, target)
-                safe_print(f"[LS] 已复制{model_file}到torch缓存目录")
-            except Exception as e:
-                safe_print(f"[LS] 复制{model_file}失败: {e}")
-
-
-def _start_latentsync_server(progress_cb=None):
-    """启动 LatentSync 常驻推理服务（模型只加载一次）。
-    progress_cb: 可选的 (float, str) 回调，用于向 UI 报告加载进度。"""
-    global _ls_server_proc, _ls_server_ready
-
-    if not os.path.exists(LATENTSYNC_PYTHON):
-        safe_print("[LS-SERVER] _internal_sync Python 未找到，跳过")
-        return False
-    if not os.path.exists(LATENTSYNC_CKPT):
-        safe_print("[LS-SERVER] 模型文件未找到，跳过")
-        return False
-
-    # 预先复制人脸检测模型到 torch 缓存
-    _copy_torch_cache_models()
-
-    safe_print("[LS-SERVER] 正在启动常驻推理服务（加载模型中）...")
-    if progress_cb:
-        progress_cb(0.06, "正在启动推理引擎...")
-
-    env = _build_ls_env()
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-
-    cmd = [LATENTSYNC_PYTHON, "-m", "scripts.inference_server",
-           "--unet_config_path", LATENTSYNC_CONFIG,
-           "--inference_ckpt_path", LATENTSYNC_CKPT]
-
-    try:
-        _ls_server_proc = subprocess.Popen(
-            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True, cwd=LATENTSYNC_DIR, env=env,
-            encoding="utf-8", errors="replace", creationflags=flags, bufsize=1)
-    except Exception as e:
-        safe_print(f"[LS-SERVER] 启动失败: {e}")
-        return False
-
-    # 等待 __READY__ 信号（最多等 180 秒），同时向 UI 报告加载阶段
-    import time as _time
-    deadline = _time.time() + 180
-    while _time.time() < deadline:
-        if _ls_server_proc.poll() is not None:
-            safe_print("[LS-SERVER] 服务进程在加载模型时意外退出")
-            _ls_server_proc = None
-            return False
-        line = _ls_server_proc.stdout.readline()
-        if not line:
-            continue
-        line = line.strip()
-        if not line:
-            continue
-        safe_print("[LS-SERVER] " + line)
-
-        # 向 UI 报告模型加载进度
-        if progress_cb:
-            low = line.lower()
-            if "audio encoder" in low:
-                progress_cb(0.06, "加载音频编码器...")
-            elif "vae" in low:
-                progress_cb(0.07, "加载 VAE 模型...")
-            elif "unet" in low:
-                progress_cb(0.08, "加载 UNet 模型...")
-            elif "pipeline" in low or "cuda" in low:
-                progress_cb(0.09, "模型转移到 GPU...")
-
-        if "__READY__" in line:
-            _ls_server_ready = True
-            safe_print("[LS-SERVER] ✅ 推理服务就绪，模型已常驻GPU显存")
-            if progress_cb:
-                progress_cb(0.10, "推理引擎就绪")
-            return True
-        if "__ERROR__" in line:
-            safe_print("[LS-SERVER] 模型加载失败")
-            _ls_server_proc = None
-            return False
-
-    safe_print("[LS-SERVER] 启动超时（180秒）")
-    try:
-        _ls_server_proc.kill()
-    except Exception:
-        pass
-    _ls_server_proc = None
-    return False
-
-
-def _stop_ls_server():
-    """停止 LatentSync 常驻服务，彻底释放所有 GPU 显存（包括 CUDA 上下文）"""
-    global _ls_server_proc, _ls_server_ready
-    if _ls_server_proc is not None:
-        try:
-            _ls_server_proc.kill()
-            _ls_server_proc.wait(timeout=5)
-        except Exception:
-            pass
-        _ls_server_proc = None
-    _ls_server_ready = False
-    safe_print("[LS-SERVER] 服务已停止，GPU 显存已完全释放")
-
-
-def _ensure_ls_server(progress_cb=None):
-    """确保推理服务进程存活，必要时重启"""
-    global _ls_server_proc, _ls_server_ready
-    if _ls_server_proc is not None and _ls_server_proc.poll() is None:
-        return True  # 进程还在运行
-    # 需要重启
-    safe_print("[LS-SERVER] 服务进程不存在或已退出，正在重启...")
-    _ls_server_proc = None
-    _ls_server_ready = False
-    return _start_latentsync_server(progress_cb=progress_cb)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -411,12 +380,8 @@ def auto_load_model():
     finally:
         os.chdir(original_cwd)
 
-    # ── LatentSync 常驻服务采用懒启动：首次视频生成时通过 _ensure_ls_server() 启动 ──
-    safe_print("[LS-SERVER] 常驻推理服务将在首次视频生成时懒启动")
-
-
 # ══════════════════════════════════════════════════════════════
-#  TTS GPU 显存管理（在 TTS 与 LatentSync 之间切换 GPU 占用）
+#  TTS GPU 显存管理（视频合成前后自动释放/恢复 GPU 占用）
 # ══════════════════════════════════════════════════════════════
 _tts_on_gpu = True  # 追踪 TTS 模型当前是否在 GPU 上
 
@@ -719,37 +684,12 @@ def generate_speech(text, prompt_audio, voice_name, top_p, top_k, temperature, n
 
 
 # ══════════════════════════════════════════════════════════════
-#  进度行解析
-# ══════════════════════════════════════════════════════════════
-def parse_progress_line(line: str):
-    try:
-        if "|" not in line or "/" not in line: return None
-        low = line.lower()
-
-        # 判断阶段
-        if   "preprocess" in low or "loading" in low: stage = "预处理"
-        elif "inference"  in low:                     stage = "推理"
-        elif "postprocess" in low or "saving" in low: stage = "后处理"
-        else:                                          stage = "生成"
-
-        # 判断进度类型（步骤进度 vs 帧进度）
-        progress_type = "frame" if "frame" in low else "step"
-
-        mp = re.search(r'(\d+)%', line)
-        ms = re.search(r'(\d+)/(\d+)', line)
-        if not mp or not ms: return None
-        return stage, int(mp.group(1)), int(ms.group(1)), int(ms.group(2)), progress_type
-    except Exception:
-        return None
-
-
-# ══════════════════════════════════════════════════════════════
 #  视频格式转换
 # ══════════════════════════════════════════════════════════════
 def convert_video_for_browser(video_path, progress=gr.Progress()):
     if not video_path or not os.path.exists(video_path): return None
-    ffmpeg = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin", "ffmpeg.exe")
-    if not os.path.exists(ffmpeg): return video_path
+    ffmpeg = _resolve_ffmpeg_exe()
+    if not ffmpeg: return video_path
     ts  = int(time.time())
     out = os.path.join(OUTPUT_DIR, f"converted_{ts}.mp4")
     progress(0.3, desc="转换视频格式...")
@@ -950,9 +890,7 @@ def mix_bgm_into_video(video_path: str, bgm_path: str, bgm_volume: float, progre
     if not bgm_path or not os.path.exists(bgm_path):
         raise gr.Error("请先选择背景音乐")
 
-    ffmpeg_bin = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin", "ffmpeg.exe")
-    if not os.path.exists(ffmpeg_bin):
-        ffmpeg_bin = "ffmpeg"
+    ffmpeg_bin = _resolve_ffmpeg_exe()
 
     vol = float(bgm_volume or 1.0)
     vol = max(0.0, min(3.0, vol))
@@ -1034,230 +972,250 @@ def _make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog):
         </div>'''
     )
 
-# ══════════════════════════════════════════════════════════════
-#  视频合成 — 常驻服务模式
-# ══════════════════════════════════════════════════════════════
-def _update_ls_progress(line, progress, detail_cb, state):
-    """统一的 LatentSync 进度行处理，server 和 oneshot 共用。
-    state 是一个 dict，包含 last / step_progress / frame_progress。
-    返回更新后的 state。"""
-    parsed = parse_progress_line(line)
-    if not parsed:
-        return state
-    stage, pct, cur, total, progress_type = parsed
+def _build_heygem_env():
+    """构建 HeyGem 子进程所需的环境变量（参考 heygem-win-50/开始.bat）。"""
+    env = os.environ.copy()
+    py_path = os.path.join(HEYGEM_DIR, "py39")
+    scripts_path = os.path.join(py_path, "Scripts")
+    cu_path = os.path.join(py_path, "Lib", "site-packages", "torch", "lib")
+    cuda_path = os.path.join(py_path, "Library", "bin")
+    ffmpeg_path = HEYGEM_FFMPEG
 
-    if progress_type == "step":
-        state["step"] = (pct, cur, total)
-    elif progress_type == "frame":
-        state["frame"] = (pct, cur, total)
+    # 这些变量在 bat 里会清空，避免污染系统 Python
+    env["PYTHONHOME"] = ""
+    env["PYTHONPATH"] = ""
 
-    if stage == "预处理":
-        prog = 0.08 + (pct / 100.0) * 0.04
-        desc = f"预处理 {pct}%"
-    elif stage in ("推理", "生成"):
-        if pct >= 100:
-            prog = 0.89; desc = "生成中..."
-        else:
-            fp = state.get("frame")
-            sp = state.get("step")
-            if fp:
-                prog = 0.12 + (fp[0] / 100.0) * 0.76
-                f_pct, f_cur, f_total = fp
-                if sp:
-                    s_pct, s_cur, s_total = sp
-                    desc = f"生成中 {prog*100:.0f}%  帧{f_cur}/{f_total}  步骤{s_cur}/{s_total}"
-                    if detail_cb:
-                        detail_cb(_make_detail_html(f_pct, f_cur, f_total, s_pct, s_cur, s_total, prog))
-                else:
-                    desc = f"生成中 {prog*100:.0f}%（{f_cur}/{f_total}）"
-            else:
-                prog = 0.12 + (pct / 100.0) * 0.76
-                desc = f"生成中 {prog*100:.0f}%（{cur}/{total}）"
-    elif stage == "后处理":
-        prog = 0.90 + (pct / 100.0) * 0.06
-        desc = f"收尾处理 {pct}%"
-    else:
-        prog = state["last"]; desc = f"{stage} {pct}%"
+    # 关键：让 heygem 内置 ffmpeg 可用
+    env["PATH"] = ";".join([
+        py_path,
+        scripts_path,
+        ffmpeg_path,
+        cu_path,
+        cuda_path,
+        env.get("PATH", "")
+    ])
 
-    prog = max(prog, state["last"]); state["last"] = prog
-    progress(prog, desc=desc)
-    return state
+    # gradio 临时目录
+    env["GRADIO_TEMP_DIR"] = os.path.join(HEYGEM_DIR, "tmp")
+
+    # huggingface 镜像/缓存（bat 里有，保留一致）
+    env.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+    env.setdefault("HF_HOME", os.path.join(HEYGEM_DIR, "hf_download"))
+    env.setdefault("TRANSFORMERS_CACHE", os.path.join(HEYGEM_DIR, "tf_download"))
+    env.setdefault("XFORMERS_FORCE_DISABLE_TRITON", "1")
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:512")
+
+    # 让子进程/多进程能 import 到编译模块
+    env["PYTHONPATH"] = ";".join([
+        HEYGEM_DIR,
+        os.path.join(HEYGEM_DIR, "service"),
+        env.get("PYTHONPATH", "")
+    ])
+    return env
 
 
-def _run_latentsync_via_server(sv, sa, out, progress, detail_cb,
-                               inference_steps=12, guidance_scale=1.2, seed=1247):
-    """通过常驻推理服务执行 LatentSync（模型已预加载，省去冷启动）。
-    返回 True=成功, False=服务不可用需回退, 或抛异常。"""
-    global _ls_server_proc, _ls_server_ready
+def run_heygem(video_path, audio_path, progress=gr.Progress(), detail_cb=None,
+               output_path_override=None, steps=12, if_gfpgan=False):
+    """使用 heygem-win-50 生成口型视频。
 
-    with _ls_server_lock:
-        # 确保服务进程存活（首次调用时会加载模型，progress 用于显示加载阶段）
-        if not _ensure_ls_server(progress_cb=lambda p, d: progress(p, desc=d)):
-            return False
+    通过 HeyGem 内置 python 在子进程中调用 cy_app.VideoProcessor.process_video，避免依赖当前主进程环境。
+    """
+    if not video_path:
+        raise gr.Error("请上传人物视频")
+    if not audio_path:
+        raise gr.Error("请先在步骤1准备音频（文字转语音 或 直接上传音频文件）")
+    if not os.path.exists(str(video_path)):
+        raise gr.Error("视频文件不存在，请重新上传")
+    if not os.path.exists(str(audio_path)):
+        raise gr.Error("音频文件不存在，请重新选择")
+    if not os.path.exists(HEYGEM_PYTHON):
+        raise gr.Error("HeyGem 环境未找到：heygem-win-50/py39/python.exe")
 
-        # 发送 JSON 请求
-        request = json.dumps({
-            "video_path": sv, "audio_path": sa, "video_out_path": out,
-            "inference_steps": inference_steps,
-            "guidance_scale": guidance_scale,
-            "seed": seed
-        })
-        try:
-            _ls_server_proc.stdin.write(request + "\n")
-            _ls_server_proc.stdin.flush()
-        except Exception as e:
-            safe_print(f"[LS-SERVER] 发送请求失败: {e}")
-            try: _ls_server_proc.kill()
-            except Exception: pass
-            _ls_server_proc = None
-            _ls_server_ready = False
-            return False
-
-        # 读取进度输出
-        progress(0.08, desc="正在生成视频...")
-        state = {"last": 0.08, "step": None, "frame": None}
-
-        while True:
-            try:
-                line = _ls_server_proc.stdout.readline()
-            except Exception:
-                line = ""
-
-            if not line:
-                # 管道关闭 = 服务崩溃
-                safe_print("[LS-SERVER] 服务进程异常退出")
-                _ls_server_proc = None
-                _ls_server_ready = False
-                return False
-
-            line = line.strip()
-            if not line:
-                continue
-            safe_print("[LS] " + line)
-
-            if line.startswith("__DONE__:"):
-                break
-            elif line.startswith("__ERROR__:"):
-                raise gr.Error(f"视频合成失败: {line[len('__ERROR__:'):]}") 
-
-            state = _update_ls_progress(line, progress, detail_cb, state)
-
-    if state["last"] < 0.93:
-        progress(0.94, desc="写入文件...")
-    return True
-
-
-# ══════════════════════════════════════════════════════════════
-#  视频合成（带进度更新 + GPU 显存自动管理）
-# ══════════════════════════════════════════════════════════════
-def run_latentsync(video_path, audio_path, progress=gr.Progress(), detail_cb=None, output_path_override=None,
-                   inference_steps=12, guidance_scale=1.2):
-    if not video_path:                 raise gr.Error("请上传人物视频")
-    if not audio_path:                 raise gr.Error("请先在步骤1准备音频（文字转语音 或 直接上传音频文件）")
-    if not os.path.exists(video_path): raise gr.Error("视频文件不存在，请重新上传")
-    if not os.path.exists(audio_path): raise gr.Error("音频文件不存在，请重新选择")
-
-    ts  = int(time.time())
-    sv  = os.path.join(OUTPUT_DIR, f"in_v_{ts}{os.path.splitext(video_path)[1]}")
-    sa  = os.path.join(OUTPUT_DIR, f"in_a_{ts}{os.path.splitext(audio_path)[1]}")
+    ts = int(time.time())
+    sv = os.path.join(OUTPUT_DIR, f"in_v_{ts}{os.path.splitext(str(video_path))[1]}")
+    sa = os.path.join(OUTPUT_DIR, f"in_a_{ts}{os.path.splitext(str(audio_path))[1]}")
     out = output_path_override if output_path_override else os.path.join(OUTPUT_DIR, f"lipsync_{ts}.mp4")
     try:
-        shutil.copy2(video_path, sv); shutil.copy2(audio_path, sa)
+        shutil.copy2(str(video_path), sv)
+        shutil.copy2(str(audio_path), sa)
     except Exception as e:
         raise gr.Error("复制文件失败: " + str(e))
 
     progress(0.05, desc="初始化中...")
-
-    # 确保人脸检测模型在 torch 缓存目录
-    torch_cache_dir = os.path.join(LATENTSYNC_DIR, "checkpoints", "hub", "checkpoints")
-    os.makedirs(torch_cache_dir, exist_ok=True)
-    for model_file in ["s3fd-619a316812.pth", "2DFAN4-cd938726ad.zip"]:
-        source = os.path.join(LATENTSYNC_DIR, "checkpoints", "auxiliary", model_file)
-        target = os.path.join(torch_cache_dir, model_file)
-        if os.path.exists(source) and not os.path.exists(target):
-            try:
-                shutil.copy2(source, target)
-                safe_print(f"[LS] 已复制{model_file}到torch缓存目录")
-            except Exception as e:
-                safe_print(f"[LS] 复制{model_file}失败: {e}")
-
-    # ── 释放 TTS 显存，给 LatentSync 腾出 GPU 空间 ──
     _release_tts_gpu()
 
-    server_ok = False
+    env = _build_heygem_env()
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+    # 子进程脚本：调用 heygem 的 VideoProcessor，并把 yield 的内容打印出来（便于调试/追踪）
+    py_code = (
+        "import os,sys\n"
+        "os.chdir(r'''" + HEYGEM_DIR.replace("'", "''") + "''')\n"
+        "import cy_app\n"
+        "vp=cy_app.VideoProcessor()\n"
+        "gen=vp.process_video(1, r'''" + sa.replace("'", "''") + "''', r'''" + sv.replace("'", "''") + "''', " + str(int(steps or 12)) + ", " + ("True" if if_gfpgan else "False") + ", output_filename=r'''" + out.replace("'", "''") + "''')\n"
+        "last=None\n"
+        "try:\n"
+        "  for x in gen:\n"
+        "    last=x\n"
+        "    try: print(x, flush=True)\n"
+        "    except Exception: pass\n"
+        "except Exception as e:\n"
+        "  print('HEYGEM_ERROR:'+repr(e), flush=True)\n"
+        "  raise\n"
+        "print('HEYGEM_DONE', last, flush=True)\n"
+    )
+
     try:
-        # ── 优先走常驻服务模式（跳过模型冷加载） ──
-        server_ok = _run_latentsync_via_server(sv, sa, out, progress, detail_cb,
-                                               inference_steps=inference_steps,
-                                               guidance_scale=guidance_scale)
-        if server_ok:
-            safe_print("[LS] ✅ 通过常驻服务完成推理")
-
-        if not server_ok:
-            # ── 回退：独立子进程模式（每次冷加载） ──
-            safe_print("[LS] 常驻服务不可用，使用独立进程模式")
-
-            env = _build_ls_env()
-            cmd = [LATENTSYNC_PYTHON, "-m", "scripts.inference",
-                   "--unet_config_path", LATENTSYNC_CONFIG,
-                   "--inference_ckpt_path", LATENTSYNC_CKPT,
-                   "--video_path", sv, "--audio_path", sa,
-                   "--video_out_path", out,
-                   "--inference_steps", str(inference_steps),
-                   "--guidance_scale", str(guidance_scale), "--seed", "1247"]
-
-            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                        text=True, cwd=LATENTSYNC_DIR, env=env,
-                                        encoding="utf-8", errors="replace", creationflags=flags, bufsize=1)
-            except subprocess.SubprocessError as e:
-                raise gr.Error("启动生成引擎失败: " + str(e))
-
-            progress(0.08, desc="正在生成视频...")
-            state = {"last": 0.08, "step": None, "frame": None}
-            model_loaded = False
-
-            while True:
-                line = proc.stdout.readline()
-                if not line and proc.poll() is not None: break
-                if not line: continue
-                line = line.strip()
-                if not line: continue
-                safe_print("[LS] " + line)
-
-                # 模型加载阶段
-                loading_keywords = ["Loading", "loading", "Initializing", "initializing", "model", "checkpoint"]
-                if not model_loaded and any(kw in line for kw in loading_keywords):
-                    if state["last"] < 0.12:
-                        state["last"] = min(state["last"] + 0.005, 0.12)
-                        progress(state["last"], desc="正在生成视频...")
-                    continue
-
-                if parse_progress_line(line):
-                    model_loaded = True
-                state = _update_ls_progress(line, progress, detail_cb, state)
-
-            if state["last"] < 0.93:
-                progress(0.94, desc="写入文件...")
-            if proc.wait() != 0:
-                raise gr.Error("视频合成失败，请检查视频/音频格式是否正确")
-    finally:
-        # ── 杀掉 LS 服务进程，彻底释放 GPU 显存（含 CUDA 上下文） ──
-        _stop_ls_server()
-        # ── 恢复 TTS 到 GPU ──
+        proc = subprocess.Popen(
+            [HEYGEM_PYTHON, "-c", py_code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=HEYGEM_DIR,
+            env=env,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=flags,
+            bufsize=1,
+        )
+    except Exception as e:
         _restore_tts_gpu()
+        raise gr.Error("启动 HeyGem 失败: " + str(e))
 
-    if not os.path.exists(out):
-        raise gr.Error("输出视频文件未找到，请重试")
+    progress(0.08, desc="正在生成视频...")
+    last_line = ""
+    prog = 0.08
+    stage = "准备中"
+    stage_pct = 8
+    t0 = time.time()
+    # HeyGem 双进度追踪：总进度 + 步骤进度
+    step_total = 0
+    step_pct = 0       # 当前步骤百分比 0~100
+    step_label = ""    # 当前步骤描述
 
-    progress(1.0, desc="✅ 完成")
-    for f in (sv, sa):
+    if detail_cb:
         try:
-            if os.path.exists(f): os.remove(f)
+            detail_cb(_dual_progress_html(stage, stage_pct, "", 0, 0))
+        except Exception:
+            pass
+    while True:
+        line = proc.stdout.readline() if proc.stdout else ""
+        if not line and proc.poll() is not None:
+            break
+        if not line:
+            continue
+        line = line.strip()
+        if not line:
+            continue
+        last_line = line
+        safe_print("[HEYGEM] " + line)
+        low = line.lower()
+
+        # ── 解析 HeyGem 各阶段（只在匹配时更新 stage，避免跳动）──
+
+        # 1) 预处理
+        if "文件下载耗时" in line or ("下载" in line and "耗时" in line):
+            stage = "准备素材"
+            stage_pct = max(stage_pct, 5)
+            prog = max(prog, 0.05)
+            step_label = "下载文件"
+            step_pct = 100
+        elif "format" in low and ("video" in low or "audio" in low or "帧率" in line or "fps" in low):
+            stage = "分析音视频"
+            stage_pct = max(stage_pct, 8)
+            prog = max(prog, 0.08)
+            step_label = "格式转换"
+            step_pct = 100
+        elif "batch_size" in low or "batch size" in low:
+            stage = "初始化推理"
+            stage_pct = max(stage_pct, 10)
+            prog = max(prog, 0.10)
+            step_label = "加载模型"
+            step_pct = 0
+
+        # 2) 数据准备进度：drivered_video_pn >>> progress: 12/108
+        elif "drivered_video_pn" in line:
+            stage = "准备数据"
+            dp = re.search(r'progress:\s*(\d+)/(\d+)', line)
+            if dp:
+                cur, total = int(dp.group(1)), int(dp.group(2))
+                step_total = max(step_total, total)
+                if total > 0:
+                    frac = cur / total
+                    stage_pct = max(stage_pct, int(10 + frac * 20))
+                    prog = max(prog, 0.10 + frac * 0.20)
+                    step_label = f"帧数据 {cur}/{total}"
+                    step_pct = int(frac * 100)
+
+        # 3) 推理进度：audio_transfer >>> frameId:24
+        elif "audio_transfer" in line and "frameid" in low:
+            stage = "生成口型"
+            ap = re.search(r'frameId[:\s]*(\d+)', line, re.IGNORECASE)
+            if ap:
+                step_cur = int(ap.group(1))
+                if step_total > 0:
+                    frac = min(1.0, step_cur / step_total)
+                    stage_pct = max(stage_pct, int(30 + frac * 55))
+                    prog = max(prog, 0.30 + frac * 0.55)
+                    step_label = f"推理帧 {step_cur}/{step_total}"
+                    step_pct = int(frac * 100)
+                else:
+                    stage_pct = max(stage_pct, min(80, stage_pct + 3))
+                    prog = max(prog, min(0.80, prog + 0.03))
+                    step_label = f"推理帧 {step_cur}"
+                    step_pct = min(step_pct + 5, 95)
+
+        # 4) 合成输出
+        elif "executing ffmpeg command" in low or ("ffmpeg" in low and "command" in low):
+            stage = "合成输出"
+            stage_pct = max(stage_pct, 88)
+            prog = max(prog, 0.88)
+            step_label = "ffmpeg 合并"
+            step_pct = 50
+        elif "video result saved" in low:
+            stage = "完成"
+            stage_pct = max(stage_pct, 95)
+            prog = max(prog, 0.95)
+            step_label = "保存文件"
+            step_pct = 100
+
+        # 输出双进度条卡片
+        if detail_cb:
+            try:
+                el = int(time.time() - t0)
+                detail_cb(_dual_progress_html(stage, stage_pct, step_label, step_pct, el))
+            except Exception:
+                pass
+
+        # 推进 Gradio progress bar
+        try:
+            prog = min(0.96, prog + 0.002)
+            progress(prog, desc=f"{stage}... {int(stage_pct)}%")
         except Exception:
             pass
 
+    rc = proc.wait()
+    _restore_tts_gpu()
+
+    if rc != 0:
+        raise gr.Error("视频合成失败（HeyGem）: " + (last_line or "unknown error"))
+    if not os.path.exists(out):
+        raise gr.Error("输出视频文件未找到，请重试")
+
+    if detail_cb:
+        try:
+            el = int(time.time() - t0)
+            detail_cb(_dual_progress_html("完成", 100, "全部完成", 100, el))
+        except Exception:
+            pass
+    progress(1.0, desc="✅ 完成")
+    for f in (sv, sa):
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except Exception:
+            pass
     return out, "✅ 视频合成完成"
 
 
@@ -1744,7 +1702,7 @@ def build_ui():
                                 tts_speed_preset = gr.Radio(
                                     label="合成速度",
                                     choices=list(TTS_SPEED_PRESETS.keys()),
-                                    value="🚀 快速(FP16)",
+                                    value="🚀 快速",
                                     elem_classes="voice-style-radio")
                                 gr.HTML(
                                     '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
@@ -1926,11 +1884,11 @@ def build_ui():
                                 )
                                 # 基本设置：字体 字号 位置（始终可见）
                                 with gr.Row():
-                                    _font_grouped = _sub.get_font_choices_grouped() if _LIBS_OK else [("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
+                                    _font_grouped = _sub.get_font_choices_grouped() if _LIBS_OK else [("🖥️ 系统字体（默认）", "系统字体"), ("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
                                     sub_font = gr.Dropdown(
                                         label="字体",
                                         choices=_font_grouped,
-                                        value="SourceHanSansCN-Bold",
+                                        value="系统字体",
                                         interactive=True, scale=3)
                                     sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
                                                          value=38, step=2, scale=3)
@@ -2448,7 +2406,7 @@ def build_ui():
                                     raise RuntimeError("专属视频不存在")
                             op = os.path.join(batch_dir, f"任务{idx}.mp4")
                             progress(0.3, desc=f"[{idx}/{total}] {tn} — 视频合成...")
-                            run_latentsync(vp, ap, output_path_override=op)
+                            run_heygem(vp, ap, output_path_override=op, steps=12, if_gfpgan=False)
                             rt[i]["status"] = "✅ 完成"
                             yield _y(idx,"运行中",f"✅ {tn} 完成 → 任务{idx}.mp4")
                         except Exception as e:
@@ -2925,14 +2883,13 @@ def build_ui():
                         tmp_path = out_path + ".speed.wav"
                         # atempo 范围 0.5~2.0, 链式处理超出范围
                         atempo_val = max(0.5, min(2.0, speed))
-                        ffmpeg_bin = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin", "ffmpeg.exe")
-                        if not os.path.exists(ffmpeg_bin):
-                            ffmpeg_bin = "ffmpeg"
+                        ffmpeg_bin = _resolve_ffmpeg_exe()
                         cmd = [ffmpeg_bin, "-y", "-i", out_path,
-                               "-filter:a", f"atempo={atempo_val}",
-                               "-vn", tmp_path]
+                               "-filter:a", f"atempo={atempo_val}", tmp_path]
                         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                        subprocess.run(cmd, capture_output=True, timeout=60, creationflags=flags)
+                        subprocess.run(cmd, capture_output=True, text=True,
+                                       encoding="utf-8", errors="replace",
+                                       creationflags=flags)
                         if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 100:
                             os.replace(tmp_path, out_path)
                     except Exception as e:
@@ -3249,7 +3206,7 @@ def build_ui():
 
         # ── TTS 合成速度预设 ──
         def _on_tts_speed(preset):
-            p = TTS_SPEED_PRESETS.get(preset, TTS_SPEED_PRESETS["🚀 快速(FP16)"])
+            p = TTS_SPEED_PRESETS.get(preset, TTS_SPEED_PRESETS["🚀 快速"])
             return [
                 gr.update(value=p["num_beams"]),
                 gr.update(value=p["max_mel_tokens"]),
@@ -4407,9 +4364,9 @@ def build_ui():
 
             def _run():
                 try:
-                    out, _ = run_latentsync(video, audio, progress, detail_cb=_detail_cb,
-                                            inference_steps=preset["inference_steps"],
-                                            guidance_scale=preset["guidance_scale"])
+                    out, _ = run_heygem(video, audio, progress, detail_cb=_detail_cb,
+                                        steps=preset.get("inference_steps", 12),
+                                        if_gfpgan=False)
                     result["out"] = out
                 except Exception as e:
                     result["err"] = e
@@ -4418,8 +4375,10 @@ def build_ui():
 
             threading.Thread(target=_run, daemon=True).start()
 
-            # 简洁的状态提示（不用大块HTML，直接进度条推进）
-            yield gr.update(), gr.update(value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;"><div style="width:18px;height:18px;border:2.5px solid #c7d2fe;border-top-color:#6366f1;border-radius:50%;animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div><span style="font-size:13px;color:#4338ca;font-weight:600;">正在生成视频，请稍候...</span><style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>', visible=True)
+            # 初始展示：用户可理解的阶段进度卡片
+            _t0 = time.time()
+            _last_detail = _dual_progress_html("准备中", 5, "初始化", 0, 0)
+            yield gr.update(), gr.update(value=_last_detail, visible=True)
 
             while True:
                 try:
@@ -4427,12 +4386,14 @@ def build_ui():
                     if item[0] == "done":
                         break
                     elif item[0] == "detail":
-                        yield gr.update(), gr.update(value=item[1], visible=True)
+                        _last_detail = item[1]
+                        yield gr.update(), gr.update(value=_last_detail, visible=True)
                 except _queue.Empty:
-                    yield gr.update(), gr.update()
+                    # 超时时保持上一次的进度内容不变，不覆盖 detail_cb 的输出
+                    yield gr.update(), gr.update(value=_last_detail, visible=True)
 
             if result["err"]:
-                yield gr.update(), gr.update(visible=False)
+                yield gr.update(), gr.update(value=_dual_progress_html("出错", 0, "失败", 0, int(time.time() - _t0)), visible=True)
                 raise gr.Error(str(result["err"]))
 
             out      = result["out"]
@@ -4462,7 +4423,7 @@ def build_ui():
             # 视频合成完成后显示抖音发布区域，并自动填充标题
             # 返回：视频路径（字符串）、详情
             # 注意：第一个返回值是视频路径字符串，不是 gr.update 对象
-            yield out, gr.update(visible=False)
+            yield out, gr.update(value=_dual_progress_html("✅ 完成", 100, "全部完成", 100, int(time.time() - _t0)), visible=True)
 
         # 视频合成按钮点击 - 直接在完成后保存
         def video_and_save(avatar_sel, aud_for_ls, inp_txt, quality_name,
@@ -5190,6 +5151,12 @@ if __name__ == "__main__":
     #     sys.exit(0)
 
     auto_load_model()
+    try:
+        # 在线版无需预热 HeyGem（节省启动时间/资源）
+        if os.getenv('TTS_MODE', 'local') != 'online':
+            _warmup_heygem()
+    except Exception:
+        pass
     app = build_ui()
     app.queue()
     for port in [7870, 7871, 7872, 7873, 7874]:

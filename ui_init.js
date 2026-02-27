@@ -492,20 +492,32 @@
 
     /* ── 11. 合成按钮互锁（任一合成按钮执行时禁止所有合成按钮）── */
     (function() {
+        var _lockStart = 0;
         function checkBusy() {
             /* Gradio 在运行时会给按钮添加 .loading 类，或在容器上添加 .pending */
             var anyBusy = !!document.querySelector(
-                'button.primary.loading, button.primary[disabled], ' +
-                '.pending button.primary, .generating button.primary, ' +
-                '.progress-bar:not([style*="display: none"]):not([style*="display:none"])'
+                'button.primary.loading, ' +
+                '.pending button.primary, .generating button.primary'
             );
-            /* 找到所有主按钮，排除工作台记录面板的按钮 */
-            var allBtns = document.querySelectorAll('button.primary:not(#workspace-record-panel button)');
+            
+            /* 跟踪锁定时间，超过 120 秒强制解锁（防止出错后永久锁死）*/
+            if (anyBusy) {
+                if (!_lockStart) _lockStart = Date.now();
+                if (Date.now() - _lockStart > 120000) {
+                    anyBusy = false;
+                    _lockStart = 0;
+                }
+            } else {
+                _lockStart = 0;
+            }
+            
+            /* 找到所有主按钮，排除工作台记录面板和关闭对话框的按钮 */
+            var allBtns = document.querySelectorAll('button.primary:not(#workspace-record-panel button):not(#zdai-cm button):not(#zdai-del-modal button)');
             if (allBtns.length === 0) return;
             
             allBtns.forEach(function(b) {
                 /* 跳过工作台记录面板内的按钮 */
-                if (b.closest('#workspace-record-panel')) return;
+                if (b.closest('#workspace-record-panel') || b.closest('#zdai-cm') || b.closest('#zdai-del-modal')) return;
                 
                 var isSelf = b.classList.contains('loading') || b.disabled;
                 if (anyBusy && !isSelf) {
@@ -589,4 +601,27 @@
     setTimeout(applyFontPreview, 5000);
 
     console.log('[织梦AI] 初始化完成 | Ctrl+Shift+Q 强制退出');
+
+    /* ── 14. 下载按钮：弹出系统另存为对话框保存文件 ── */
+    document.addEventListener('click', function(e) {
+        var link = e.target.closest('a[download]');
+        if (!link) return;
+        var href = link.getAttribute('href') || link.href || '';
+        if (!href || !href.includes('/file=')) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        // 构造完整 URL
+        var fullUrl = href.startsWith('http') ? href : window.location.origin + href;
+        console.log('[织梦AI] 另存为下载:', fullUrl);
+
+        // 调用 Python 端弹出另存为对话框
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.save_download_file) {
+            window.pywebview.api.save_download_file(fullUrl);
+        } else {
+            // 兜底：直接用浏览器打开
+            window.open(fullUrl);
+        }
+    }, true);
 }

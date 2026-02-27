@@ -30,14 +30,22 @@ os.makedirs(FONTS_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # FFmpeg 路径配置
-_LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
-_FFMPEG_DIR = os.path.join(_LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-_FFMPEG = os.path.join(_FFMPEG_DIR, "ffmpeg.exe")
-_FFPROBE = os.path.join(_FFMPEG_DIR, "ffprobe.exe")
+_HEYGEM_DIR = os.path.join(BASE_DIR, "heygem-win-50")
+_HEYGEM_FFMPEG_DIR = os.path.join(_HEYGEM_DIR, "py39", "ffmpeg", "bin")
+_FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
+_FFPROBE = shutil.which("ffprobe") or "ffprobe"
 
-if not os.path.exists(_FFMPEG):
-    _FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
-    _FFPROBE = shutil.which("ffprobe") or "ffprobe"
+_HEYGEM_FFMPEG = os.path.join(_HEYGEM_FFMPEG_DIR, "ffmpeg.exe")
+_HEYGEM_FFPROBE = os.path.join(_HEYGEM_FFMPEG_DIR, "ffprobe.exe")
+if os.path.exists(_HEYGEM_FFMPEG):
+    _FFMPEG = _HEYGEM_FFMPEG
+if os.path.exists(_HEYGEM_FFPROBE):
+    _FFPROBE = _HEYGEM_FFPROBE
+
+if not _FFMPEG:
+    _FFMPEG = "ffmpeg"
+if not _FFPROBE:
+    _FFPROBE = "ffprobe"
 
 # Windows 无窗口标志
 _WIN = sys.platform == "win32"
@@ -105,6 +113,7 @@ def get_font_choices_grouped() -> list:
     """从 fonts_merged.json 读取字体列表，按分组返回扁平 choices
     
     排序规则：
+    0. 系统字体（Windows 内置）→ 始终置顶
     1. 用户使用过的字体 → 置顶（按使用次数降序），标记【最近使用】
     2. 每个分组内按 popular 降序排列
     """
@@ -112,7 +121,7 @@ def get_font_choices_grouped() -> list:
     fonts = data.get("fonts", [])
     
     if not fonts:
-        return [("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
+        return [("🖥️ 系统字体（默认）", "系统字体"), ("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
     
     usage = _load_font_usage()
     
@@ -146,7 +155,10 @@ def get_font_choices_grouped() -> list:
     
     result = []
     
-    # 先放用户常用字体
+    # 系统字体始终在最前面
+    result.append(("🖥️ 系统字体（默认）", "系统字体"))
+    
+    # 再放用户常用字体
     if used_fonts:
         result.extend((d, v) for d, v, _ in used_fonts)
     

@@ -11,13 +11,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PIP_DIR  = os.path.join(BASE_DIR, "画中画")
 os.makedirs(PIP_DIR, exist_ok=True)
 
-LATENTSYNC_DIR = os.path.join(BASE_DIR, "_internal_sync")
-_FFMPEG_DIR = os.path.join(LATENTSYNC_DIR, "ffmpeg-7.1", "bin")
-_FFMPEG  = os.path.join(_FFMPEG_DIR, "ffmpeg.exe")
-_FFPROBE = os.path.join(_FFMPEG_DIR, "ffprobe.exe")
-if not os.path.exists(_FFMPEG):
-    _FFMPEG  = shutil.which("ffmpeg")  or "ffmpeg"
-    _FFPROBE = shutil.which("ffprobe") or "ffprobe"
+HEYGEM_DIR = os.path.join(BASE_DIR, "heygem-win-50")
+HEYGEM_FFMPEG = os.path.join(HEYGEM_DIR, "py39", "ffmpeg", "bin")
+_FFMPEG  = shutil.which("ffmpeg")  or "ffmpeg"
+_FFPROBE = shutil.which("ffprobe") or "ffprobe"
+_HEYGEM_FFMPEG_EXE = os.path.join(HEYGEM_FFMPEG, "ffmpeg.exe")
+_HEYGEM_FFPROBE_EXE = os.path.join(HEYGEM_FFMPEG, "ffprobe.exe")
+if os.path.exists(_HEYGEM_FFMPEG_EXE):
+    _FFMPEG = _HEYGEM_FFMPEG_EXE
+if os.path.exists(_HEYGEM_FFPROBE_EXE):
+    _FFPROBE = _HEYGEM_FFPROBE_EXE
 
 OUTPUT_DIR = os.path.join(BASE_DIR, "unified_outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)

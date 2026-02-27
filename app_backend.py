@@ -844,6 +844,80 @@ class AppApi:
                 pass
         threading.Thread(target=_do, daemon=True).start()
 
+    def save_download_file(self, gradio_file_url):
+        """下载 Gradio 文件并弹出另存为对话框"""
+        def _do():
+            try:
+                import urllib.request, urllib.parse
+                from tkinter import Tk, filedialog
+                
+                # 从 URL 提取原始文件名
+                # Gradio URL 格式: /file=C:\...\lipsync_xxx.mp4
+                fname = "download"
+                if '/file=' in gradio_file_url:
+                    raw = gradio_file_url.split('/file=', 1)[1]
+                    raw = urllib.parse.unquote(raw)
+                    fname = os.path.basename(raw)
+                
+                ext = os.path.splitext(fname)[1].lower() or '.mp4'
+                
+                # 弹出另存为对话框
+                root = Tk()
+                root.withdraw()
+                root.attributes('-topmost', True)
+                save_path = filedialog.asksaveasfilename(
+                    parent=root,
+                    title='保存文件',
+                    initialfile=fname,
+                    defaultextension=ext,
+                    filetypes=[
+                        ('视频文件', '*.mp4 *.avi *.mkv *.mov'),
+                        ('音频文件', '*.wav *.mp3 *.flac'),
+                        ('所有文件', '*.*'),
+                    ]
+                )
+                root.destroy()
+                
+                if not save_path:
+                    print("[API] 用户取消保存")
+                    return
+                
+                # 如果是本地文件路径，直接复制
+                if '/file=' in gradio_file_url:
+                    raw = gradio_file_url.split('/file=', 1)[1]
+                    raw = urllib.parse.unquote(raw)
+                    local_path = os.path.normpath(raw)
+                    if os.path.exists(local_path):
+                        import shutil
+                        shutil.copy2(local_path, save_path)
+                        print(f"[API] 文件已保存: {save_path}")
+                        return
+                
+                # 否则通过 HTTP 下载
+                print(f"[API] 下载文件: {gradio_file_url}")
+                urllib.request.urlretrieve(gradio_file_url, save_path)
+                print(f"[API] 文件已保存: {save_path}")
+                
+            except Exception as e:
+                print(f"[API] save_download_file 失败: {e}")
+        threading.Thread(target=_do, daemon=True).start()
+
+    def open_file_location(self, file_path):
+        """用资源管理器打开文件所在目录并选中文件"""
+        def _do():
+            try:
+                fp = os.path.normpath(file_path)
+                if os.path.exists(fp):
+                    subprocess.Popen(["explorer", "/select,", fp],
+                                     creationflags=subprocess.CREATE_NO_WINDOW)
+                    print(f"[API] 打开文件位置: {fp}")
+                else:
+                    print(f"[API] 文件不存在: {fp}")
+            except Exception as e:
+                print(f"[API] open_file_location 失败: {e}")
+        threading.Thread(target=_do, daemon=True).start()
+
+
 
 _api = AppApi()
 
