@@ -56,8 +56,40 @@ DEFAULT_BG_COLOR = "#000000"
 # ============================================================
 # 字体工具
 # ============================================================
+FONTS_MERGED_PATH = os.path.join(BASE_DIR, "fonts_merged.json")
+FONT_CACHE_DIR = os.path.join(BASE_DIR, "font_cache")
+FONT_USAGE_PATH = os.path.join(BASE_DIR, "font_usage.json")
+
+def _load_fonts_merged() -> dict:
+    """加载 fonts_merged.json"""
+    try:
+        with open(FONTS_MERGED_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"fonts": [], "categories": {}}
+
+def _load_font_usage() -> dict:
+    """加载用户字体使用记录 {font_name: count}"""
+    try:
+        with open(FONT_USAGE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def record_font_usage(font_name: str):
+    """记录用户使用了某个字体（生成字幕时调用）"""
+    if not font_name or font_name in ("系统字体", "默认字体"):
+        return
+    usage = _load_font_usage()
+    usage[font_name] = usage.get(font_name, 0) + 1
+    try:
+        with open(FONT_USAGE_PATH, "w", encoding="utf-8") as f:
+            json.dump(usage, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 def get_font_choices() -> List[str]:
-    """获取字体选择列表，第一项为系统字体"""
+    """获取字体选择列表，第一项为系统字体（兼容旧逻辑）"""
     font_exts = {".ttf", ".otf", ".TTF", ".OTF"}
     try:
         names = [
@@ -68,6 +100,348 @@ def get_font_choices() -> List[str]:
     except OSError:
         names = []
     return ["系统字体"] + names
+
+def get_font_choices_grouped() -> list:
+    """从 fonts_merged.json 读取字体列表，按分组返回扁平 choices
+    
+    排序规则：
+    1. 用户使用过的字体 → 置顶（按使用次数降序），标记【最近使用】
+    2. 每个分组内按 popular 降序排列
+    """
+    data = _load_fonts_merged()
+    fonts = data.get("fonts", [])
+    
+    if not fonts:
+        return [("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
+    
+    usage = _load_font_usage()
+    
+    # 按 category 分组
+    groups: Dict[str, List[tuple]] = {}
+    cat_labels: Dict[str, str] = {}
+    used_fonts = []  # 用户使用过的字体
+    
+    for f in fonts:
+        cat = f.get("category", "other")
+        label = f.get("category_label", cat)
+        cat_labels[cat] = label
+        if cat not in groups:
+            groups[cat] = []
+        display = f.get("display_name") or f.get("name", "")
+        value = f.get("name", "")
+        pop = f.get("popular", 0)
+        use_count = usage.get(value, 0)
+        if display and value:
+            if use_count > 0:
+                used_fonts.append((f"⭐ {display}", value, use_count))
+            groups[cat].append((f"【{label}】{display}", value, pop))
+    
+    # 用户使用过的按次数降序
+    used_fonts.sort(key=lambda x: -x[2])
+    used_names = {v for _, v, _ in used_fonts}
+    
+    # 每个分组内按 popular 降序
+    for cat in groups:
+        groups[cat].sort(key=lambda x: -x[2])
+    
+    result = []
+    
+    # 先放用户常用字体
+    if used_fonts:
+        result.extend((d, v) for d, v, _ in used_fonts)
+    
+    # 再按分组放其余字体（跳过已在常用中的）
+    order = ["zh_cn", "zh_tw", "en"]
+    for cat in order:
+        if cat in groups:
+            result.extend((d, v) for d, v, _ in groups[cat] if v not in used_names)
+    for cat, items in groups.items():
+        if cat not in order:
+            result.extend((d, v) for d, v, _ in items if v not in used_names)
+    
+    return result
+
+def get_font_info(font_name: str) -> Optional[dict]:
+    """根据字体 name 获取完整信息"""
+    data = _load_fonts_merged()
+    for f in data.get("fonts", []):
+        if f.get("name") == font_name:
+            return f
+    return None
+
+def get_font_preview_path(font_name: str) -> str:
+    """获取字体的 cache_font 路径（用于预览）"""
+    info = get_font_info(font_name)
+    if not info:
+        return ""
+    cache_path = info.get("cache_font", "")
+    if cache_path:
+        full = os.path.join(BASE_DIR, cache_path)
+        if os.path.exists(full):
+            return full
+    return ""
+
+
+def ensure_font_downloaded(font_name: str, progress_cb=None) -> str:
+    """确保字体文件存在于 fonts/ 目录，不存在则下载（参考 BGM 直连下载方式）
+
+    返回字体文件的完整路径，失败返回空字符串
+    """
+    if not font_name or font_name in ("系统字体", "默认字体"):
+        return ""
+
+    info = get_font_info(font_name)
+    if not info:
+        print(f"[FONT] 未找到字体信息: {font_name}")
+        return ""
+
+    filename = info.get("filename", "")
+    if not filename:
+        return ""
+
+    # 检查 fonts/ 目录是否已有（完整版）
+    target = os.path.join(FONTS_DIR, filename)
+    expected_size = info.get("size", 0)
+    if os.path.exists(target):
+        actual_size = os.path.getsize(target)
+        if expected_size > 0 and actual_size >= expected_size * 0.5:
+            print(f"[FONT] 字体已存在(完整版): {target} ({actual_size} bytes)")
+            return target
+        elif expected_size == 0 and actual_size > 100000:
+            print(f"[FONT] 字体已存在: {target} ({actual_size} bytes)")
+            return target
+        else:
+            print(f"[FONT] 字体文件太小({actual_size} vs 预期{expected_size})，需要下载完整版")
+            try: os.remove(target)
+            except Exception: pass
+
+    # 需要下载
+    url = info.get("download_url", "")
+    if not url:
+        print(f"[FONT] 无下载链接: {font_name}")
+        return ""
+
+    display = info.get("display_name", font_name)
+    print(f"[FONT] 开始下载字体: {font_name} from {url}")
+    if progress_cb:
+        try: progress_cb(0.1, f"⬇️ 下载字体: {display}...")
+        except Exception: pass
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+    }
+
+    tmp_path = target + ".tmp"
+
+    def _looks_like_html(p):
+        """检查文件是否为 HTML 错误页面"""
+        try:
+            with open(p, "rb") as f:
+                head = f.read(256).lstrip()
+            if not head:
+                return True
+            low = head[:64].lower()
+            return low.startswith(b"<!doctype") or low.startswith(b"<html") or low.startswith(b"<head")
+        except Exception:
+            return False
+
+    def _file_valid(p):
+        return os.path.exists(p) and os.path.getsize(p) > 10000 and not _looks_like_html(p)
+
+    def _do_stream_write(resp_iter, total):
+        """通用流式写入 + 进度回调"""
+        downloaded = 0
+        with open(tmp_path, "wb") as f:
+            for chunk in resp_iter:
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_cb and total > 0:
+                        pct = 0.1 + 0.85 * (downloaded / total)
+                        try: progress_cb(min(pct, 0.95), f"⬇️ 下载字体: {display} ({downloaded//1024}KB)")
+                        except Exception: pass
+        return downloaded
+
+    # ---- 方法1: requests 默认（和 BGM 下载完全一致） ----
+    def _dl_requests():
+        try:
+            import requests as _req
+        except ImportError:
+            return False
+        last_err = None
+        for _attempt in range(3):
+            try:
+                if os.path.exists(tmp_path):
+                    try: os.remove(tmp_path)
+                    except Exception: pass
+                with _req.get(url, headers=headers, stream=True,
+                              allow_redirects=True, timeout=(15, 120)) as r:
+                    total = int(r.headers.get("content-length", 0))
+                    _do_stream_write(r.iter_content(chunk_size=262144), total)
+                if _file_valid(tmp_path):
+                    return True
+                last_err = Exception("invalid file")
+            except Exception as e:
+                last_err = e
+                print(f"[FONT] requests 第{_attempt+1}次失败: {e}")
+            time.sleep(0.5)
+        return False
+
+    # ---- 方法2: requests 直连（禁用系统代理） ----
+    def _dl_requests_noproxy():
+        try:
+            import requests as _req
+        except ImportError:
+            return False
+        try:
+            if os.path.exists(tmp_path):
+                try: os.remove(tmp_path)
+                except Exception: pass
+            sess = _req.Session()
+            sess.trust_env = False
+            with sess.get(url, headers=headers, stream=True,
+                          allow_redirects=True, timeout=(15, 120)) as r:
+                total = int(r.headers.get("content-length", 0))
+                _do_stream_write(r.iter_content(chunk_size=262144), total)
+            sess.close()
+            return _file_valid(tmp_path)
+        except Exception as e:
+            print(f"[FONT] requests(noproxy) 失败: {e}")
+            return False
+
+    # ---- 方法3: urllib 直连 ----
+    def _dl_urllib():
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers=headers)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(req, timeout=120) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                with open(tmp_path, "wb") as f:
+                    while True:
+                        chunk = resp.read(262144)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_cb and total > 0:
+                            pct = 0.1 + 0.85 * (downloaded / total)
+                            try: progress_cb(min(pct, 0.95), f"⬇️ 下载字体: {display} ({downloaded//1024}KB)")
+                            except Exception: pass
+            return _file_valid(tmp_path)
+        except Exception as e:
+            print(f"[FONT] urllib 失败: {e}")
+            return False
+
+    # ---- 方法4: PowerShell 兜底（走系统网络栈，和浏览器最接近） ----
+    def _dl_powershell():
+        try:
+            u = url.replace("'", "''")
+            p = tmp_path.replace("'", "''")
+            cmd = (
+                "$ProgressPreference='SilentlyContinue';"
+                "try { "
+                f"Invoke-WebRequest -UseBasicParsing -Uri '{u}' -OutFile '{p}' "
+                f"-Headers @{{'User-Agent'='{headers['User-Agent']}'}}; "
+                "exit 0 } catch { exit 1 }"
+            )
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+                capture_output=True, text=True,
+                creationflags=_NWIN, timeout=120)
+            return r.returncode == 0 and _file_valid(tmp_path)
+        except Exception as e:
+            print(f"[FONT] powershell 失败: {e}")
+            return False
+
+    try:
+        ok = False
+        methods = [
+            ("requests", _dl_requests),
+            ("requests-noproxy", _dl_requests_noproxy),
+            ("urllib", _dl_urllib),
+            ("powershell", _dl_powershell),
+        ]
+        for method_name, method in methods:
+            print(f"[FONT] 尝试 {method_name} 下载...")
+            if os.path.exists(tmp_path):
+                try: os.remove(tmp_path)
+                except Exception: pass
+            if method():
+                print(f"[FONT] {method_name} 下载成功")
+                ok = True
+                break
+            else:
+                print(f"[FONT] {method_name} 失败，尝试下一个方法")
+
+        if ok and _file_valid(tmp_path):
+            shutil.move(tmp_path, target)
+            print(f"[FONT] 下载完成: {target} ({os.path.getsize(target)} bytes)")
+            if progress_cb:
+                try: progress_cb(1.0, "✅ 字体下载完成")
+                except Exception: pass
+            return target
+        else:
+            if os.path.exists(tmp_path):
+                try: os.remove(tmp_path)
+                except Exception: pass
+            print(f"[FONT] 所有下载方式均失败")
+            return ""
+    except Exception as e:
+        print(f"[FONT] 下载异常: {e}")
+        if os.path.exists(tmp_path):
+            try: os.remove(tmp_path)
+            except Exception: pass
+        return ""
+
+
+
+
+def get_font_family_name(font_name: str) -> str:
+    """读取字体文件内部的 family name（ASS/libass 需要用内部名称匹配）
+    
+    优先从 fonts/ 目录读取，其次从 font_cache/ 读取。
+    返回内部 family name，失败则返回原始 font_name。
+    """
+    if not font_name or font_name in ("系统字体", "默认字体"):
+        return "Source Han Sans CN Bold"
+    
+    info = get_font_info(font_name)
+    if not info:
+        return font_name
+    
+    filename = info.get("filename", "")
+    
+    # 查找可用的字体文件路径
+    font_path = ""
+    if filename:
+        p = os.path.join(FONTS_DIR, filename)
+        if os.path.exists(p):
+            font_path = p
+    if not font_path:
+        cache = info.get("cache_font", "")
+        if cache:
+            p = os.path.join(BASE_DIR, cache)
+            if os.path.exists(p):
+                font_path = p
+    
+    if not font_path:
+        return font_name
+    
+    try:
+        from PIL import ImageFont
+        pil_font = ImageFont.truetype(font_path, 20)
+        family, style = pil_font.getname()
+        if family:
+            print(f"[FONT] '{font_name}' -> internal family: '{family}'")
+            return family
+    except Exception as e:
+        print(f"[FONT] 读取字体内部名称失败: {e}")
+    
+    return font_name
 
 
 # ============================================================
@@ -215,7 +589,8 @@ def build_ass(words, font_name, font_size,
     # 调试日志
     print(f"[SUBTITLE] kw_enable={kw_enable}, keywords={keywords}, kws={kws}")
 
-    fn = font_name if font_name and font_name not in ("默认字体", "系统字体") else "Microsoft YaHei"
+    fn = get_font_family_name(font_name) if font_name and font_name not in ("默认字体", "系统字体") else "Source Han Sans CN Bold"
+    print(f"[SUBTITLE] font_name='{font_name}' -> ASS Fontname='{fn}'")
 
     # 背景色处理 - 使用\an标签和box方式
     bg_op = max(0, min(100, int(bg_opacity or 0)))
@@ -677,6 +1052,15 @@ def burn_subtitles(video_path, audio_path, text_hint,
     hi_color      = normalize_color(hi_color,      "#FFD700")
     outline_color = normalize_color(outline_color, "#000000")
     bg_color      = normalize_color(bg_color,      "#000000")
+
+    # 确保字体文件已下载到 fonts/ 目录
+    if font_name and font_name not in ("系统字体", "默认字体", ""):
+        _prog(0.02, "🔤 检查字体文件...")
+        _font_path = ensure_font_downloaded(font_name, progress_cb=_prog)
+        if _font_path:
+            record_font_usage(font_name)
+        else:
+            print(f"[SUBTITLE] 字体 '{font_name}' 下载失败，使用系统字体")
 
     _prog(0.05, "🎙 识别音频文字...")
     src_audio = str(audio_path) if (audio_path and os.path.exists(str(audio_path))) else str(video_path)

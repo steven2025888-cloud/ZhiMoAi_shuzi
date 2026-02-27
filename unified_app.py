@@ -1926,16 +1926,19 @@ def build_ui():
                                 )
                                 # 基本设置：字体 字号 位置（始终可见）
                                 with gr.Row():
+                                    _font_grouped = _sub.get_font_choices_grouped() if _LIBS_OK else [("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
                                     sub_font = gr.Dropdown(
                                         label="字体",
-                                        choices=_sub.get_font_choices() if _LIBS_OK else ["系统字体"],
-                                        value="系统字体",
+                                        choices=_font_grouped,
+                                        value="SourceHanSansCN-Bold",
                                         interactive=True, scale=3)
                                     sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
                                                          value=38, step=2, scale=3)
                                     sub_pos = gr.Radio(label="位置", choices=["上","中","下"],
                                                        value="下", scale=2,
                                                        elem_classes="sub-pos-radio")
+                                # 字体预览区域
+                                sub_font_preview = gr.HTML(value="", visible=False, elem_id="sub-font-preview")
                                 # ── 高级设置按钮（弹窗入口）──
                                 sub_settings_open_btn = gr.Button(
                                     "⚙️ 高级设置", variant="secondary", size="sm",
@@ -2748,9 +2751,14 @@ def build_ui():
             """恢复选中的工作台记录"""
             try:
                 if not record_idx_str:
-                    return [gr.update()] * 27 + [_hint_html("warning", "无效的记录索引")]
+                    # 未选择记录，只更新提示，其他组件不动
+                    return [gr.update()] * 27 + [_hint_html("warning", "请先选择一条记录")]
                 
-                record_idx = int(record_idx_str)
+                try:
+                    record_idx = int(record_idx_str)
+                except (ValueError, TypeError):
+                    return [gr.update()] * 27 + [_hint_html("error", "无效的记录索引")]
+                
                 records = _load_workspace_records()
                 
                 if record_idx < 0 or record_idx >= len(records):
@@ -3486,6 +3494,94 @@ def build_ui():
             return gr.update(visible=enabled), gr.update(visible=enabled)
         sub_kw_enable.change(_toggle_kw, inputs=[sub_kw_enable],
                              outputs=[sub_kw_row, sub_hi_scale])
+
+        # ── 字体选择预览 ──
+
+        def _render_font_preview(font_path, text, width=580, height=64, font_size=30):
+            """用 Pillow 渲染字体预览图，返回 base64 PNG 字符串"""
+            try:
+                from PIL import Image, ImageDraw, ImageFont
+                import base64, io
+                img = Image.new("RGBA", (width, height), (26, 26, 46, 255))
+                draw = ImageDraw.Draw(img)
+                try:
+                    pil_font = ImageFont.truetype(font_path, font_size)
+                except Exception:
+                    return ""
+                bbox = draw.textbbox((0, 0), text, font=pil_font)
+                tw = bbox[2] - bbox[0]
+                th = bbox[3] - bbox[1]
+                x = (width - tw) // 2 - bbox[0]
+                y = (height - th) // 2 - bbox[1]
+                draw.text((x, y), text, fill=(255, 255, 255, 255), font=pil_font)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return base64.b64encode(buf.getvalue()).decode("ascii")
+            except Exception as e:
+                print(f"[FONT PREVIEW] render failed: {e}")
+                return ""
+
+        def _on_font_select(font_name):
+            """字体选择后用 Pillow 渲染预览图片"""
+            if not font_name or font_name in ("系统字体", "默认字体"):
+                return gr.update(value="", visible=False)
+            
+            if not _LIBS_OK:
+                return gr.update(value="", visible=False)
+            
+            info = _sub.get_font_info(font_name)
+            if not info:
+                return gr.update(value="", visible=False)
+            
+            display = info.get("display_name", font_name)
+            filename = info.get("filename", "")
+            category = info.get("category", "zh_cn")
+            in_fonts = os.path.exists(os.path.join(_sub.FONTS_DIR, filename)) if filename else False
+            size_mb = info.get("size", 0) / 1024 / 1024
+            status = "✅ 已下载" if in_fonts else f"⬇️ 生成时自动下载 ({size_mb:.1f}MB)"
+            
+            # 优先用 font_cache 精简版，其次用 fonts/ 完整版
+            font_file = ""
+            cache_font = info.get("cache_font", "")
+            if cache_font:
+                p = os.path.join(_sub.BASE_DIR, cache_font)
+                if os.path.exists(p):
+                    font_file = p
+            if not font_file and filename:
+                p = os.path.join(_sub.FONTS_DIR, filename)
+                if os.path.exists(p):
+                    font_file = p
+            
+            # 根据分类用 display_name + 数字 作为预览文字
+            cat_suffix = {"zh_cn": "中文字幕", "zh_tw": "中文字幕", "en": "Subtitle"}
+            preview_text = f"{display} {cat_suffix.get(category, '字幕')} 1234"
+            
+            img_html = ""
+            if font_file:
+                b64 = _render_font_preview(font_file, preview_text)
+                if b64:
+                    img_html = (
+                        f'<img src="data:image/png;base64,{b64}" '
+                        f'style="width:100%;border-radius:6px;display:block;" />'
+                    )
+            
+            if not img_html:
+                img_html = (
+                    '<div style="font-size:20px;color:#888;text-align:center;'
+                    'padding:12px 0;">预览不可用</div>'
+                )
+            
+            html = (
+                f'<div style="padding:8px;background:#1a1a2e;border-radius:8px;">'
+                f'{img_html}'
+                f'<div style="color:#aaa;font-size:12px;text-align:center;'
+                f'margin-top:6px;padding-bottom:4px;">'
+                f'🔤 {display} &nbsp; {status}</div>'
+                f'</div>'
+            )
+            return gr.update(value=html, visible=True)
+        
+        sub_font.change(_on_font_select, inputs=[sub_font], outputs=[sub_font_preview])
 
         # ── 字幕生成 ──
         def _do_subtitle(vid, aud, text,
@@ -5110,7 +5206,8 @@ if __name__ == "__main__":
                 allowed_paths=[BASE_DIR, OUTPUT_DIR,
                               os.path.join(BASE_DIR,"avatars"),
                               os.path.join(BASE_DIR,"voices"),
-                              os.path.join(BASE_DIR,"fonts")],
+                              os.path.join(BASE_DIR,"fonts"),
+                              os.path.join(BASE_DIR,"font_cache")],
             )
             break
         except OSError:

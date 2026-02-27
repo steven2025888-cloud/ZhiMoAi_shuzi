@@ -1079,7 +1079,7 @@ def start_gradio():
     flags = 0
     if sys.platform == "win32":
         flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-    log_path = os.path.join(BASE_DIR, "gradio_error.log")
+    log_path = os.path.join(BASE_DIR, "logs", "gradio_error.log")
     try:
         with open(log_path, 'w', encoding='utf-8', errors='replace') as log_f:
             gradio_process = subprocess.Popen(

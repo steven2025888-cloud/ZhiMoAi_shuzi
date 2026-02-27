@@ -25,8 +25,8 @@ class LogFileConfig:
 
 # 日志文件配置列表
 LOG_FILES: List[LogFileConfig] = [
-    LogFileConfig(os.path.join(BASE_DIR, "vbs_startup.log"), 50),
-    LogFileConfig(os.path.join(BASE_DIR, "ws_extract.log"), 50),
+    LogFileConfig(os.path.join(BASE_DIR, "logs", "vbs_startup.log"), 50),
+    LogFileConfig(os.path.join(BASE_DIR, "logs", "ws_extract.log"), 50),
     LogFileConfig(os.path.join(BASE_DIR, "logs", "app.log"), 100),
 ]
 

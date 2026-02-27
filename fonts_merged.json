@@ -83,7 +83,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-105-Heavy.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-105-Heavy.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-105-Heavy.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-105-Heavy.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-105-Heavy.png",
+      "popular": 199
     },
     {
       "name": "AlibabaPuHuiTi-2-115-Black",
@@ -97,7 +98,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-115-Black.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-115-Black.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-115-Black.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-115-Black.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-115-Black.png",
+      "popular": 100
     },
     {
       "name": "AlibabaPuHuiTi-2-35-Thin",
@@ -111,7 +113,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-35-Thin.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-35-Thin.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-35-Thin.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-35-Thin.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-35-Thin.png",
+      "popular": 97
     },
     {
       "name": "AlibabaPuHuiTi-2-45-Light",
@@ -125,7 +128,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-45-Light.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-45-Light.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-45-Light.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-45-Light.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-45-Light.png",
+      "popular": 98
     },
     {
       "name": "AlibabaPuHuiTi-2-55-Regular",
@@ -139,7 +143,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-55-Regular.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-55-Regular.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-55-Regular.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-55-Regular.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-55-Regular.png",
+      "popular": 178
     },
     {
       "name": "AlibabaPuHuiTi-2-65-Medium",
@@ -153,7 +158,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-65-Medium.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-65-Medium.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-65-Medium.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-65-Medium.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-65-Medium.png",
+      "popular": 180
     },
     {
       "name": "AlibabaPuHuiTi-2-75-SemiBold",
@@ -167,7 +173,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-75-SemiBold.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-75-SemiBold.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-75-SemiBold.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-75-SemiBold.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-75-SemiBold.png",
+      "popular": 179
     },
     {
       "name": "AlibabaPuHuiTi-2-85-Bold",
@@ -181,7 +188,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-85-Bold.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-85-Bold.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-85-Bold.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-85-Bold.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-85-Bold.png",
+      "popular": 200
     },
     {
       "name": "AlibabaPuHuiTi-2-95-ExtraBold",
@@ -195,7 +203,8 @@
       "cache_font": "font_cache\\zh_cn\\AlibabaPuHuiTi-2-95-ExtraBold.ttf",
       "path": "zh_cn\\AlibabaPuHuiTi-2-95-ExtraBold.ttf",
       "preview_image": "font_previews\\zh_cn\\AlibabaPuHuiTi-2-95-ExtraBold.png",
-      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-95-ExtraBold.png"
+      "preview_relative": "font_previews/zh_cn/AlibabaPuHuiTi-2-95-ExtraBold.png",
+      "popular": 99
     },
     {
       "name": "Droid Sans Fallback",
@@ -251,7 +260,8 @@
       "cache_font": "font_cache\\zh_cn\\Liu Jian Mao Cao钟齐流江毛草.ttf",
       "path": "zh_cn\\Liu Jian Mao Cao钟齐流江毛草.ttf",
       "preview_image": "font_previews\\zh_cn\\Liu Jian Mao Cao钟齐流江毛草.png",
-      "preview_relative": "font_previews/zh_cn/Liu Jian Mao Cao钟齐流江毛草.png"
+      "preview_relative": "font_previews/zh_cn/Liu Jian Mao Cao钟齐流江毛草.png",
+      "popular": 109
     },
     {
       "name": "OPPOSans-B",
@@ -265,7 +275,8 @@
       "cache_font": "font_cache\\zh_cn\\OPPOSans-B.ttf",
       "path": "zh_cn\\OPPOSans-B.ttf",
       "preview_image": "font_previews\\zh_cn\\OPPOSans-B.png",
-      "preview_relative": "font_previews/zh_cn/OPPOSans-B.png"
+      "preview_relative": "font_previews/zh_cn/OPPOSans-B.png",
+      "popular": 195
     },
     {
       "name": "OPPOSans-H",
@@ -279,7 +290,8 @@
       "cache_font": "font_cache\\zh_cn\\OPPOSans-H.ttf",
       "path": "zh_cn\\OPPOSans-H.ttf",
       "preview_image": "font_previews\\zh_cn\\OPPOSans-H.png",
-      "preview_relative": "font_previews/zh_cn/OPPOSans-H.png"
+      "preview_relative": "font_previews/zh_cn/OPPOSans-H.png",
+      "popular": 196
     },
     {
       "name": "OPPOSans-L",
@@ -293,7 +305,8 @@
       "cache_font": "font_cache\\zh_cn\\OPPOSans-L.ttf",
       "path": "zh_cn\\OPPOSans-L.ttf",
       "preview_image": "font_previews\\zh_cn\\OPPOSans-L.png",
-      "preview_relative": "font_previews/zh_cn/OPPOSans-L.png"
+      "preview_relative": "font_previews/zh_cn/OPPOSans-L.png",
+      "popular": 93
     },
     {
       "name": "OPPOSans-M",
@@ -307,7 +320,8 @@
       "cache_font": "font_cache\\zh_cn\\OPPOSans-M.ttf",
       "path": "zh_cn\\OPPOSans-M.ttf",
       "preview_image": "font_previews\\zh_cn\\OPPOSans-M.png",
-      "preview_relative": "font_previews/zh_cn/OPPOSans-M.png"
+      "preview_relative": "font_previews/zh_cn/OPPOSans-M.png",
+      "popular": 175
     },
     {
       "name": "OPPOSans-R",
@@ -321,7 +335,8 @@
       "cache_font": "font_cache\\zh_cn\\OPPOSans-R.ttf",
       "path": "zh_cn\\OPPOSans-R.ttf",
       "preview_image": "font_previews\\zh_cn\\OPPOSans-R.png",
-      "preview_relative": "font_previews/zh_cn/OPPOSans-R.png"
+      "preview_relative": "font_previews/zh_cn/OPPOSans-R.png",
+      "popular": 174
     },
     {
       "name": "ResourceHanRoundedCN-Bold",
@@ -335,7 +350,8 @@
       "cache_font": "font_cache\\zh_cn\\ResourceHanRoundedCN-Bold.ttf",
       "path": "zh_cn\\ResourceHanRoundedCN-Bold.ttf",
       "preview_image": "font_previews\\zh_cn\\ResourceHanRoundedCN-Bold.png",
-      "preview_relative": "font_previews/zh_cn/ResourceHanRoundedCN-Bold.png"
+      "preview_relative": "font_previews/zh_cn/ResourceHanRoundedCN-Bold.png",
+      "popular": 173
     },
     {
       "name": "ResourceHanRoundedCN-Regular",
@@ -349,7 +365,8 @@
       "cache_font": "font_cache\\zh_cn\\ResourceHanRoundedCN-Regular.ttf",
       "path": "zh_cn\\ResourceHanRoundedCN-Regular.ttf",
       "preview_image": "font_previews\\zh_cn\\ResourceHanRoundedCN-Regular.png",
-      "preview_relative": "font_previews/zh_cn/ResourceHanRoundedCN-Regular.png"
+      "preview_relative": "font_previews/zh_cn/ResourceHanRoundedCN-Regular.png",
+      "popular": 172
     },
     {
       "name": "SourceHanSansCN-Bold",
@@ -363,7 +380,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSansCN-Bold.otf",
       "path": "zh_cn\\SourceHanSansCN-Bold.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSansCN-Bold.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Bold.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Bold.png",
+      "popular": 198
     },
     {
       "name": "SourceHanSansCN-ExtraLight",
@@ -377,7 +395,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSansCN-ExtraLight.otf",
       "path": "zh_cn\\SourceHanSansCN-ExtraLight.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSansCN-ExtraLight.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-ExtraLight.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-ExtraLight.png",
+      "popular": 94
     },
     {
       "name": "SourceHanSansCN-Heavy",
@@ -391,7 +410,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSansCN-Heavy.otf",
       "path": "zh_cn\\SourceHanSansCN-Heavy.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSansCN-Heavy.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Heavy.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Heavy.png",
+      "popular": 197
     },
     {
       "name": "SourceHanSansCN-Light",
@@ -405,7 +425,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSansCN-Light.otf",
       "path": "zh_cn\\SourceHanSansCN-Light.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSansCN-Light.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Light.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Light.png",
+      "popular": 95
     },
     {
       "name": "SourceHanSansCN-Medium",
@@ -419,7 +440,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSansCN-Medium.otf",
       "path": "zh_cn\\SourceHanSansCN-Medium.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSansCN-Medium.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Medium.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Medium.png",
+      "popular": 177
     },
     {
       "name": "SourceHanSansCN-Normal",
@@ -433,7 +455,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSansCN-Normal.otf",
       "path": "zh_cn\\SourceHanSansCN-Normal.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSansCN-Normal.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Normal.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Normal.png",
+      "popular": 96
     },
     {
       "name": "SourceHanSansCN-Regular",
@@ -447,7 +470,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSansCN-Regular.otf",
       "path": "zh_cn\\SourceHanSansCN-Regular.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSansCN-Regular.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Regular.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSansCN-Regular.png",
+      "popular": 176
     },
     {
       "name": "SourceHanSerifCN-Bold",
@@ -461,7 +485,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSerifCN-Bold.otf",
       "path": "zh_cn\\SourceHanSerifCN-Bold.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSerifCN-Bold.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Bold.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Bold.png",
+      "popular": 140
     },
     {
       "name": "SourceHanSerifCN-ExtraLight",
@@ -475,7 +500,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSerifCN-ExtraLight.otf",
       "path": "zh_cn\\SourceHanSerifCN-ExtraLight.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSerifCN-ExtraLight.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-ExtraLight.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-ExtraLight.png",
+      "popular": 134
     },
     {
       "name": "SourceHanSerifCN-Heavy",
@@ -489,7 +515,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSerifCN-Heavy.otf",
       "path": "zh_cn\\SourceHanSerifCN-Heavy.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSerifCN-Heavy.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Heavy.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Heavy.png",
+      "popular": 139
     },
     {
       "name": "SourceHanSerifCN-Light",
@@ -503,7 +530,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSerifCN-Light.otf",
       "path": "zh_cn\\SourceHanSerifCN-Light.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSerifCN-Light.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Light.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Light.png",
+      "popular": 135
     },
     {
       "name": "SourceHanSerifCN-Medium",
@@ -517,7 +545,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSerifCN-Medium.otf",
       "path": "zh_cn\\SourceHanSerifCN-Medium.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSerifCN-Medium.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Medium.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Medium.png",
+      "popular": 138
     },
     {
       "name": "SourceHanSerifCN-Regular",
@@ -531,7 +560,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSerifCN-Regular.otf",
       "path": "zh_cn\\SourceHanSerifCN-Regular.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSerifCN-Regular.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Regular.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-Regular.png",
+      "popular": 137
     },
     {
       "name": "SourceHanSerifCN-SemiBold",
@@ -545,7 +575,8 @@
       "cache_font": "font_cache\\zh_cn\\SourceHanSerifCN-SemiBold.otf",
       "path": "zh_cn\\SourceHanSerifCN-SemiBold.otf",
       "preview_image": "font_previews\\zh_cn\\SourceHanSerifCN-SemiBold.png",
-      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-SemiBold.png"
+      "preview_relative": "font_previews/zh_cn/SourceHanSerifCN-SemiBold.png",
+      "popular": 136
     },
     {
       "name": "ZhiMangXingShu钟齐志莽行书",
@@ -559,7 +590,8 @@
       "cache_font": "font_cache\\zh_cn\\ZhiMangXingShu钟齐志莽行书.ttf",
       "path": "zh_cn\\ZhiMangXingShu钟齐志莽行书.ttf",
       "preview_image": "font_previews\\zh_cn\\ZhiMangXingShu钟齐志莽行书.png",
-      "preview_relative": "font_previews/zh_cn/ZhiMangXingShu钟齐志莽行书.png"
+      "preview_relative": "font_previews/zh_cn/ZhiMangXingShu钟齐志莽行书.png",
+      "popular": 110
     },
     {
       "name": "d4象黑体",
@@ -615,7 +647,8 @@
       "cache_font": "font_cache\\zh_cn\\仓迹高德国妙黑.ttf",
       "path": "zh_cn\\仓迹高德国妙黑.ttf",
       "preview_image": "font_previews\\zh_cn\\仓迹高德国妙黑.png",
-      "preview_relative": "font_previews/zh_cn/仓迹高德国妙黑.png"
+      "preview_relative": "font_previews/zh_cn/仓迹高德国妙黑.png",
+      "popular": 149
     },
     {
       "name": "优设好身体",
@@ -629,7 +662,8 @@
       "cache_font": "font_cache\\zh_cn\\优设好身体.ttf",
       "path": "zh_cn\\优设好身体.ttf",
       "preview_image": "font_previews\\zh_cn\\优设好身体.png",
-      "preview_relative": "font_previews/zh_cn/优设好身体.png"
+      "preview_relative": "font_previews/zh_cn/优设好身体.png",
+      "popular": 170
     },
     {
       "name": "优设字由棒棒体",
@@ -643,7 +677,8 @@
       "cache_font": "font_cache\\zh_cn\\优设字由棒棒体.ttf",
       "path": "zh_cn\\优设字由棒棒体.ttf",
       "preview_image": "font_previews\\zh_cn\\优设字由棒棒体.png",
-      "preview_relative": "font_previews/zh_cn/优设字由棒棒体.png"
+      "preview_relative": "font_previews/zh_cn/优设字由棒棒体.png",
+      "popular": 147
     },
     {
       "name": "优设标题黑",
@@ -657,7 +692,8 @@
       "cache_font": "font_cache\\zh_cn\\优设标题黑.ttf",
       "path": "zh_cn\\优设标题黑.ttf",
       "preview_image": "font_previews\\zh_cn\\优设标题黑.png",
-      "preview_relative": "font_previews/zh_cn/优设标题黑.png"
+      "preview_relative": "font_previews/zh_cn/优设标题黑.png",
+      "popular": 191
     },
     {
       "name": "创客贴金刚体",
@@ -671,7 +707,8 @@
       "cache_font": "font_cache\\zh_cn\\创客贴金刚体.ttf",
       "path": "zh_cn\\创客贴金刚体.ttf",
       "preview_image": "font_previews\\zh_cn\\创客贴金刚体.png",
-      "preview_relative": "font_previews/zh_cn/创客贴金刚体.png"
+      "preview_relative": "font_previews/zh_cn/创客贴金刚体.png",
+      "popular": 146
     },
     {
       "name": "包图小白体",
@@ -685,7 +722,8 @@
       "cache_font": "font_cache\\zh_cn\\包图小白体.ttf",
       "path": "zh_cn\\包图小白体.ttf",
       "preview_image": "font_previews\\zh_cn\\包图小白体.png",
-      "preview_relative": "font_previews/zh_cn/包图小白体.png"
+      "preview_relative": "font_previews/zh_cn/包图小白体.png",
+      "popular": 157
     },
     {
       "name": "千图小兔体",
@@ -713,7 +751,8 @@
       "cache_font": "font_cache\\zh_cn\\品如手写体.ttf",
       "path": "zh_cn\\品如手写体.ttf",
       "preview_image": "font_previews\\zh_cn\\品如手写体.png",
-      "preview_relative": "font_previews/zh_cn/品如手写体.png"
+      "preview_relative": "font_previews/zh_cn/品如手写体.png",
+      "popular": 116
     },
     {
       "name": "字体传奇特战体(正式版)",
@@ -783,7 +822,8 @@
       "cache_font": "font_cache\\zh_cn\\寒蝉手拙体.ttf",
       "path": "zh_cn\\寒蝉手拙体.ttf",
       "preview_image": "font_previews\\zh_cn\\寒蝉手拙体.png",
-      "preview_relative": "font_previews/zh_cn/寒蝉手拙体.png"
+      "preview_relative": "font_previews/zh_cn/寒蝉手拙体.png",
+      "popular": 119
     },
     {
       "name": "小可奶酪体 商用免费",
@@ -797,7 +837,8 @@
       "cache_font": "font_cache\\zh_cn\\小可奶酪体 商用免费.ttf",
       "path": "zh_cn\\小可奶酪体 商用免费.ttf",
       "preview_image": "font_previews\\zh_cn\\小可奶酪体 商用免费.png",
-      "preview_relative": "font_previews/zh_cn/小可奶酪体 商用免费.png"
+      "preview_relative": "font_previews/zh_cn/小可奶酪体 商用免费.png",
+      "popular": 156
     },
     {
       "name": "庞门正道标题体",
@@ -811,7 +852,8 @@
       "cache_font": "font_cache\\zh_cn\\庞门正道标题体.ttf",
       "path": "zh_cn\\庞门正道标题体.ttf",
       "preview_image": "font_previews\\zh_cn\\庞门正道标题体.png",
-      "preview_relative": "font_previews/zh_cn/庞门正道标题体.png"
+      "preview_relative": "font_previews/zh_cn/庞门正道标题体.png",
+      "popular": 190
     },
     {
       "name": "庞门正道真贵楷体",
@@ -825,7 +867,8 @@
       "cache_font": "font_cache\\zh_cn\\庞门正道真贵楷体.ttf",
       "path": "zh_cn\\庞门正道真贵楷体.ttf",
       "preview_image": "font_previews\\zh_cn\\庞门正道真贵楷体.png",
-      "preview_relative": "font_previews/zh_cn/庞门正道真贵楷体.png"
+      "preview_relative": "font_previews/zh_cn/庞门正道真贵楷体.png",
+      "popular": 128
     },
     {
       "name": "庞门正道粗书体6.0",
@@ -839,7 +882,8 @@
       "cache_font": "font_cache\\zh_cn\\庞门正道粗书体6.0.ttf",
       "path": "zh_cn\\庞门正道粗书体6.0.ttf",
       "preview_image": "font_previews\\zh_cn\\庞门正道粗书体6.0.png",
-      "preview_relative": "font_previews/zh_cn/庞门正道粗书体6.0.png"
+      "preview_relative": "font_previews/zh_cn/庞门正道粗书体6.0.png",
+      "popular": 168
     },
     {
       "name": "庞门正道细线体",
@@ -881,7 +925,8 @@
       "cache_font": "font_cache\\zh_cn\\得意黑 斜体.ttf",
       "path": "zh_cn\\得意黑 斜体.ttf",
       "preview_image": "font_previews\\zh_cn\\得意黑 斜体.png",
-      "preview_relative": "font_previews/zh_cn/得意黑 斜体.png"
+      "preview_relative": "font_previews/zh_cn/得意黑 斜体.png",
+      "popular": 160
     },
     {
       "name": "悠哉Yozai",
@@ -909,7 +954,8 @@
       "cache_font": "font_cache\\zh_cn\\手书体.ttf",
       "path": "zh_cn\\手书体.ttf",
       "preview_image": "font_previews\\zh_cn\\手书体.png",
-      "preview_relative": "font_previews/zh_cn/手书体.png"
+      "preview_relative": "font_previews/zh_cn/手书体.png",
+      "popular": 115
     },
     {
       "name": "文楷",
@@ -937,7 +983,8 @@
       "cache_font": "font_cache\\zh_cn\\文道潮黑.ttf",
       "path": "zh_cn\\文道潮黑.ttf",
       "preview_image": "font_previews\\zh_cn\\文道潮黑.png",
-      "preview_relative": "font_previews/zh_cn/文道潮黑.png"
+      "preview_relative": "font_previews/zh_cn/文道潮黑.png",
+      "popular": 148
     },
     {
       "name": "斗鱼追光体",
@@ -951,7 +998,8 @@
       "cache_font": "font_cache\\zh_cn\\斗鱼追光体.ttf",
       "path": "zh_cn\\斗鱼追光体.ttf",
       "preview_image": "font_previews\\zh_cn\\斗鱼追光体.png",
-      "preview_relative": "font_previews/zh_cn/斗鱼追光体.png"
+      "preview_relative": "font_previews/zh_cn/斗鱼追光体.png",
+      "popular": 167
     },
     {
       "name": "新叶念体",
@@ -1007,7 +1055,8 @@
       "cache_font": "font_cache\\zh_cn\\智勇手书体(增加英文版).ttf",
       "path": "zh_cn\\智勇手书体(增加英文版).ttf",
       "preview_image": "font_previews\\zh_cn\\智勇手书体(增加英文版).png",
-      "preview_relative": "font_previews/zh_cn/智勇手书体(增加英文版).png"
+      "preview_relative": "font_previews/zh_cn/智勇手书体(增加英文版).png",
+      "popular": 114
     },
     {
       "name": "杨任东竹石体",
@@ -1077,7 +1126,8 @@
       "cache_font": "font_cache\\zh_cn\\江城圆体 200W.ttf",
       "path": "zh_cn\\江城圆体 200W.ttf",
       "preview_image": "font_previews\\zh_cn\\江城圆体 200W.png",
-      "preview_relative": "font_previews/zh_cn/江城圆体 200W.png"
+      "preview_relative": "font_previews/zh_cn/江城圆体 200W.png",
+      "popular": 82
     },
     {
       "name": "江城圆体 300W",
@@ -1091,7 +1141,8 @@
       "cache_font": "font_cache\\zh_cn\\江城圆体 300W.ttf",
       "path": "zh_cn\\江城圆体 300W.ttf",
       "preview_image": "font_previews\\zh_cn\\江城圆体 300W.png",
-      "preview_relative": "font_previews/zh_cn/江城圆体 300W.png"
+      "preview_relative": "font_previews/zh_cn/江城圆体 300W.png",
+      "popular": 83
     },
     {
       "name": "江城圆体 400W",
@@ -1105,7 +1156,8 @@
       "cache_font": "font_cache\\zh_cn\\江城圆体 400W.ttf",
       "path": "zh_cn\\江城圆体 400W.ttf",
       "preview_image": "font_previews\\zh_cn\\江城圆体 400W.png",
-      "preview_relative": "font_previews/zh_cn/江城圆体 400W.png"
+      "preview_relative": "font_previews/zh_cn/江城圆体 400W.png",
+      "popular": 84
     },
     {
       "name": "江城圆体 500W",
@@ -1119,7 +1171,8 @@
       "cache_font": "font_cache\\zh_cn\\江城圆体 500W.ttf",
       "path": "zh_cn\\江城圆体 500W.ttf",
       "preview_image": "font_previews\\zh_cn\\江城圆体 500W.png",
-      "preview_relative": "font_previews/zh_cn/江城圆体 500W.png"
+      "preview_relative": "font_previews/zh_cn/江城圆体 500W.png",
+      "popular": 85
     },
     {
       "name": "江城圆体 600W",
@@ -1133,7 +1186,8 @@
       "cache_font": "font_cache\\zh_cn\\江城圆体 600W.ttf",
       "path": "zh_cn\\江城圆体 600W.ttf",
       "preview_image": "font_previews\\zh_cn\\江城圆体 600W.png",
-      "preview_relative": "font_previews/zh_cn/江城圆体 600W.png"
+      "preview_relative": "font_previews/zh_cn/江城圆体 600W.png",
+      "popular": 86
     },
     {
       "name": "江城圆体 700W",
@@ -1147,7 +1201,8 @@
       "cache_font": "font_cache\\zh_cn\\江城圆体 700W.ttf",
       "path": "zh_cn\\江城圆体 700W.ttf",
       "preview_image": "font_previews\\zh_cn\\江城圆体 700W.png",
-      "preview_relative": "font_previews/zh_cn/江城圆体 700W.png"
+      "preview_relative": "font_previews/zh_cn/江城圆体 700W.png",
+      "popular": 87
     },
     {
       "name": "江西拙楷2.0",
@@ -1161,7 +1216,8 @@
       "cache_font": "font_cache\\zh_cn\\江西拙楷2.0.ttf",
       "path": "zh_cn\\江西拙楷2.0.ttf",
       "preview_image": "font_previews\\zh_cn\\江西拙楷2.0.png",
-      "preview_relative": "font_previews/zh_cn/江西拙楷2.0.png"
+      "preview_relative": "font_previews/zh_cn/江西拙楷2.0.png",
+      "popular": 129
     },
     {
       "name": "沐瑶软笔手写体",
@@ -1175,7 +1231,8 @@
       "cache_font": "font_cache\\zh_cn\\沐瑶软笔手写体.ttf",
       "path": "zh_cn\\沐瑶软笔手写体.ttf",
       "preview_image": "font_previews\\zh_cn\\沐瑶软笔手写体.png",
-      "preview_relative": "font_previews/zh_cn/沐瑶软笔手写体.png"
+      "preview_relative": "font_previews/zh_cn/沐瑶软笔手写体.png",
+      "popular": 118
     },
     {
       "name": "沐瑶随心手写体",
@@ -1189,7 +1246,8 @@
       "cache_font": "font_cache\\zh_cn\\沐瑶随心手写体.ttf",
       "path": "zh_cn\\沐瑶随心手写体.ttf",
       "preview_image": "font_previews\\zh_cn\\沐瑶随心手写体.png",
-      "preview_relative": "font_previews/zh_cn/沐瑶随心手写体.png"
+      "preview_relative": "font_previews/zh_cn/沐瑶随心手写体.png",
+      "popular": 117
     },
     {
       "name": "演示佛系体",
@@ -1203,7 +1261,8 @@
       "cache_font": "font_cache\\zh_cn\\演示佛系体.ttf",
       "path": "zh_cn\\演示佛系体.ttf",
       "preview_image": "font_previews\\zh_cn\\演示佛系体.png",
-      "preview_relative": "font_previews/zh_cn/演示佛系体.png"
+      "preview_relative": "font_previews/zh_cn/演示佛系体.png",
+      "popular": 120
     },
     {
       "name": "演示夏行楷",
@@ -1217,7 +1276,8 @@
       "cache_font": "font_cache\\zh_cn\\演示夏行楷.ttf",
       "path": "zh_cn\\演示夏行楷.ttf",
       "preview_image": "font_previews\\zh_cn\\演示夏行楷.png",
-      "preview_relative": "font_previews/zh_cn/演示夏行楷.png"
+      "preview_relative": "font_previews/zh_cn/演示夏行楷.png",
+      "popular": 131
     },
     {
       "name": "演示悠然小楷",
@@ -1231,7 +1291,8 @@
       "cache_font": "font_cache\\zh_cn\\演示悠然小楷.ttf",
       "path": "zh_cn\\演示悠然小楷.ttf",
       "preview_image": "font_previews\\zh_cn\\演示悠然小楷.png",
-      "preview_relative": "font_previews/zh_cn/演示悠然小楷.png"
+      "preview_relative": "font_previews/zh_cn/演示悠然小楷.png",
+      "popular": 132
     },
     {
       "name": "演示春风楷",
@@ -1245,7 +1306,8 @@
       "cache_font": "font_cache\\zh_cn\\演示春风楷.ttf",
       "path": "zh_cn\\演示春风楷.ttf",
       "preview_image": "font_previews\\zh_cn\\演示春风楷.png",
-      "preview_relative": "font_previews/zh_cn/演示春风楷.png"
+      "preview_relative": "font_previews/zh_cn/演示春风楷.png",
+      "popular": 133
     },
     {
       "name": "演示秋鸿楷2.0",
@@ -1259,7 +1321,8 @@
       "cache_font": "font_cache\\zh_cn\\演示秋鸿楷2.0.ttf",
       "path": "zh_cn\\演示秋鸿楷2.0.ttf",
       "preview_image": "font_previews\\zh_cn\\演示秋鸿楷2.0.png",
-      "preview_relative": "font_previews/zh_cn/演示秋鸿楷2.0.png"
+      "preview_relative": "font_previews/zh_cn/演示秋鸿楷2.0.png",
+      "popular": 130
     },
     {
       "name": "濑户字体简体",
@@ -1343,7 +1406,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷仓耳渔阳体-W01.ttf",
       "path": "zh_cn\\站酷仓耳渔阳体-W01.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷仓耳渔阳体-W01.png",
-      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W01.png"
+      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W01.png",
+      "popular": 88
     },
     {
       "name": "站酷仓耳渔阳体-W02",
@@ -1357,7 +1421,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷仓耳渔阳体-W02.ttf",
       "path": "zh_cn\\站酷仓耳渔阳体-W02.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷仓耳渔阳体-W02.png",
-      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W02.png"
+      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W02.png",
+      "popular": 89
     },
     {
       "name": "站酷仓耳渔阳体-W03",
@@ -1371,7 +1436,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷仓耳渔阳体-W03.ttf",
       "path": "zh_cn\\站酷仓耳渔阳体-W03.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷仓耳渔阳体-W03.png",
-      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W03.png"
+      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W03.png",
+      "popular": 90
     },
     {
       "name": "站酷仓耳渔阳体-W04",
@@ -1385,7 +1451,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷仓耳渔阳体-W04.ttf",
       "path": "zh_cn\\站酷仓耳渔阳体-W04.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷仓耳渔阳体-W04.png",
-      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W04.png"
+      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W04.png",
+      "popular": 91
     },
     {
       "name": "站酷仓耳渔阳体-W05",
@@ -1399,7 +1466,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷仓耳渔阳体-W05.ttf",
       "path": "zh_cn\\站酷仓耳渔阳体-W05.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷仓耳渔阳体-W05.png",
-      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W05.png"
+      "preview_relative": "font_previews/zh_cn/站酷仓耳渔阳体-W05.png",
+      "popular": 92
     },
     {
       "name": "站酷小薇LOGO体",
@@ -1441,7 +1509,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷庆科黄油体.ttf",
       "path": "zh_cn\\站酷庆科黄油体.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷庆科黄油体.png",
-      "preview_relative": "font_previews/zh_cn/站酷庆科黄油体.png"
+      "preview_relative": "font_previews/zh_cn/站酷庆科黄油体.png",
+      "popular": 194
     },
     {
       "name": "站酷快乐体开源版",
@@ -1455,7 +1524,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷快乐体开源版.ttf",
       "path": "zh_cn\\站酷快乐体开源版.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷快乐体开源版.png",
-      "preview_relative": "font_previews/zh_cn/站酷快乐体开源版.png"
+      "preview_relative": "font_previews/zh_cn/站酷快乐体开源版.png",
+      "popular": 171
     },
     {
       "name": "站酷文艺体",
@@ -1469,7 +1539,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷文艺体.ttf",
       "path": "zh_cn\\站酷文艺体.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷文艺体.png",
-      "preview_relative": "font_previews/zh_cn/站酷文艺体.png"
+      "preview_relative": "font_previews/zh_cn/站酷文艺体.png",
+      "popular": 169
     },
     {
       "name": "站酷酷黑体",
@@ -1483,7 +1554,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷酷黑体.ttf",
       "path": "zh_cn\\站酷酷黑体.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷酷黑体.png",
-      "preview_relative": "font_previews/zh_cn/站酷酷黑体.png"
+      "preview_relative": "font_previews/zh_cn/站酷酷黑体.png",
+      "popular": 192
     },
     {
       "name": "站酷高端黑",
@@ -1497,7 +1569,8 @@
       "cache_font": "font_cache\\zh_cn\\站酷高端黑.ttf",
       "path": "zh_cn\\站酷高端黑.ttf",
       "preview_image": "font_previews\\zh_cn\\站酷高端黑.png",
-      "preview_relative": "font_previews/zh_cn/站酷高端黑.png"
+      "preview_relative": "font_previews/zh_cn/站酷高端黑.png",
+      "popular": 193
     },
     {
       "name": "素材集市康康体",
@@ -1511,7 +1584,8 @@
       "cache_font": "font_cache\\zh_cn\\素材集市康康体.ttf",
       "path": "zh_cn\\素材集市康康体.ttf",
       "preview_image": "font_previews\\zh_cn\\素材集市康康体.png",
-      "preview_relative": "font_previews/zh_cn/素材集市康康体.png"
+      "preview_relative": "font_previews/zh_cn/素材集市康康体.png",
+      "popular": 154
     },
     {
       "name": "联盟起艺卢帅正锐黑体",
@@ -1525,7 +1599,8 @@
       "cache_font": "font_cache\\zh_cn\\联盟起艺卢帅正锐黑体.ttf",
       "path": "zh_cn\\联盟起艺卢帅正锐黑体.ttf",
       "preview_image": "font_previews\\zh_cn\\联盟起艺卢帅正锐黑体.png",
-      "preview_relative": "font_previews/zh_cn/联盟起艺卢帅正锐黑体.png"
+      "preview_relative": "font_previews/zh_cn/联盟起艺卢帅正锐黑体.png",
+      "popular": 150
     },
     {
       "name": "胡晓波男神体",
@@ -1623,7 +1698,8 @@
       "cache_font": "font_cache\\zh_cn\\荆南波波黑.ttf",
       "path": "zh_cn\\荆南波波黑.ttf",
       "preview_image": "font_previews\\zh_cn\\荆南波波黑.png",
-      "preview_relative": "font_previews/zh_cn/荆南波波黑.png"
+      "preview_relative": "font_previews/zh_cn/荆南波波黑.png",
+      "popular": 159
     },
     {
       "name": "荆南缘默体",
@@ -1651,7 +1727,8 @@
       "cache_font": "font_cache\\zh_cn\\荆南麦圆体.ttf",
       "path": "zh_cn\\荆南麦圆体.ttf",
       "preview_image": "font_previews\\zh_cn\\荆南麦圆体.png",
-      "preview_relative": "font_previews/zh_cn/荆南麦圆体.png"
+      "preview_relative": "font_previews/zh_cn/荆南麦圆体.png",
+      "popular": 158
     },
     {
       "name": "草书 简入繁出",
@@ -1665,7 +1742,8 @@
       "cache_font": "font_cache\\zh_cn\\草书 简入繁出.ttf",
       "path": "zh_cn\\草书 简入繁出.ttf",
       "preview_image": "font_previews\\zh_cn\\草书 简入繁出.png",
-      "preview_relative": "font_previews/zh_cn/草书 简入繁出.png"
+      "preview_relative": "font_previews/zh_cn/草书 简入繁出.png",
+      "popular": 108
     },
     {
       "name": "蒲瓜素材圆体",
@@ -1693,7 +1771,8 @@
       "cache_font": "font_cache\\zh_cn\\贤二体.ttf",
       "path": "zh_cn\\贤二体.ttf",
       "preview_image": "font_previews\\zh_cn\\贤二体.png",
-      "preview_relative": "font_previews/zh_cn/贤二体.png"
+      "preview_relative": "font_previews/zh_cn/贤二体.png",
+      "popular": 153
     },
     {
       "name": "铁蒺藜体r",
@@ -1721,7 +1800,8 @@
       "cache_font": "font_cache\\zh_cn\\锐字真言体.ttf",
       "path": "zh_cn\\锐字真言体.ttf",
       "preview_image": "font_previews\\zh_cn\\锐字真言体.png",
-      "preview_relative": "font_previews/zh_cn/锐字真言体.png"
+      "preview_relative": "font_previews/zh_cn/锐字真言体.png",
+      "popular": 151
     },
     {
       "name": "问藏书房",
@@ -1749,7 +1829,8 @@
       "cache_font": "font_cache\\zh_cn\\阿朱泡泡体.ttf",
       "path": "zh_cn\\阿朱泡泡体.ttf",
       "preview_image": "font_previews\\zh_cn\\阿朱泡泡体.png",
-      "preview_relative": "font_previews/zh_cn/阿朱泡泡体.png"
+      "preview_relative": "font_previews/zh_cn/阿朱泡泡体.png",
+      "popular": 152
     },
     {
       "name": "雷盖体",
@@ -1777,7 +1858,8 @@
       "cache_font": "font_cache\\zh_cn\\霞鹜漫黑LxgwMarker.ttf",
       "path": "zh_cn\\霞鹜漫黑LxgwMarker.ttf",
       "preview_image": "font_previews\\zh_cn\\霞鹜漫黑LxgwMarker.png",
-      "preview_relative": "font_previews/zh_cn/霞鹜漫黑LxgwMarker.png"
+      "preview_relative": "font_previews/zh_cn/霞鹜漫黑LxgwMarker.png",
+      "popular": 155
     },
     {
       "name": "風楷-简入繁出",
@@ -1805,7 +1887,8 @@
       "cache_font": "font_cache\\zh_cn\\马善政毛笔楷体.ttf",
       "path": "zh_cn\\马善政毛笔楷体.ttf",
       "preview_image": "font_previews\\zh_cn\\马善政毛笔楷体.png",
-      "preview_relative": "font_previews/zh_cn/马善政毛笔楷体.png"
+      "preview_relative": "font_previews/zh_cn/马善政毛笔楷体.png",
+      "popular": 111
     },
     {
       "name": "鸿雷板书",
@@ -1819,7 +1902,8 @@
       "cache_font": "font_cache\\zh_cn\\鸿雷板书.ttf",
       "path": "zh_cn\\鸿雷板书.ttf",
       "preview_image": "font_previews\\zh_cn\\鸿雷板书.png",
-      "preview_relative": "font_previews/zh_cn/鸿雷板书.png"
+      "preview_relative": "font_previews/zh_cn/鸿雷板书.png",
+      "popular": 112
     },
     {
       "name": "鸿雷行书简体",
@@ -1833,7 +1917,8 @@
       "cache_font": "font_cache\\zh_cn\\鸿雷行书简体.ttf",
       "path": "zh_cn\\鸿雷行书简体.ttf",
       "preview_image": "font_previews\\zh_cn\\鸿雷行书简体.png",
-      "preview_relative": "font_previews/zh_cn/鸿雷行书简体.png"
+      "preview_relative": "font_previews/zh_cn/鸿雷行书简体.png",
+      "popular": 113
     },
     {
       "name": "龙藏体",

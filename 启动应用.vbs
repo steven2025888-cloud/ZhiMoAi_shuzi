@@ -9,7 +9,7 @@ sBase   = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\"))
 sPyw    = sBase & "_internal_tts\installer_files\env\pythonw.exe"
 sPy     = sBase & "_internal_tts\installer_files\env\python.exe"
 sScript = sBase & "app_backend.py"
-sLogFile = sBase & "vbs_startup.log"
+sLogFile = sBase & "logs\vbs_startup.log"
 
 Sub WriteLog(msg)
     On Error Resume Next
@@ -63,7 +63,7 @@ If Err.Number <> 0 Then
     MsgBox "Startup failed:" & vbCrLf & vbCrLf & _
            "Error: " & Err.Description & vbCrLf & _
            "Code: " & Err.Number & vbCrLf & vbCrLf & _
-           "Check log: vbs_startup.log", vbCritical, "Startup Failed"
+           "Check log: logs\vbs_startup.log", vbCritical, "Startup Failed"
 Else
     WriteLog "[OK] Startup command executed"
     WriteLog "========== Startup Complete =========="
