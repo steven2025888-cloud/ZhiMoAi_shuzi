@@ -2043,7 +2043,7 @@ def build_ui():
                                         value="系统字体",
                                         interactive=True, scale=3)
                                     sub_size = gr.Slider(label="字号 px", minimum=16, maximum=72,
-                                                         value=38, step=2, scale=3)
+                                                         value=44, step=2, scale=3)
                                     sub_pos = gr.Radio(label="位置", choices=["上","中","下"],
                                                        value="下", scale=2,
                                                        elem_classes="sub-pos-radio")
@@ -2114,20 +2114,24 @@ def build_ui():
                                         
                                         gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">📌 标题设置</div>')
                                         sub_title_text = gr.Textbox(
-                                            label="标题内容",
-                                            placeholder="输入标题文字，留空则不显示标题",
+                                            label="标题第一行",
+                                            placeholder="输入第一行标题文字，留空则不显示标题",
+                                            max_lines=1)
+                                        sub_title_text2 = gr.Textbox(
+                                            label="标题第二行",
+                                            placeholder="输入第二行标题文字（可选）",
                                             max_lines=1)
                                         with gr.Row():
                                             sub_title_font_size = gr.Slider(
                                                 label="标题字号", minimum=12, maximum=96,
-                                                value=48, step=1, scale=2)
+                                                value=68, step=1, scale=2)
                                             sub_title_duration = gr.Slider(
                                                 label="显示时长(秒)", minimum=1, maximum=30,
                                                 value=5, step=1, scale=2)
                                         with gr.Row():
                                             sub_title_margin_top = gr.Slider(
-                                                label="距顶部距离 px", minimum=0, maximum=200,
-                                                value=30, step=5, scale=2)
+                                                label="距顶部距离 px", minimum=0, maximum=400,
+                                                value=200, step=5, scale=2)
                                         with gr.Row():
                                             sub_title_color = gr.ColorPicker(
                                                 label="标题颜色", value="#FFD700", scale=1)
@@ -2714,8 +2718,13 @@ def build_ui():
                                 douyin_title_val="", douyin_topics_val="",
                                 # 字幕标题参数
                                 sub_title_text_val="",
-                                # 画中画提示词
+                                sub_title_text2_val="",
+                                # 画中画参数
+                                pip_enable_val=None,
+                                pip_mode_val=None,
                                 pip_prompt_val=None,
+                                pip_interval_val=None,
+                                pip_clip_dur_val=None,
                                 # 可选：用于 AI 改写场景，按原文查找已有记录并替换
                                 search_key=None):
             """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建
@@ -2819,11 +2828,16 @@ def build_ui():
                     "sub_kw_text": to_json_safe(sub_kw_text_val),
                     # 字幕标题
                     "sub_title_text": to_json_safe(sub_title_text_val),
+                    "sub_title_text2": to_json_safe(sub_title_text2_val),
                     # 发布参数
                     "douyin_title": to_json_safe(douyin_title_val),
                     "douyin_topics": to_json_safe(douyin_topics_val),
-                    # 画中画提示词
+                    # 画中画参数
+                    "pip_enable": bool(pip_enable_val) if pip_enable_val is not None else False,
+                    "pip_mode": to_json_safe(pip_mode_val) if pip_mode_val is not None else "🌐 在线生成",
                     "pip_prompt": to_json_safe(pip_prompt_val) if pip_prompt_val is not None else "",
+                    "pip_interval": to_json_safe(pip_interval_val) if pip_interval_val is not None else 15.0,
+                    "pip_clip_dur": to_json_safe(pip_clip_dur_val) if pip_clip_dur_val is not None else 5.0,
                 }
                 
                 # 读取现有记录
@@ -2846,9 +2860,18 @@ def build_ui():
                         existing_idx = 0
                 
                 if existing_idx >= 0:
-                    # 更新现有记录 - 画中画提示词为空时保留旧值
-                    if pip_prompt_val is None and records[existing_idx].get("pip_prompt"):
-                        record["pip_prompt"] = records[existing_idx]["pip_prompt"]
+                    # 更新现有记录 - 画中画参数为空时保留旧值
+                    old_record = records[existing_idx]
+                    if pip_enable_val is None and old_record.get("pip_enable") is not None:
+                        record["pip_enable"] = old_record["pip_enable"]
+                    if pip_mode_val is None and old_record.get("pip_mode"):
+                        record["pip_mode"] = old_record["pip_mode"]
+                    if pip_prompt_val is None and old_record.get("pip_prompt"):
+                        record["pip_prompt"] = old_record["pip_prompt"]
+                    if pip_interval_val is None and old_record.get("pip_interval") is not None:
+                        record["pip_interval"] = old_record["pip_interval"]
+                    if pip_clip_dur_val is None and old_record.get("pip_clip_dur") is not None:
+                        record["pip_clip_dur"] = old_record["pip_clip_dur"]
                     records[existing_idx] = record
                     msg = f"已更新：{record_name}"
                 else:
@@ -2871,18 +2894,18 @@ def build_ui():
             """恢复选中的工作台记录"""
             try:
                 if not record_idx_str:
-                    # 未选择记录，只更新提示，其他组件不动
-                    return [gr.update()] * 28 + [_hint_html("warning", "请先选择一条记录")]
-                
+                    # 未选择记录,只更新提示,其他组件不动
+                    return [gr.update()] * 33 + [_hint_html("warning", "请先选择一条记录")]
+
                 try:
                     record_idx = int(record_idx_str)
                 except (ValueError, TypeError):
-                    return [gr.update()] * 28 + [_hint_html("error", "无效的记录索引")]
-                
+                    return [gr.update()] * 32 + [_hint_html("error", "无效的记录索引")]
+
                 records = _load_workspace_records()
-                
+
                 if record_idx < 0 or record_idx >= len(records):
-                    return [gr.update()] * 28 + [_hint_html("error", "记录不存在")]
+                    return [gr.update()] * 32 + [_hint_html("error", "记录不存在")]
                 
                 rec = records[record_idx]
                 
@@ -2997,11 +3020,16 @@ def build_ui():
                     gr.update(value=rec.get("sub_kw_text", "")),          # sub_kw_text
                     # 字幕标题
                     gr.update(value=rec.get("sub_title_text", "")),        # sub_title_text
+                    gr.update(value=rec.get("sub_title_text2", "")),       # sub_title_text2
                     # 发布参数
                     gr.update(value=rec.get("douyin_title", "")),           # douyin_title
                     gr.update(value=rec.get("douyin_topics", "")),          # douyin_topics
-                    # 画中画提示词
+                    # 画中画参数
+                    gr.update(value=rec.get("pip_enable", False)),          # pip_enable
+                    gr.update(value=rec.get("pip_mode", "🌐 在线生成")),     # pip_mode
                     gr.update(value=rec.get("pip_prompt", "")),             # pip_prompt
+                    gr.update(value=rec.get("pip_interval", 15.0)),         # pip_interval
+                    gr.update(value=rec.get("pip_clip_dur", 5.0)),          # pip_clip_dur
                     _hint_html("ok", f"已恢复记录：{rec.get('record_name', rec.get('time', '未知'))}")
                 ]
                 
@@ -3010,7 +3038,7 @@ def build_ui():
                 
                 return result
             except Exception as e:
-                return [gr.update()] * 28 + [_hint_html("error", f"恢复失败: {str(e)}")]
+                return [gr.update()] * 33 + [_hint_html("error", f"恢复失败: {str(e)}")]
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, voice_name, spd, tp, tk, temp, nb, rp, mmt,
@@ -3094,7 +3122,7 @@ def build_ui():
                         sub_color_val, sub_hi_val, sub_outline_val, sub_outline_size_val,
                         sub_bg_color_val, sub_bg_opacity_val,
                         sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
-                        sub_title_text_val,
+                        sub_title_text_val, sub_title_text2_val,
                         douyin_title_val, douyin_topics_val,
                         progress=gr.Progress()):
             """合成并自动保存工作台状态"""
@@ -3119,7 +3147,8 @@ def build_ui():
                 sub_bg_color_val, sub_bg_opacity_val,
                 sub_kw_enable_val, sub_hi_scale_val, sub_kw_text_val,
                 douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
-                sub_title_text_val=sub_title_text_val
+                sub_title_text_val=sub_title_text_val,
+                sub_title_text2_val=sub_title_text2_val
             )
             
             # 返回所有需要更新的组件
@@ -3146,7 +3175,7 @@ def build_ui():
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
-                sub_title_text,
+                sub_title_text, sub_title_text2,
                 douyin_title, douyin_topics
             ],
             outputs=[output_audio, audio_for_ls, sub_text,
@@ -3202,21 +3231,21 @@ def build_ui():
                     # 使用 TextExtractor 连接生成画中画
                     extractor = get_text_extractor()
                     if len(prompts_list) == 1:
-                        # 单个提示词
+                        # 单个提示词 - 暂不支持合成，只生成
                         pip_result = _pip_ws.generate_pip_via_extractor(
                             prompts_list[0],
                             extractor,
                             progress_cb=lambda pct, msg: progress(pct, desc=f"🖼 {msg}")
                         )
                     else:
-                        # 多个提示词，批量生成
-                        clips = _pip_ws.generate_multiple_pips(
+                        # 多个提示词，批量生成并合成
+                        pip_result = _pip_ws.generate_and_compose_pips(
+                            str(current_video),
                             prompts_list,
                             extractor,
+                            clip_duration=5.0,
                             progress_cb=lambda pct, msg: progress(pct, desc=f"🖼 {msg}")
                         )
-                        # TODO: 需要将多个片段合成到主视频中
-                        pip_result = clips[0] if clips else ""
                 else:
                     # 本地上传模式
                     if not pip_local_val:
@@ -3270,6 +3299,30 @@ def build_ui():
             - 如果未优化过(already_optimized=False)：关键词+字幕标题+视频标题+话题+画中画提示词
             - 如果已优化过(already_optimized=True)：只优化关键词+字幕标题
             """
+
+            def _two_line_title(t: str) -> str:
+                s = (t or "").strip()
+                if not s:
+                    return ""
+                # 常见分隔符：| / ｜ 换行
+                for sep in ("\n", "｜", "|", "/"):
+                    if sep in s:
+                        parts = [p.strip() for p in s.split(sep) if p.strip()]
+                        if parts:
+                            s1 = parts[0][:10]
+                            s2 = (parts[1] if len(parts) > 1 else "")[:10]
+                            if not s2 and len(parts) > 2:
+                                s2 = parts[2][:10]
+                            if not s2 and len(s1) < len(parts[0]):
+                                # parts[0] 太长被截断，给第二行补齐
+                                s2 = parts[0][10:20]
+                            if not s2 and len(s) > 10:
+                                s2 = s[10:20]
+                            return (s1 + "\n" + s2).strip()
+                # 无分隔符：按长度硬切两行
+                s1 = s[:10]
+                s2 = s[10:20]
+                return (s1 + ("\n" + s2 if s2 else "")).strip()
             if not video_text or not video_text.strip():
                 if not already_optimized:
                     return "", "", "", "", "", False, _hint_html("warning", "请先输入视频文本内容")
@@ -3280,11 +3333,13 @@ def build_ui():
                 # 全量优化：关键词+字幕标题+视频标题+话题+多个画中画提示词
                 prompt = f"""请根据以下视频文本内容，完成五个任务：
 
-任务一：生成一个简短的字幕标题（不超过15字，概括视频主题）
+任务一：生成两行字幕标题（每行最多10个字）。标题要口语化、有冲击力、适合短视频封面。
+        输出时请用“｜”分隔两行，例如：第一行｜第二行（不要超过10字/行）。
 任务二：从文本中提取尽可能多的关键词（用于字幕高亮显示），包括核心名词、动词、形容词等重要词语，不限数量，用逗号分隔
 任务三：生成一个吸引人的短视频标题（不超过30字，吸引眼球、引发好奇）
 任务四：生成5个相关的热门话题标签，用逗号分隔
-任务五：为画中画视频生成提示词。每30秒视频生成1个提示词（例如30秒文案生成1个，60秒文案生成2个，90秒文案生成3个）。每个提示词描述一个适合口播推广的真实场景画面，用于AI生成实景B-roll视频素材。
+任务五：为画中画视频生成多个提示词。每个提示词描述一个不同的真实场景画面，用于AI生成实景B-roll视频素材。
+生成1个提示词（例如30秒文案生成1个，60秒文案生成2个，90秒文案生成3个）。每个提示词描述一个适合口播推广的真实场景画面，用于AI生成实景B-roll视频素材。
 要求：根据文案朗读时长估算（约每秒3-4个字），按每30秒1个提示词的规则生成对应数量。每个不超过80字。
 场景要求：实物场景，适合短视频口播画中画素材，主要用于展示厂家、商品、工作场景或服务环境。画面干净高级，空间通透，主体明确，构图简洁，具有短视频B-roll质感，灯光柔和，真实细节丰富，整体高级感强，生活化但不杂乱，超清写实风格。场景必须不同。
 
@@ -3330,6 +3385,7 @@ def build_ui():
                     kw_enable = bool(new_keywords.strip())
                     new_pip_prompt = "\n".join(pip_prompts_list) if pip_prompts_list else ""
                     pip_count = len(pip_prompts_list)
+                    sub_title = _two_line_title(sub_title)
                     return sub_title, new_keywords, video_title, new_topics, new_pip_prompt, kw_enable, _hint_html("ok", f"AI优化完成！已生成字幕标题、关键词、视频标题、话题和{pip_count}个画中画提示词")
                 else:
                     return "", "", "", "", "", False, _hint_html("error", "AI优化失败，未返回内容")
@@ -3337,7 +3393,7 @@ def build_ui():
                 # 精简优化：只优化关键词+字幕标题
                 prompt = f"""请根据以下视频文本内容，完成两个任务：
 
-任务一：生成一个简短的字幕标题（不超过15字，概括视频主题）
+任务一：生成两行字幕标题（每行最多10个字）。输出用“｜”分隔两行，例如：第一行｜第二行。
 任务二：从文本中提取尽可能多的关键词（用于字幕高亮显示），包括核心名词、动词、形容词等重要词语，不限数量，用逗号分隔
 
 视频文本内容：
@@ -3364,6 +3420,7 @@ def build_ui():
                             new_keywords = line.split("：", 1)[-1].split(":", 1)[-1].strip()
                     
                     kw_enable = bool(new_keywords.strip())
+                    new_title = _two_line_title(new_title)
                     return new_title, new_keywords, kw_enable, _hint_html("ok", "AI优化完成！已生成字幕标题和关键词")
                 else:
                     return "", "", False, _hint_html("error", "AI优化失败，未返回内容")
@@ -3382,7 +3439,7 @@ def build_ui():
                                          sub_col, sub_hi, sub_out, sub_out_sz,
                                          sub_bg_col, sub_bg_op,
                                          sub_kw_en, sub_hi_sc, sub_kw_txt,
-                                         sub_title_txt,
+                                         sub_title_txt, sub_title_txt2,
                                          douyin_title_val, douyin_topics_val):
             """关闭高级设置弹窗并保存到工作台"""
             try:
@@ -3395,7 +3452,8 @@ def build_ui():
                     sub_bg_col, sub_bg_op,
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
                     douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
-                    sub_title_text_val=sub_title_txt
+                    sub_title_text_val=sub_title_txt,
+                    sub_title_text2_val=sub_title_txt2
                 )
             except Exception as e:
                 save_hint = _hint_html("error", f"保存失败: {e}")
@@ -3412,7 +3470,7 @@ def build_ui():
                     sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_hi_scale, sub_kw_text,
-                    sub_title_text,
+                    sub_title_text, sub_title_text2,
                     douyin_title, douyin_topics],
             outputs=[sub_settings_modal, sub_text,
                     workspace_record_hint, workspace_record_dropdown])
@@ -3421,6 +3479,29 @@ def build_ui():
             outputs=[sub_settings_modal])
         
         # ── AI优化字幕按钮（根据是否已AI改写，执行不同范围优化，并保存到工作台）──
+        def _split_title_lines(title_text):
+            """将标题分成两行，每行最多10个字"""
+            if not title_text or not title_text.strip():
+                return "", ""
+
+            # 支持多种分隔符
+            title = title_text.strip()
+            for sep in ("\n", "｜", "|", "\\"):
+                if sep in title:
+                    parts = [p.strip() for p in title.split(sep) if p.strip()]
+                    line1 = parts[0][:10] if parts else ""  # 限制第一行最多10字
+                    line2 = parts[1][:10] if len(parts) > 1 else ""  # 限制第二行最多10字
+                    return line1, line2
+
+            # 如果没有分隔符，且标题超过10个字，自动分成两行
+            if len(title) > 10:
+                line1 = title[:10]
+                line2 = title[10:20]  # 第二行也最多10字
+                return line1, line2
+
+            # 标题不超过10字，返回第一行，第二行为空
+            return title, ""
+
         def _subtitle_ai_optimize_and_save(video_text, ai_rewrite_done_val,
                                            prmt_aud, voice_sel, audio_mode_val, direct_aud,
                                            avatar_sel, aud_for_ls, out_aud, out_vid,
@@ -3438,9 +3519,11 @@ def build_ui():
                 # result: (sub_title, keywords, video_title, topics, pip_prompt, kw_enable, hint)
                 if len(result) == 7:
                     sub_title, new_keywords, video_title, new_topics, new_pip_prompt, kw_enable, hint = result
+                    # 将标题分成两行
+                    title_line1, title_line2 = _split_title_lines(sub_title)
                 else:
                     # 出错时返回少量值
-                    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), True, gr.update(), gr.update()
+                    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), True, gr.update(), gr.update()
                 try:
                     save_hint, dropdown_update = _auto_save_workspace(
                         video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
@@ -3452,22 +3535,25 @@ def build_ui():
                         kw_enable, sub_hi_sc, new_keywords,
                         douyin_title_val=video_title or douyin_title_val,
                         douyin_topics_val=new_topics or douyin_topics_val,
-                        sub_title_text_val=sub_title,
+                        sub_title_text_val=title_line1,
+                        sub_title_text2_val=title_line2,
                         pip_prompt_val=new_pip_prompt
                     )
                 except Exception as e:
                     save_hint = _hint_html("error", f"保存失败: {e}")
                     dropdown_update = gr.update()
-                # outputs: sub_title_text, sub_kw_text, sub_kw_enable, douyin_title, douyin_topics, pip_prompt, tts_hint, ai_rewrite_done, workspace_hint, workspace_dropdown
-                return sub_title, new_keywords, kw_enable, video_title, new_topics, new_pip_prompt, hint, True, save_hint, dropdown_update
+                # outputs: sub_title_text, sub_title_text2, sub_kw_text, sub_kw_enable, douyin_title, douyin_topics, pip_prompt, tts_hint, ai_rewrite_done, workspace_hint, workspace_dropdown
+                return title_line1, title_line2, new_keywords, kw_enable, video_title, new_topics, new_pip_prompt, hint, True, save_hint, dropdown_update
             else:
                 # 精简优化：只优化关键词+字幕标题
                 result = _optimize_subtitle_with_deepseek(video_text, already_optimized=True)
                 # result: (title, keywords, kw_enable, hint)
                 if len(result) == 4:
                     new_title, new_keywords, kw_enable, hint = result
+                    # 将标题分成两行
+                    title_line1, title_line2 = _split_title_lines(new_title)
                 else:
-                    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), True, gr.update(), gr.update()
+                    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), True, gr.update(), gr.update()
                 try:
                     save_hint, dropdown_update = _auto_save_workspace(
                         video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
@@ -3478,13 +3564,14 @@ def build_ui():
                         sub_bg_col, sub_bg_op,
                         kw_enable, sub_hi_sc, new_keywords,
                         douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
-                        sub_title_text_val=new_title
+                        sub_title_text_val=title_line1,
+                        sub_title_text2_val=title_line2
                     )
                 except Exception as e:
                     save_hint = _hint_html("error", f"保存失败: {e}")
                     dropdown_update = gr.update()
                 # 精简模式不更新 douyin_title, douyin_topics, pip_prompt
-                return new_title, new_keywords, kw_enable, gr.update(), gr.update(), gr.update(), hint, True, save_hint, dropdown_update
+                return title_line1, title_line2, new_keywords, kw_enable, gr.update(), gr.update(), gr.update(), hint, True, save_hint, dropdown_update
 
         subtitle_ai_optimize_btn.click(
             _subtitle_ai_optimize_and_save,
@@ -3497,7 +3584,7 @@ def build_ui():
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_hi_scale, sub_kw_text,
                     douyin_title, douyin_topics],
-            outputs=[sub_title_text, sub_kw_text, sub_kw_enable,
+            outputs=[sub_title_text, sub_title_text2, sub_kw_text, sub_kw_enable,
                     douyin_title, douyin_topics, pip_prompt, tts_hint,
                     ai_rewrite_done,
                     workspace_record_hint, workspace_record_dropdown]
@@ -3871,9 +3958,9 @@ def build_ui():
                          color_txt, hi_txt, outline_txt, outline_size,
                          bg_color, bg_opacity,
                          kw_enable, kw_str, hi_scale,
-                         title_text="", title_duration=5,
+                         title_text="", title_text2="", title_duration=5,
                          title_color="#FFD700", title_outline_color="#000000",
-                         title_margin_top=30, title_font_size=48,
+                         title_margin_top=200, title_font_size=68,
                          intro_enable=False,
                          progress=gr.Progress()):
             if not _LIBS_OK:
@@ -3888,9 +3975,19 @@ def build_ui():
                 return gr.update(visible=False), _hint_html("warning","请先完成视频合成再添加字幕")
 
             aud_path = str(aud) if (aud and isinstance(aud, str)) else None
-            
+
+            # 合并两行标题
+            combined_title = ""
+            if title_text and title_text.strip():
+                combined_title = title_text.strip()
+                if title_text2 and title_text2.strip():
+                    combined_title += "｜" + title_text2.strip()
+            elif title_text2 and title_text2.strip():
+                combined_title = title_text2.strip()
+
             # 调试日志
             print(f"[SUBTITLE] _do_subtitle: kw_enable={kw_enable}, kw_str='{kw_str}'")
+            print(f"[SUBTITLE] title_text='{title_text}', title_text2='{title_text2}', combined='{combined_title}'")
 
             def _cb(pct, msg): progress(pct, desc=msg)
             try:
@@ -3904,12 +4001,12 @@ def build_ui():
                     hi_scale=float(hi_scale or 1.5),
                     bg_color=bg_color or "#000000",
                     bg_opacity=int(bg_opacity or 0),
-                    title_text=title_text or "",
+                    title_text=combined_title,
                     title_duration=int(title_duration or 5),
                     title_color=title_color or "#FFD700",
                     title_outline_color=title_outline_color or "#000000",
-                    title_margin_top=int(title_margin_top or 30),
-                    title_font_size=int(title_font_size or 48),
+                    title_margin_top=int(title_margin_top or 200),
+                    title_font_size=int(title_font_size or 68),
                     intro_enable=bool(intro_enable),
                     progress_cb=_cb
                 )
@@ -3925,7 +4022,7 @@ def build_ui():
                              sub_col, sub_hi, sub_out, sub_out_sz,
                              sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
                              # 标题参数
-                             title_txt, title_fs, title_dur, title_col, title_out_col, title_mt,
+                             title_txt, title_txt2, title_fs, title_dur, title_col, title_out_col, title_mt,
                              # 片头参数
                              intro_en,
                              # 保存需要的其他参数
@@ -3942,11 +4039,12 @@ def build_ui():
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
                 title_text=title_txt or "",
+                title_text2=title_txt2 or "",
                 title_duration=int(title_dur or 5),
                 title_color=title_col or "#FFD700",
                 title_outline_color=title_out_col or "#000000",
-                title_margin_top=int(title_mt or 30),
-                title_font_size=int(title_fs or 48),
+                title_margin_top=int(title_mt or 200),
+                title_font_size=int(title_fs or 68),
                 intro_enable=bool(intro_en),
                 progress=progress
             )
@@ -3962,7 +4060,8 @@ def build_ui():
                 sub_bg_col, sub_bg_op,
                 sub_kw_en, sub_hi_sc, sub_kw_txt,
                 douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
-                sub_title_text_val=title_txt
+                sub_title_text_val=title_txt,
+                sub_title_text2_val=title_txt2
             )
             
             # 返回字幕视频，需要设置 visible=True 和 show_download_button=True
@@ -3982,7 +4081,7 @@ def build_ui():
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_kw_text, sub_hi_scale,
                 # 标题参数
-                sub_title_text, sub_title_font_size, sub_title_duration, sub_title_color,
+                sub_title_text, sub_title_text2, sub_title_font_size, sub_title_duration, sub_title_color,
                 sub_title_outline_color, sub_title_margin_top,
                 # 片头参数
                 intro_enable,
@@ -4237,9 +4336,12 @@ def build_ui():
             """改写文案并同步返回给字幕，同时保存工作台记录"""
             try:
                 new_text, title, topics, new_keywords, new_pip_prompt, kw_enable, hint = _rewrite_text_with_deepseek(original_text)
+                # 将标题分成两行
+                title_line1, title_line2 = _split_title_lines(title)
             except Exception as e:
                 new_text = original_text
                 title, topics, new_keywords, new_pip_prompt, kw_enable = "", "", "", "", False
+                title_line1, title_line2 = "", ""
                 hint = _hint_html("error", f"AI改写异常: {e}")
             
             try:
@@ -4252,7 +4354,8 @@ def build_ui():
                     sub_bg_col, sub_bg_op,
                     kw_enable, sub_hi_sc, new_keywords,
                     douyin_title_val=title, douyin_topics_val=topics,
-                    sub_title_text_val=title,
+                    sub_title_text_val=title_line1,
+                    sub_title_text2_val=title_line2,
                     pip_prompt_val=new_pip_prompt,
                     search_key=original_text
                 )
@@ -4262,8 +4365,8 @@ def build_ui():
                 save_hint = _hint_html("error", f"保存工作台失败: {e}")
                 dropdown_update = gr.update()
             
-            # outputs: input_text, douyin_title, douyin_topics, sub_kw_text, sub_kw_enable, pip_prompt, tts_hint, sub_text, sub_title_text, ai_rewrite_done, workspace_hint, workspace_dropdown
-            return new_text, title, topics, new_keywords, kw_enable, new_pip_prompt, hint, new_text, title, True, save_hint, dropdown_update
+            # outputs: input_text, douyin_title, douyin_topics, sub_kw_text, sub_kw_enable, pip_prompt, tts_hint, sub_text, sub_title_text, sub_title_text2, ai_rewrite_done, workspace_hint, workspace_dropdown
+            return new_text, title, topics, new_keywords, kw_enable, new_pip_prompt, hint, new_text, title_line1, title_line2, True, save_hint, dropdown_update
         rewrite_btn.click(
             _rewrite_and_save,
             inputs=[input_text,
@@ -4276,7 +4379,7 @@ def build_ui():
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_hi_scale, sub_kw_text],
             outputs=[input_text, douyin_title, douyin_topics, sub_kw_text, sub_kw_enable,
-                    pip_prompt, tts_hint, sub_text, sub_title_text,
+                    pip_prompt, tts_hint, sub_text, sub_title_text, sub_title_text2,
                     ai_rewrite_done,
                     workspace_record_hint, workspace_record_dropdown])
         
@@ -4305,7 +4408,8 @@ def build_ui():
                     sub_bg_col, sub_bg_op,
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
                     douyin_title_val=new_title, douyin_topics_val=new_topics,
-                    sub_title_text_val=""  # AI优化标题不影响字幕标题
+                    sub_title_text_val="",  # AI优化标题不影响字幕标题
+                    sub_title_text2_val=""
                 )
             except Exception as e:
                 print(f"[AI优化] 保存工作台失败: {e}")
@@ -4335,7 +4439,7 @@ def build_ui():
                                     sub_col, sub_hi, sub_out, sub_out_sz,
                                     sub_bg_col, sub_bg_op,
                                     sub_kw_en, sub_hi_sc, sub_kw_txt,
-                                    sub_title_txt):
+                                    sub_title_txt, sub_title_txt2):
             try:
                 # 只有标题或话题非空时才保存（避免清空时触发无用保存）
                 if not (title_val or "").strip() and not (topics_val or "").strip():
@@ -4349,7 +4453,8 @@ def build_ui():
                     sub_bg_col, sub_bg_op,
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
                     douyin_title_val=title_val, douyin_topics_val=topics_val,
-                    sub_title_text_val=sub_title_txt
+                    sub_title_text_val=sub_title_txt,
+                    sub_title_text2_val=sub_title_txt2
                 )
             except Exception as e:
                 print(f"[标题话题自动保存] 失败: {e}")
@@ -4364,7 +4469,7 @@ def build_ui():
             sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
             sub_bg_color, sub_bg_opacity,
             sub_kw_enable, sub_hi_scale, sub_kw_text,
-            sub_title_text
+            sub_title_text, sub_title_text2
         ]
         _title_topics_save_outputs = [workspace_record_hint, workspace_record_dropdown]
         douyin_title.change(_on_title_topics_change,
@@ -4575,7 +4680,19 @@ def build_ui():
             inputs=[bgm_video, sub_video, output_video, douyin_title, douyin_topics, publish_platforms],
             outputs=[douyin_hint])
 
-        def _mix_bgm_entry(enable_val, types_val, current_selected_val, bgm_path_val, bgm_state_val, vol_val, sub_vid, out_vid, progress=gr.Progress()):
+        def _mix_bgm_entry(enable_val, types_val, current_selected_val, bgm_path_val, bgm_state_val, vol_val, sub_vid, out_vid,
+                          # 保存需要的参数
+                          inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                          avatar_sel, aud_for_ls, out_aud,
+                          sub_txt,
+                          sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                          sub_col, sub_hi, sub_out, sub_out_sz,
+                          sub_bg_col, sub_bg_op,
+                          sub_kw_en, sub_hi_sc, sub_kw_txt,
+                          sub_title_txt, sub_title_txt2,
+                          douyin_title_val, douyin_topics_val,
+                          pip_prompt_val,
+                          progress=gr.Progress()):
             if not enable_val:
                 raise gr.Error("请先启用背景音乐")
 
@@ -4623,6 +4740,28 @@ def build_ui():
                 hint = _hint_html("ok", f"已自动选择并合成BGM：{selected_label}")
             shown = (selected_label or (current_selected_val or "")).strip()
             new_state = {"path": bgm_path_val, "title": shown}
+
+            # 保存工作台状态
+            try:
+                save_hint, dropdown_update = _auto_save_workspace(
+                    inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                    avatar_sel, aud_for_ls, aud_for_ls, out_vid,
+                    sub_txt, sub_vid,
+                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                    sub_col, sub_hi, sub_out, sub_out_sz,
+                    sub_bg_col, sub_bg_op,
+                    sub_kw_en, sub_hi_sc, sub_kw_txt,
+                    douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
+                    sub_title_text_val=sub_title_txt,
+                    sub_title_text2_val=sub_title_txt2,
+                    pip_prompt_val=pip_prompt_val
+                )
+            except Exception as e:
+                print(f"[BGM混音] 保存工作台失败: {e}")
+                traceback.print_exc()
+                save_hint = _hint_html("error", f"保存工作台失败: {e}")
+                dropdown_update = gr.update()
+
             return (
                 out,
                 hint,
@@ -4630,6 +4769,8 @@ def build_ui():
                 gr.update(value=bgm_path_val),
                 gr.update(value=bgm_path_val, visible=True),
                 new_state,
+                save_hint,
+                dropdown_update,
             )
 
         def _change_bgm(types_val, bgm_state_val, progress=gr.Progress()):
@@ -4713,8 +4854,20 @@ def build_ui():
 
         bgm_mix_btn.click(
             _mix_bgm_entry,
-            inputs=[bgm_enable, bgm_types, bgm_selected, bgm_path_hidden, bgm_state, bgm_volume, sub_video, output_video],
-            outputs=[bgm_video, bgm_hint, bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_state]
+            inputs=[bgm_enable, bgm_types, bgm_selected, bgm_path_hidden, bgm_state, bgm_volume, sub_video, output_video,
+                   # 保存需要的参数
+                   input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
+                   avatar_select, audio_for_ls, output_audio,
+                   sub_text,
+                   sub_font, sub_size, sub_pos, sub_pos_offset,
+                   sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
+                   sub_bg_color, sub_bg_opacity,
+                   sub_kw_enable, sub_hi_scale, sub_kw_text,
+                   sub_title_text, sub_title_text2,
+                   douyin_title, douyin_topics,
+                   pip_prompt],
+            outputs=[bgm_video, bgm_hint, bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_state,
+                    workspace_record_hint, workspace_record_dropdown]
         )
 
         # 视频合成
@@ -4805,7 +4958,7 @@ def build_ui():
                           sub_col, sub_hi, sub_out, sub_out_sz,
                           sub_bg_col, sub_bg_op,
                           sub_kw_en, sub_hi_sc, sub_kw_txt,
-                          sub_title_txt,
+                          sub_title_txt, sub_title_txt2,
                           douyin_title_val, douyin_topics_val,
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
@@ -4856,18 +5009,21 @@ def build_ui():
                                 # 使用 TextExtractor 连接生成画中画
                                 extractor = get_text_extractor()
                                 if len(prompts_list) == 1:
+                                    # 单个提示词 - 暂不支持合成
                                     pip_result = _pip_ws.generate_pip_via_extractor(
                                         prompts_list[0],
                                         extractor,
                                         progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
                                     )
                                 else:
-                                    clips = _pip_ws.generate_multiple_pips(
+                                    # 多个提示词，批量生成并合成
+                                    pip_result = _pip_ws.generate_and_compose_pips(
+                                        str(video_path),
                                         prompts_list,
                                         extractor,
+                                        clip_duration=5.0,
                                         progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
                                     )
-                                    pip_result = clips[0] if clips else ""
                             else:
                                 safe_print("[PIP] 在线模式但无提示词，跳过画中画")
                         else:
@@ -4919,6 +5075,7 @@ def build_ui():
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
                     douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
                     sub_title_text_val=sub_title_txt,
+                    sub_title_text2_val=sub_title_txt2,
                     pip_prompt_val=pip_prompt_val
                 )
                 
@@ -4939,7 +5096,7 @@ def build_ui():
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
-                sub_title_text,
+                sub_title_text, sub_title_text2,
                 douyin_title, douyin_topics
             ],
             outputs=[output_video, ls_detail_html,
@@ -4971,9 +5128,9 @@ def build_ui():
                 sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                 sub_bg_color, sub_bg_opacity,
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
-                sub_title_text,
+                sub_title_text, sub_title_text2,
                 douyin_title, douyin_topics,
-                pip_prompt,
+                pip_enable, pip_mode, pip_prompt, pip_interval, pip_clip_dur,
                 workspace_record_hint
             ])
         

@@ -625,45 +625,65 @@ def build_ass(words, font_name, font_size,
             f"{align},20,20,{marginv},1\n"
         )
 
-    # ── 标题样式 ──
+    # ── 标题样式（两行不同样式） ──
     title_style_line = ""
     title_event = ""
     if title_text and title_text.strip():
         title_display = title_text.strip()
-        
-        _raw_title_color = title_color
-        t_tc  = _hex2ass(normalize_color(title_color, "#FFD700"))
-        t_oc  = _hex2ass(normalize_color(title_outline_color, "#000000"))
-        # 使用用户设置的标题字体大小，限制范围12-96
-        t_fs  = max(12, min(96, int(title_font_size or 48)))
-        # 标题距顶部距离
-        t_mv  = max(10, min(200, int(title_margin_top or 30)))
+
+        # 支持两行：\n 或 \N 或 ｜ 分隔
+        tmp = title_display.replace("\\N", "\n")
+        if "｜" in tmp:
+            tmp = tmp.replace("｜", "\n")
+        parts = [p.strip() for p in tmp.split("\n") if p.strip()]
+        line1 = (parts[0] if parts else "")
+        line2 = (parts[1] if len(parts) > 1 else "")
+
+        # 样式固定：
+        # 第一行：橙色字 + 黑描边
+        # 第二行：黑字 + 白描边
+        t1_tc = _hex2ass("#FFA500")
+        t1_oc = _hex2ass("#000000")
+        t2_tc = _hex2ass("#000000")
+        t2_oc = _hex2ass("#FFFFFF")
+
+        t_fs  = max(12, min(96, int(title_font_size or 68)))
+        t_mv  = max(10, min(400, int(title_margin_top or 200)))
         t_dur = max(1, int(title_duration or 5))
-        
-        print(f"[SUBTITLE] title_color raw='{_raw_title_color}' -> normalized='{normalize_color(title_color, '#FFD700')}' -> ass='{t_tc}', t_fs={t_fs}")
-        
-        # 标题换行：根据字体大小和视频宽度计算
+
+        # 标题换行：根据字体大小和视频宽度计算（每行单独裁切）
+        # 修复：使用更准确的字符宽度计算（中文字符约为字号的1.1倍）
         _title_margin = 80
-        _title_usable = (play_res_x - _title_margin * 2) * 0.90
-        _title_char_w = t_fs  # 1个中文字符 ≈ font_size px
-        _title_max_chars = max(4, int(_title_usable / _title_char_w))
-        
-        if len(title_display) > _title_max_chars:
-            # 按字符数切分并插入 \N
-            lines = [title_display[i:i + _title_max_chars]
-                     for i in range(0, len(title_display), _title_max_chars)]
-            title_display = "\\N".join(lines)
-        
+        _title_usable = (play_res_x - _title_margin * 2)
+        _title_char_w = t_fs * 1.1  # 中文字符宽度约为字号的1.1倍
+        _title_max_chars = max(10, int(_title_usable / _title_char_w))  # 至少显示10个字
+        if len(line1) > _title_max_chars:
+            line1 = line1[:_title_max_chars]
+        if len(line2) > _title_max_chars:
+            line2 = line2[:_title_max_chars]
+
+        # 两套样式（同位置对齐方式，但 MarginV 由事件用 \pos 控制）
         title_style_line = (
-            f"Style: Title,{fn},{t_fs},"
-            f"{t_tc},&H000000FF&,{t_oc},&H00000000&,"
+            f"Style: Title1,{fn},{t_fs},"
+            f"{t1_tc},&H000000FF&,{t1_oc},&H00000000&,"
+            f"1,0,0,0,100,100,0,0,{border_style},{osz},0,"
+            f"8,{_title_margin},{_title_margin},{t_mv},1\n"
+            f"Style: Title2,{fn},{t_fs},"
+            f"{t2_tc},&H000000FF&,{t2_oc},&H00000000&,"
             f"1,0,0,0,100,100,0,0,{border_style},{osz},0,"
             f"8,{_title_margin},{_title_margin},{t_mv},1\n"
         )
+
         t_ts = _ass_time(0)
         t_te = _ass_time(t_dur)
-        # 内联颜色标签确保颜色生效
-        title_event = f"Dialogue: 2,{t_ts},{t_te},Title,,0,0,0,,{{\\c{t_tc}\\3c{t_oc}}}{title_display}\n"
+        # 使用 \pos 做垂直偏移：第二行下移一行高度
+        cx = play_res_x // 2
+        y1 = t_mv
+        y2 = t_mv + int(t_fs * 1.15)
+        if line1:
+            title_event += f"Dialogue: 2,{t_ts},{t_te},Title1,,0,0,0,,{{\\pos({cx},{y1})\\an8\\c{t1_tc}\\3c{t1_oc}}}{line1}\n"
+        if line2:
+            title_event += f"Dialogue: 2,{t_ts},{t_te},Title2,,0,0,0,,{{\\pos({cx},{y2})\\an8\\c{t2_tc}\\3c{t2_oc}}}{line2}\n"
 
     header = (
         "[Script Info]\n"
