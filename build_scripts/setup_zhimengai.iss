@@ -110,7 +110,8 @@ Source: "{#SourceRoot}\README.txt";                 DestDir: "{app}"; Flags: ign
 Source: "{#SourceRoot}\客户使用手册.txt";             DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\Whisper使用说明.txt";          DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\抖音发布功能说明.txt";          DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "{#SourceRoot}\douyin_publish_agreement.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\user_agreement.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\privacy_policy.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\功能演示-工作台记录.md";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ── 字体目录（只打包默认字体，其他字体运行时按需下载） ──

@@ -38,7 +38,7 @@ dist-ssr
 pyCapCut/
 heygem-win-50/
 font_cache/
-
+bgm_cache/
 # 日志文件
 logs/
 *.log

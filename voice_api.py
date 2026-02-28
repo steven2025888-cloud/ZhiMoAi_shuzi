@@ -185,7 +185,7 @@ class VoiceApiClient:
             url, 
             headers=self._headers(), 
             json={"model_id": model_id, "text": text}, 
-            timeout=30
+            timeout=300
         )
         return safe_json(response)
 
@@ -204,6 +204,6 @@ class VoiceApiClient:
             url, 
             headers=self._headers(), 
             params={"taskId": task_id}, 
-            timeout=10
+            timeout=60
         )
         return safe_json(response)

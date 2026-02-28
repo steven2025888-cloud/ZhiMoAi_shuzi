@@ -1039,6 +1039,319 @@ def _get_duration(video_path: str) -> float:
 
 
 # ═══════════════════════════════════════════════
+# 片头生成：人物抠图 + 白色描边 + 标题
+# ═══════════════════════════════════════════════
+def _extract_first_frame(video_path: str, out_path: str) -> bool:
+    """从视频提取第一帧"""
+    try:
+        subprocess.run(
+            [_FFMPEG, "-y", "-i", str(video_path),
+             "-vframes", "1", "-q:v", "2", out_path],
+            capture_output=True, creationflags=_NWIN, timeout=30)
+        return os.path.exists(out_path)
+    except Exception as e:
+        print(f"[INTRO] 提取首帧失败: {e}")
+        return False
+
+
+def _remove_bg(img_path: str) -> "Image.Image":
+    """用 rembg 抠图，返回 RGBA 图片"""
+    from rembg import remove
+    from PIL import Image
+    inp = Image.open(img_path).convert("RGBA")
+    out = remove(inp)
+    return out
+
+
+def _add_white_outline(rgba_img: "Image.Image", thickness: int = 18, gap: int = 10) -> "Image.Image":
+    """给抠出的人物添加白色粗描边效果，描边与人物之间有间距"""
+    from PIL import Image, ImageFilter
+    
+    # 提取 alpha 通道
+    alpha = rgba_img.split()[3]
+    
+    # 先膨胀出间距（gap）
+    gap_alpha = alpha
+    for _ in range(gap):
+        gap_alpha = gap_alpha.filter(ImageFilter.MaxFilter(3))
+    
+    # 再膨胀出描边厚度（thickness）
+    expanded = gap_alpha
+    for _ in range(thickness):
+        expanded = expanded.filter(ImageFilter.MaxFilter(3))
+    
+    # 创建白色描边层
+    w, h = rgba_img.size
+    outline_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    # 白色填充膨胀区域
+    white = Image.new("RGBA", (w, h), (255, 255, 255, 255))
+    outline_layer.paste(white, mask=expanded)
+    
+    # 挖掉间距区域（让描边和人物之间透明）
+    transparent = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    outline_layer.paste(transparent, mask=gap_alpha)
+    
+    # 把原图贴回去
+    outline_layer.paste(rgba_img, mask=alpha)
+    
+    return outline_layer
+
+
+def _get_video_resolution(video_path: str) -> tuple:
+    """获取视频分辨率"""
+    try:
+        r = subprocess.run(
+            [_FFPROBE, "-v", "quiet", "-print_format", "json",
+             "-show_streams", "-select_streams", "v:0", str(video_path)],
+            capture_output=True, text=True, creationflags=_NWIN, timeout=10)
+        streams = json.loads(r.stdout).get("streams", [])
+        if streams:
+            return int(streams[0].get("width", 1280)), int(streams[0].get("height", 720))
+    except Exception:
+        pass
+    return 1280, 720
+
+
+def _get_video_fps(video_path: str) -> float:
+    """获取视频帧率"""
+    try:
+        r = subprocess.run(
+            [_FFPROBE, "-v", "quiet", "-print_format", "json",
+             "-show_streams", "-select_streams", "v:0", str(video_path)],
+            capture_output=True, text=True, creationflags=_NWIN, timeout=10)
+        streams = json.loads(r.stdout).get("streams", [])
+        if streams:
+            fps_str = streams[0].get("r_frame_rate", "30/1")
+            if "/" in fps_str:
+                num, den = fps_str.split("/")
+                return float(num) / float(den)
+            return float(fps_str)
+    except Exception:
+        pass
+    return 30.0
+
+
+def generate_intro(video_path: str, title_text: str,
+                   title_font_name: str = "", title_font_size: int = 48,
+                   title_color: str = "#FFD700",
+                   title_outline_color: str = "#000000",
+                   bg_gradient: tuple = ((30, 30, 60), (15, 15, 40)),
+                   outline_thickness: int = 18,
+                   progress_cb=None) -> str:
+    """生成2秒片头视频：人物抠图+白色描边+标题
+
+    返回片头视频路径，失败返回空字符串。
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    def _prog(pct, msg):
+        if progress_cb:
+            try: progress_cb(pct, msg)
+            except Exception: pass
+
+    if not video_path or not os.path.exists(str(video_path)):
+        return ""
+
+    ts = int(time.time())
+    frame_path = os.path.join(OUTPUT_DIR, f"intro_frame_{ts}.png")
+    intro_img_path = os.path.join(OUTPUT_DIR, f"intro_img_{ts}.png")
+    intro_vid_path = os.path.join(OUTPUT_DIR, f"intro_{ts}.mp4")
+
+    try:
+        # 1. 提取第一帧
+        _prog(0.05, "🎬 提取视频首帧...")
+        if not _extract_first_frame(video_path, frame_path):
+            print("[INTRO] 提取首帧失败")
+            return ""
+
+        # 2. 获取视频分辨率和帧率
+        vid_w, vid_h = _get_video_resolution(video_path)
+        fps = _get_video_fps(video_path)
+
+        # 3. 抠图
+        _prog(0.15, "✂️ 人物抠图中...")
+        person = _remove_bg(frame_path)
+
+        # 4. 添加白色描边
+        _prog(0.45, "🖌️ 添加描边效果...")
+        person_outlined = _add_white_outline(person, thickness=outline_thickness)
+
+        # 5. 合成片头图片
+        _prog(0.55, "🎨 合成片头画面...")
+
+        # 创建渐变背景
+        canvas = Image.new("RGBA", (vid_w, vid_h), (0, 0, 0, 255))
+        draw = ImageDraw.Draw(canvas)
+        c1, c2 = bg_gradient
+        for y in range(vid_h):
+            ratio = y / vid_h
+            r = int(c1[0] + (c2[0] - c1[0]) * ratio)
+            g = int(c1[1] + (c2[1] - c1[1]) * ratio)
+            b = int(c1[2] + (c2[2] - c1[2]) * ratio)
+            draw.line([(0, y), (vid_w, y)], fill=(r, g, b, 255))
+
+        # 缩放人物到画面高度的 85%，居中偏下
+        pw, ph = person_outlined.size
+        target_h = int(vid_h * 0.85)
+        scale = target_h / ph
+        target_w = int(pw * scale)
+        person_resized = person_outlined.resize((target_w, target_h), Image.LANCZOS)
+
+        # 人物居中，底部对齐
+        px = (vid_w - target_w) // 2
+        py = vid_h - target_h
+        canvas.paste(person_resized, (px, py), person_resized)
+
+        # 6. 添加标题文字
+        if title_text and title_text.strip():
+            _prog(0.65, "📝 添加标题文字...")
+            # 加载字体
+            font = None
+            font_sz = int(title_font_size or 48)
+
+            # 尝试加载用户选择的字体
+            if title_font_name and title_font_name not in ("系统字体", "默认字体", ""):
+                try:
+                    font_file = ensure_font_downloaded(title_font_name)
+                    if font_file and os.path.exists(font_file):
+                        font = ImageFont.truetype(font_file, font_sz)
+                except Exception:
+                    pass
+
+            # 回退到思源黑体或系统字体
+            if font is None:
+                for fallback in [
+                    os.path.join(FONTS_DIR, "SourceHanSansCN-Bold.ttf"),
+                    os.path.join(FONTS_DIR, "SourceHanSansCN-Bold.otf"),
+                    "C:/Windows/Fonts/msyh.ttc",
+                    "C:/Windows/Fonts/simhei.ttf",
+                ]:
+                    if os.path.exists(fallback):
+                        try:
+                            font = ImageFont.truetype(fallback, font_sz)
+                            break
+                        except Exception:
+                            continue
+            if font is None:
+                font = ImageFont.load_default()
+
+            title = title_text.strip()
+            # 计算文字位置（顶部居中，距顶 15%）
+            bbox = draw.textbbox((0, 0), title, font=font)
+            tw = bbox[2] - bbox[0]
+            tx = (vid_w - tw) // 2
+            ty = int(vid_h * 0.08)
+
+            # 描边
+            oc = tuple(int(title_outline_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+            tc = tuple(int(title_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
+            outline_w = max(2, font_sz // 12)
+            # 画描边（8方向偏移）
+            for dx in range(-outline_w, outline_w + 1):
+                for dy in range(-outline_w, outline_w + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    draw.text((tx + dx, ty + dy), title, font=font, fill=(*oc, 255))
+            # 画正文
+            draw.text((tx, ty), title, font=font, fill=(*tc, 255))
+
+        # 保存合成图片
+        canvas_rgb = canvas.convert("RGB")
+        canvas_rgb.save(intro_img_path, quality=95)
+
+        # 7. 用 ffmpeg 生成2秒视频（匹配原视频帧率）
+        _prog(0.75, "🎬 生成片头视频...")
+        cmd = [
+            _FFMPEG, "-y",
+            "-loop", "1",
+            "-i", intro_img_path,
+            "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo",
+            "-t", "2",
+            "-r", str(int(fps)),
+            "-vf", f"scale={vid_w}:{vid_h}:flags=lanczos",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-c:a", "aac", "-b:a", "128k",
+            "-pix_fmt", "yuv420p",
+            "-shortest",
+            intro_vid_path
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              creationflags=_NWIN, timeout=60, errors="replace")
+        if proc.returncode != 0 or not os.path.exists(intro_vid_path):
+            print(f"[INTRO] ffmpeg 生成片头失败: {proc.stderr[-500:]}")
+            return ""
+
+        _prog(0.90, "✅ 片头生成完成")
+        return intro_vid_path
+
+    except ImportError as e:
+        print(f"[INTRO] 缺少依赖: {e}. 请安装: pip install rembg pillow")
+        return ""
+    except Exception as e:
+        print(f"[INTRO] 片头生成失败: {e}")
+        import traceback; traceback.print_exc()
+        return ""
+    finally:
+        # 清理临时文件
+        for f in (frame_path, intro_img_path):
+            try:
+                if os.path.exists(f): os.remove(f)
+            except Exception:
+                pass
+
+
+def concat_intro_and_video(intro_path: str, main_path: str, output_path: str) -> bool:
+    """用 ffmpeg concat 拼接片头和正片"""
+    if not intro_path or not os.path.exists(intro_path):
+        return False
+    if not main_path or not os.path.exists(main_path):
+        return False
+
+    concat_list = os.path.join(OUTPUT_DIR, f"concat_{int(time.time())}.txt")
+    try:
+        with open(concat_list, "w", encoding="utf-8") as f:
+            f.write(f"file '{intro_path.replace(os.sep, '/')}'\n")
+            f.write(f"file '{main_path.replace(os.sep, '/')}'\n")
+
+        cmd = [
+            _FFMPEG, "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", concat_list,
+            "-c", "copy",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              creationflags=_NWIN, timeout=120, errors="replace")
+        if proc.returncode != 0:
+            # copy 失败时尝试重编码
+            cmd2 = [
+                _FFMPEG, "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", concat_list,
+                "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                output_path
+            ]
+            proc2 = subprocess.run(cmd2, capture_output=True, text=True,
+                                   creationflags=_NWIN, timeout=300, errors="replace")
+            if proc2.returncode != 0:
+                print(f"[INTRO] concat 失败: {proc2.stderr[-500:]}")
+                return False
+
+        return os.path.exists(output_path)
+    except Exception as e:
+        print(f"[INTRO] concat 异常: {e}")
+        return False
+    finally:
+        try:
+            if os.path.exists(concat_list): os.remove(concat_list)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════
 # 主入口：烧录字幕
 # ═══════════════════════════════════════════════
 def burn_subtitles(video_path, audio_path, text_hint,
@@ -1050,6 +1363,7 @@ def burn_subtitles(video_path, audio_path, text_hint,
                    title_text="", title_duration=5, title_color="#FFD700",
                    title_outline_color="#000000", title_margin_top=30,
                    title_font_size=48,
+                   intro_enable=False,
                    progress_cb=None):
     def _prog(pct, msg):
         if progress_cb:
@@ -1058,6 +1372,8 @@ def burn_subtitles(video_path, audio_path, text_hint,
 
     if not video_path or not os.path.exists(str(video_path)):
         raise RuntimeError("请先完成视频合成")
+
+    print(f"[SUBTITLE] intro_enable={intro_enable}, title_text='{title_text}'")
 
     # 规范化颜色（防 Gradio ColorPicker 传奇怪格式）
     text_color    = normalize_color(text_color,    "#FFFFFF")
@@ -1188,6 +1504,39 @@ def burn_subtitles(video_path, audio_path, text_hint,
         os.remove(ass_path)
     except Exception:
         pass
+
+    # ── 片头生成与拼接 ──
+    if intro_enable:
+        _prog(0.82, "🎬 生成片头...")
+        try:
+            intro_path = generate_intro(
+                video_path, (title_text or "").strip(),
+                title_font_name=font_name,
+                title_font_size=int(title_font_size or 48),
+                title_color=title_color,
+                title_outline_color=title_outline_color,
+                progress_cb=lambda p, m: _prog(0.82 + p * 0.12, m),
+            )
+            if intro_path and os.path.exists(intro_path):
+                _prog(0.94, "🔗 拼接片头与正片...")
+                final_path = os.path.join(OUTPUT_DIR, f"intro_sub_{int(time.time())}.mp4")
+                if concat_intro_and_video(intro_path, out_path, final_path):
+                    # 清理中间文件
+                    try: os.remove(out_path)
+                    except Exception: pass
+                    try: os.remove(intro_path)
+                    except Exception: pass
+                    out_path = final_path
+                    print(f"[INTRO] 片头拼接成功: {out_path}")
+                else:
+                    print("[INTRO] 片头拼接失败，返回无片头版本")
+                    try: os.remove(intro_path)
+                    except Exception: pass
+            else:
+                print("[INTRO] 片头生成失败，跳过")
+        except Exception as e:
+            print(f"[INTRO] 片头处理异常: {e}")
+            import traceback; traceback.print_exc()
 
     _prog(1.0, "✅ 完成")
     return out_path

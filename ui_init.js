@@ -371,83 +371,98 @@
         }
     };
     
-    /* ── 9d. 抖音发布免责声明（登录时显示）── */
+    /* ── 9d. 用户协议与隐私协议弹窗 ── */
     window._platformAiAgreementAccepted = false;
     
     window._showDouyinLoginAgreement = function(callback) {
-        // 如果已经同意过，直接执行回调
         if (window._platformAiAgreementAccepted) {
             if (callback) callback(true);
             return;
         }
         
-        // 显示协议弹窗
         var modal = document.getElementById('zdai-platform-ai-agreement-modal');
         if (!modal) {
-            // 创建弹窗
             document.body.insertAdjacentHTML('beforeend', `
               <div id="zdai-platform-ai-agreement-modal" style="display:flex;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;">
                 <div style="position:absolute;inset:0;background:rgba(15,23,42,.85);backdrop-filter:blur(8px)"></div>
-                <div style="position:relative;background:#fff;border-radius:20px;padding:32px 28px;width:90%;max-width:680px;max-height:85vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.3)">
-                  <div style="text-align:center;margin-bottom:24px;">
-                    <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;box-shadow:0 8px 24px rgba(245,158,11,.3)">⚠️</div>
-                    <div style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:8px">平台与AI功能使用协议</div>
-                    <div style="font-size:13px;color:#64748b;">首次登录前必须阅读并同意以下条款</div>
+                <div style="position:relative;background:#fff;border-radius:20px;padding:32px 28px;width:90%;max-width:720px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.3)">
+                  <div style="text-align:center;margin-bottom:20px;flex-shrink:0;">
+                    <div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:28px;box-shadow:0 8px 24px rgba(99,102,241,.3)">📋</div>
+                    <div style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:6px">用户协议与隐私协议</div>
+                    <div style="font-size:12px;color:#64748b;">请阅读并同意以下条款后继续</div>
                   </div>
                   
-                  <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:14px;padding:20px 24px;margin-bottom:24px;max-height:400px;overflow-y:auto;font-size:13px;line-height:1.9;color:#475569;">
-                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:0 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">一、免责声明</h3>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>1.1 服务性质</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">本软件提供的平台发布与AI处理功能仅为技术工具，用于辅助用户在多个平台进行内容处理与发布。本软件不对发布内容的合法性、真实性、准确性承担任何责任。</p>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>1.2 内容责任</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">用户对其发布的所有内容（包括但不限于视频、文字、图片、音频等）承担全部法律责任。用户保证其发布的内容：</p>
-                    <ul style="margin:0 0 16px 0;padding-left:36px;">
-                      <li>不侵犯任何第三方的知识产权、肖像权、隐私权等合法权益</li>
-                      <li>不包含违法、违规、淫秽、暴力、恐怖、诽谤等不良信息</li>
-                      <li>符合国家法律法规及相关平台规则</li>
-                      <li>不用于任何商业欺诈、虚假宣传等违法违规行为</li>
+                  <div style="display:flex;gap:6px;margin-bottom:14px;flex-shrink:0;" id="zdai-agreement-tabs">
+                    <button id="zdai-tab-user" style="flex:1;padding:10px;border-radius:10px;border:none;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s" onclick="document.getElementById('zdai-agreement-user').style.display='block';document.getElementById('zdai-agreement-privacy').style.display='none';this.style.background='linear-gradient(135deg,#6366f1,#8b5cf6)';this.style.color='#fff';document.getElementById('zdai-tab-privacy').style.background='#f1f5f9';document.getElementById('zdai-tab-privacy').style.color='#475569'">📄 用户协议</button>
+                    <button id="zdai-tab-privacy" style="flex:1;padding:10px;border-radius:10px;border:none;background:#f1f5f9;color:#475569;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s" onclick="document.getElementById('zdai-agreement-privacy').style.display='block';document.getElementById('zdai-agreement-user').style.display='none';this.style.background='linear-gradient(135deg,#6366f1,#8b5cf6)';this.style.color='#fff';document.getElementById('zdai-tab-user').style.background='#f1f5f9';document.getElementById('zdai-tab-user').style.color='#475569'">🔒 隐私协议</button>
+                  </div>
+
+                  <div id="zdai-agreement-user" style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:14px;padding:20px 24px;margin-bottom:20px;overflow-y:auto;font-size:13px;line-height:1.9;color:#475569;flex:1;min-height:0;">
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:0 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">一、服务性质与责任边界</h3>
+                    <p style="margin:0 0 12px 0;padding-left:0;">本软件（织梦AI）按"现状"方式提供，仅为技术辅助工具，不构成任何法律意见、合规意见、平台官方授权或收益保证。</p>
+                    <p style="margin:0 0 16px 0;padding-left:0;">开发者不对以下事项作保证：平台审核通过、账号安全、AI生成内容准确性、第三方服务可用性、资源授权完整性。</p>
+
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:20px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">二、用户承诺与义务</h3>
+                    <ul style="margin:0 0 16px 0;padding-left:24px;">
+                      <li>对上传、生成、发布的全部内容及素材拥有合法权利或已取得授权</li>
+                      <li>不利用本软件实施违法违规、侵权、欺诈、虚假宣传等行为</li>
+                      <li>不利用AI语音克隆、数字人功能冒充他人或制作虚假内容</li>
+                      <li>自行负责账号安全、内容审核、授权核验及商业合规</li>
                     </ul>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>1.3 账号安全</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">用户需妥善保管自己的抖音账号信息。因用户账号泄露、被盗用等原因导致的任何损失，本软件不承担责任。</p>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>1.4 平台规则</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">抖音平台可能随时调整其服务条款、发布规则、审核标准等。因平台规则变化导致的发布失败、内容被删除、账号被封禁等情况，本软件不承担任何责任。</p>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>1.5 技术限制</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">本软件依赖第三方技术和服务，可能因技术故障、网络中断、平台更新等原因导致功能异常。本软件不保证服务的持续性、稳定性和准确性。</p>
-                    
-                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:24px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">二、用户协议</h3>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>2.1 合法使用</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">用户承诺仅将本软件用于合法目的，不得用于任何违法违规活动。</p>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>2.2 自担风险</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">用户理解并同意，使用本软件发布内容可能面临的风险（包括但不限于内容被删除、账号被封禁、法律纠纷等）由用户自行承担。</p>
-                    
-                    <p style="margin:0 0 12px 0;"><strong>2.3 数据隐私</strong></p>
-                    <p style="margin:0 0 16px 0;padding-left:16px;">本软件会在本地保存用户的登录状态，用于保持登录便利性。本软件不会收集、上传或泄露用户的个人信息和账号数据。</p>
-                    
-                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:24px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">三、特别提示</h3>
-                    
-                    <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:20px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">三、素材与资源授权</h3>
+                    <p style="margin:0 0 16px 0;">除开发者明确标注为"已授权资源"外，本软件中出现的字体、音乐、模板等资源不视为开发者向用户授予任何知识产权许可。用户应自行核验授权范围。</p>
+
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:20px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">四、AI功能合规</h3>
+                    <p style="margin:0 0 16px 0;">AI语音克隆、数字人合成、深度合成等功能仅供合法用途。用户需遵守相关法律法规，在必要时对AI生成内容进行标识。</p>
+
+                    <div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 16px;margin-bottom:12px;">
                       <p style="margin:0 0 8px 0;font-weight:700;color:#dc2626;">⚠️ 重要提醒</p>
                       <ul style="margin:0;padding-left:20px;color:#991b1b;">
                         <li>请确保发布内容符合法律法规和平台规定</li>
-                        <li>请勿发布侵权、违规、不良信息</li>
-                        <li>账号安全由用户自行负责</li>
+                        <li>字体、音乐等素材需自行确认授权</li>
+                        <li>自动发布功能存在平台风控风险</li>
                         <li>因违规使用导致的一切后果由用户承担</li>
                       </ul>
                     </div>
-                    
-                    <p style="margin:0;font-size:12px;color:#64748b;text-align:center;padding-top:12px;border-top:1px solid #e2e8f0;">
-                      最后更新日期：2026年2月22日
-                    </p>
+                    <p style="margin:0;font-size:12px;color:#64748b;text-align:center;padding-top:10px;border-top:1px solid #e2e8f0;">完整协议请查看程序目录下 user_agreement.md · 最后更新：2026年2月27日</p>
+                  </div>
+
+                  <div id="zdai-agreement-privacy" style="display:none;background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:14px;padding:20px 24px;margin-bottom:20px;overflow-y:auto;font-size:13px;line-height:1.9;color:#475569;flex:1;min-height:0;">
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:0 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">一、信息收集</h3>
+                    <p style="margin:0 0 12px 0;font-weight:600;">本地存储信息（仅保存在您的设备上）：</p>
+                    <ul style="margin:0 0 16px 0;padding-left:24px;">
+                      <li>软件配置与用户偏好设置</li>
+                      <li>工作台记录与项目文件</li>
+                      <li>字体、音频、模型缓存</li>
+                      <li>浏览器用户数据（用于平台登录状态保持）</li>
+                      <li>日志文件与错误记录</li>
+                    </ul>
+                    <p style="margin:0 0 12px 0;font-weight:600;">在线服务相关（仅在您主动使用时）：</p>
+                    <ul style="margin:0 0 16px 0;padding-left:24px;">
+                      <li>卡密验证：设备识别码、卡密信息</li>
+                      <li>在线语音合成：文本内容</li>
+                      <li>AI文案优化：文本内容</li>
+                      <li>版本检查：软件版本号</li>
+                    </ul>
+
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:20px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">二、信息使用</h3>
+                    <p style="margin:0 0 16px 0;">收集的信息仅用于：提供软件核心功能、验证授权状态、改善用户体验、故障排查与技术支持。</p>
+
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:20px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">三、信息安全</h3>
+                    <p style="margin:0 0 16px 0;">本软件不主动收集或上传您的个人隐私信息。在线传输采用加密通信。本地数据安全性取决于您的设备环境。</p>
+
+                    <h3 style="font-size:15px;font-weight:800;color:#0f172a;margin:20px 0 16px 0;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">四、您的权利</h3>
+                    <ul style="margin:0 0 16px 0;padding-left:24px;">
+                      <li>访问权：可查看本地存储的所有数据</li>
+                      <li>删除权：可随时删除本地缓存、日志等</li>
+                      <li>选择权：可选择不使用在线功能</li>
+                      <li>知情权：有权了解数据的收集和使用方式</li>
+                    </ul>
+                    <p style="margin:0;font-size:12px;color:#64748b;text-align:center;padding-top:10px;border-top:1px solid #e2e8f0;">完整隐私协议请查看程序目录下 privacy_policy.md · 最后更新：2026年2月27日</p>
                   </div>
                   
-                  <div style="display:flex;gap:12px;">
+                  <div style="display:flex;gap:12px;flex-shrink:0;">
                     <button id="zdai-platform-ai-agreement-cancel" style="flex:1;padding:14px;border-radius:12px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;color:#475569;transition:all .15s">取消</button>
                     <button id="zdai-platform-ai-agreement-accept" style="flex:2;padding:14px;border-radius:12px;border:none;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s;box-shadow:0 4px 12px rgba(99,102,241,.3)">我已阅读并同意</button>
                   </div>
@@ -459,7 +474,6 @@
             modal.style.display = 'flex';
         }
         
-        // 绑定按钮事件
         document.getElementById('zdai-platform-ai-agreement-cancel').onclick = function() {
             modal.style.display = 'none';
             if (callback) callback(false);
@@ -599,6 +613,112 @@
     }
     setTimeout(applyFontPreview, 2000);
     setTimeout(applyFontPreview, 5000);
+
+    /* ── 15. 视频放大预览关闭按钮 ── */
+    (function() {
+        var CLOSE_BTN_ID = 'zdai-lightbox-close';
+
+        function injectCloseBtn(container) {
+            if (!container || container.querySelector('#' + CLOSE_BTN_ID)) return;
+            var btn = document.createElement('button');
+            btn.id = CLOSE_BTN_ID;
+            btn.innerHTML = '✕ 关闭预览';
+            btn.className = 'zdai-lightbox-close-btn';
+            btn.onclick = function(e) {
+                e.stopPropagation();
+                // 尝试点击 Gradio 自带的关闭按钮
+                var nativeClose = container.querySelector('button[aria-label="Close"], button[aria-label="close"], .close, .modalClose, [class*="close"]');
+                if (nativeClose) {
+                    nativeClose.click();
+                    return;
+                }
+                // 兜底：按 Escape 键关闭
+                document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', keyCode: 27, bubbles: true}));
+                // 再兜底：直接隐藏
+                setTimeout(function() {
+                    if (container.parentNode) {
+                        container.style.display = 'none';
+                        // 尝试移除 body 上的 overflow:hidden
+                        document.body.style.overflow = '';
+                    }
+                }, 100);
+            };
+            container.appendChild(btn);
+        }
+
+        // 监听 DOM 变化，检测 Gradio lightbox 弹出
+        var observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                m.addedNodes.forEach(function(node) {
+                    if (node.nodeType !== 1) return;
+                    // Gradio lightbox: 固定定位的全屏遮罩，包含 video 或 img
+                    var el = node;
+                    var isLightbox = false;
+
+                    // 检查自身
+                    if (el.matches && (
+                        el.matches('[class*="modal"]') ||
+                        el.matches('[class*="lightbox"]') ||
+                        el.matches('[class*="preview"]')
+                    )) {
+                        var style = window.getComputedStyle(el);
+                        if (style.position === 'fixed' && (el.querySelector('video') || el.querySelector('img'))) {
+                            isLightbox = true;
+                        }
+                    }
+
+                    // 检查是否是固定定位的全屏覆盖层（含 video）
+                    if (!isLightbox && el.style) {
+                        var cs = window.getComputedStyle(el);
+                        if (cs.position === 'fixed' && cs.zIndex > 999 && (el.querySelector('video') || el.querySelector('img'))) {
+                            isLightbox = true;
+                        }
+                    }
+
+                    if (isLightbox) {
+                        setTimeout(function() { injectCloseBtn(el); }, 50);
+                    }
+                });
+            });
+
+            // 也扫描已有的 Gradio modal（有些版本不是新增节点而是 display 切换）
+            document.querySelectorAll('[class*="modal"]:not(#sub-settings-modal):not(#zdai-del-modal):not(#zdai-platform-ai-agreement-modal):not(#clear-confirm-overlay)').forEach(function(el) {
+                var cs = window.getComputedStyle(el);
+                if (cs.position === 'fixed' && cs.display !== 'none' && (el.querySelector('video') || el.querySelector('img'))) {
+                    injectCloseBtn(el);
+                }
+            });
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+    })();
+
+    /* ── 16. 字幕高级设置弹窗：点击外部区域（暗色遮罩）关闭 ── */
+    (function() {
+        document.addEventListener('click', function(e) {
+            var modal = document.getElementById('sub-settings-modal');
+            if (!modal) return;
+            // 只处理可见状态的弹窗
+            var cs = window.getComputedStyle(modal);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return;
+            if (modal.offsetWidth === 0 && modal.offsetHeight === 0) return;
+            // 检查点击的是否是打开按钮（避免打开后立即关闭）
+            if (e.target.closest && e.target.closest('.sub-settings-btn')) return;
+            // #sub-settings-modal 是全屏遮罩，其第一个子 div 是白色内容面板
+            // 需要检查点击是否落在内容面板之外（即暗色遮罩区域）
+            var panel = modal.querySelector(':scope > div');
+            if (!panel) return;
+            var rect = panel.getBoundingClientRect();
+            var x = e.clientX, y = e.clientY;
+            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return;
+            // 点击在内容面板外部（暗色遮罩上），触发取消按钮关闭弹窗
+            var cancelWrapper = modal.querySelector('.sub-modal-close-btn');
+            if (cancelWrapper) {
+                var btn = cancelWrapper.querySelector('button') || cancelWrapper;
+                btn.click();
+            }
+        });
+    })();
 
     console.log('[织梦AI] 初始化完成 | Ctrl+Shift+Q 强制退出');
 

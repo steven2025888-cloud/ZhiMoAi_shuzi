@@ -34,6 +34,7 @@ try:
     import lib_voice  as _vc
     import lib_subtitle as _sub
     import lib_pip     as _pip
+    import lib_pip_websocket as _pip_ws  # WebSocket 画中画模块
     _LIBS_OK = True
 except Exception as _libs_err:
     _LIBS_OK = False
@@ -53,7 +54,11 @@ except Exception as _libs_err:
     _av  = _StubLib()
     _vc  = _StubLib()
     _sub = _StubLib()
-    _pip = type('_StubPip', (), {'apply_pip': staticmethod(lambda *a, **kw: None)})()
+    _pip = type('_StubPip', (), {
+        'apply_pip_online': staticmethod(lambda *a, **kw: ""),
+        'apply_pip_online_smart': staticmethod(lambda *a, **kw: ""),
+        'apply_pip_local':  staticmethod(lambda *a, **kw: ""),
+    })()
 
 # ── 清除代理 ──
 for _k in ('http_proxy','https_proxy','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','all_proxy'):
@@ -65,7 +70,7 @@ os.environ['NO_PROXY'] = '127.0.0.1,localhost'
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
 LEGACY_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
-DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")  # 兼容旧版本
+DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")  # 兼容旧版本
 INDEXTTS_DIR   = os.path.join(BASE_DIR, "_internal_tts")
 HEYGEM_DIR     = os.path.join(BASE_DIR, "heygem-win-50")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
@@ -469,17 +474,77 @@ def _restore_tts_gpu():
 # ══════════════════════════════════════════════════════════════
 #  语音合成（支持本地版和在线版）
 # ══════════════════════════════════════════════════════════════
-def download_voice_from_proxy(play_url: str, output_path: str) -> str:
-    """通过代理URL下载音频文件到指定路径"""
+def download_voice_from_proxy(play_url: str, output_path: str, max_retries: int = 5) -> str:
+    """通过代理URL下载音频文件到指定路径（自动重试 + 流式/整体双模式）"""
     import requests
-    
-    r = requests.get(play_url, timeout=60)
-    r.raise_for_status()
-    
-    with open(output_path, 'wb') as f:
-        f.write(r.content)
-    
-    return output_path
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    import time as _time
+
+    session = requests.Session()
+    # urllib3 层自动重试（仅针对连接级错误）
+    adapter = HTTPAdapter(
+        max_retries=Retry(total=2, backoff_factor=1,
+                          status_forcelist=[502, 503, 504])
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+    headers = {
+        "User-Agent": "ZhiMoAi-Client/1.0",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+    }
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"[下载] 第 {attempt}/{max_retries} 次尝试下载音频...")
+
+            # 第一轮尝试用整体下载（适合 <10MB 的 TTS 音频），后续用流式
+            use_stream = attempt > 2
+            r = session.get(
+                play_url, headers=headers,
+                timeout=(30, 600),   # 放宽超时
+                stream=use_stream,
+            )
+            r.raise_for_status()
+
+            if use_stream:
+                with open(output_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+            else:
+                # 整体下载：一次性读取全部内容，避免 IncompleteRead
+                content = r.content
+                with open(output_path, 'wb') as f:
+                    f.write(content)
+
+            # 验证文件是否完整下载
+            file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            expected = int(r.headers.get('Content-Length', 0) or 0)
+            if file_size > 0 and (expected == 0 or file_size >= expected):
+                print(f"[下载] 音频下载成功，大小: {file_size} 字节")
+                return output_path
+            else:
+                raise IOError(
+                    f"文件不完整: 已下载 {file_size} / 预期 {expected} 字节"
+                )
+        except Exception as e:
+            print(f"[下载] 第 {attempt} 次下载失败: {e}")
+            # 清理不完整的文件
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+            if attempt < max_retries:
+                wait = attempt * 5
+                print(f"[下载] 等待 {wait} 秒后重试...")
+                _time.sleep(wait)
+            else:
+                raise
+    session.close()
 
 
 def generate_speech_online(text, voice_name, progress=gr.Progress()):
@@ -528,11 +593,10 @@ def generate_speech_online(text, voice_name, progress=gr.Progress()):
         
         progress(0.3, desc="[在线] 云端正在处理中...")
         
-        # 轮询结果
+        # 轮询结果（不设超时，因为长文案合成可能需要数分钟）
         import time as _time
-        max_wait = 120  # 最多等待 120 秒
         start_time = _time.time()
-        while _time.time() - start_time < max_wait:
+        while True:
             result = client.tts_result(task_id)
             print(f"[TTS在线版] 轮询结果: {result}")
             
@@ -597,10 +661,8 @@ def generate_speech_online(text, voice_name, progress=gr.Progress()):
             
             # 更新进度
             elapsed = int(_time.time() - start_time)
-            progress(0.3 + min(elapsed / max_wait * 0.5, 0.5), desc=f"[在线] 云端处理中...已等待 {elapsed} 秒")
+            progress(min(0.3 + elapsed / 600 * 0.5, 0.8), desc=f"[在线] 云端处理中...已等待 {elapsed} 秒")
             _time.sleep(2)
-        
-        raise gr.Error("合成超时，请稍后重试")
         
     except gr.Error:
         raise
@@ -1461,6 +1523,76 @@ class TextExtractor:
             self._thread.start()
             safe_print("[TextExtractor] 后台线程已启动")
     
+    def send_request(self, request_data: dict, timeout: float = 30.0,
+                    response_type: str = None, request_id: str = None) -> tuple:
+        """
+        发送通用WebSocket请求
+        :param request_data: 请求数据字典
+        :param timeout: 超时时间（秒）
+        :param response_type: 期望的响应类型（如 "chatglm_video_result"）
+        :param request_id: 请求ID，用于匹配响应
+        :return: (success, data_or_error)
+        """
+        if not _WS_OK:
+            return False, "websockets 模块未安装"
+
+        if not self._connected or not self._ws:
+            self.start()
+            time.sleep(2)
+
+        if not self._connected:
+            return False, "WebSocket 未连接"
+
+        try:
+            # 在事件循环中发送消息
+            async def send_msg():
+                await self._ws.send(json.dumps(request_data))
+
+            if self._loop and self._loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(send_msg(), self._loop)
+                future.result(timeout=5)
+            else:
+                return False, "事件循环未运行"
+
+            # 等待响应
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    response = self._response_queue.get(timeout=1)
+                    data = json.loads(response)
+
+                    # 如果指定了 request_id，检查是否匹配
+                    if request_id and data.get("request_id") != request_id:
+                        # 不匹配，放回队列
+                        self._response_queue.put(response)
+                        continue
+
+                    # 如果指定了 response_type，检查类型
+                    if response_type and data.get("type") == response_type:
+                        return True, data
+
+                    # 处理通用响应类型
+                    msg_type = data.get("type", "")
+                    if msg_type == "ack":
+                        continue  # 跳过 ack，继续等待最终结果
+                    elif msg_type == "error":
+                        return False, data.get("message", "请求失败")
+                    elif msg_type == "kicked":
+                        return False, "连接被服务器踢出"
+                    elif not response_type:
+                        # 如果没有指定响应类型，返回任何非 ack 的响应
+                        return True, data
+
+                except _queue.Empty:
+                    continue
+                except json.JSONDecodeError:
+                    continue
+
+            return False, "请求超时"
+
+        except Exception as e:
+            return False, f"发送请求失败: {e}"
+
     def extract_text(self, url_or_content: str, timeout: float = 30.0) -> tuple:
         """
         提取文案
@@ -1470,49 +1602,49 @@ class TextExtractor:
         """
         if not _WS_OK:
             return False, "websockets 模块未安装，请运行: pip install websockets"
-        
+
         if not self._connected or not self._ws:
             # 尝试启动连接
             self.start()
             time.sleep(2)  # 等待连接建立
-            
+
         if not self._connected:
             return False, "WebSocket 未连接，请检查网络"
-        
+
         # 清空队列中的旧消息
         while not self._response_queue.empty():
             try:
                 self._response_queue.get_nowait()
             except _queue.Empty:
                 break
-        
+
         # 发送提取请求
         try:
             extract_msg = json.dumps({"type": "url", "url": url_or_content})
-            
+
             # 在事件循环中发送消息
             async def send_msg():
                 await self._ws.send(extract_msg)
-            
+
             if self._loop and self._loop.is_running():
                 future = asyncio.run_coroutine_threadsafe(send_msg(), self._loop)
                 future.result(timeout=5)
             else:
                 return False, "事件循环未运行"
-            
+
             safe_print(f"[TextExtractor] 已发送提取请求: {url_or_content[:50]}...")
-            
+
             # 等待响应
             start_time = time.time()
             while time.time() - start_time < timeout:
                 try:
                     response = self._response_queue.get(timeout=1)
                     data = json.loads(response)
-                    
+
                     if data.get("type") == "result":
                         content = data.get("content", "")
                         is_error = data.get("error", False)
-                        
+
                         if is_error:
                             # 错误情况：返回失败和错误信息
                             return False, content
@@ -1527,9 +1659,9 @@ class TextExtractor:
                     continue
                 except json.JSONDecodeError:
                     continue
-            
+
             return False, "请求超时，请重试"
-            
+
         except Exception as e:
             return False, f"发送请求失败: {e}"
 
@@ -1692,30 +1824,32 @@ def build_ui():
                                 # 隐藏的 prompt_audio 组件（用于内部逻辑，不显示给用户）
                                 prompt_audio = gr.Audio(visible=False, type="filepath")
 
-                                # ── 语音风格预设 ──
-                                voice_style = gr.Radio(
-                                    label="语音风格",
-                                    choices=["标准", "稳定播报", "活泼生动", "慢速朗读", "专业模式"],
-                                    value="标准",
-                                    elem_classes="voice-style-radio")
-                                # ── 合成速度预设 ──
-                                tts_speed_preset = gr.Radio(
-                                    label="合成速度",
-                                    choices=list(TTS_SPEED_PRESETS.keys()),
-                                    value="🚀 快速",
-                                    elem_classes="voice-style-radio")
-                                gr.HTML(
-                                    '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
-                                    '⚡极快：最快速度，适合预览试听<br>'
-                                    '🚀快速：速度优先，默认推荐（FP16）<br>'
-                                    '⚖️标准：速度与质量兼顾<br>'
-                                    '✨高质量：最佳语音质量，速度较慢</div>'
-                                )
+                                # ── 语音风格预设（仅本地版可见）──
+                                _is_local_tts = (current_tts_mode == 'local')
+                                with gr.Group(visible=_is_local_tts) as local_only_settings_group:
+                                    voice_style = gr.Radio(
+                                        label="语音风格",
+                                        choices=["标准", "稳定播报", "活泼生动", "慢速朗读", "专业模式"],
+                                        value="标准",
+                                        elem_classes="voice-style-radio")
+                                    # ── 合成速度预设 ──
+                                    tts_speed_preset = gr.Radio(
+                                        label="合成速度",
+                                        choices=list(TTS_SPEED_PRESETS.keys()),
+                                        value="🚀 快速",
+                                        elem_classes="voice-style-radio")
+                                    gr.HTML(
+                                        '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
+                                        '⚡极快：最快速度，适合预览试听<br>'
+                                        '🚀快速：速度优先，默认推荐（FP16）<br>'
+                                        '⚖️标准：速度与质量兼顾<br>'
+                                        '✨高质量：最佳语音质量，速度较慢</div>'
+                                    )
 
-                                voice_speed = gr.Slider(
-                                    label="语速调节",
-                                    info="← 慢  |  快 →",
-                                    minimum=0.5, maximum=1.5, value=1.0, step=0.05)
+                                    voice_speed = gr.Slider(
+                                        label="语速调节",
+                                        info="← 慢  |  快 →",
+                                        minimum=0.5, maximum=1.5, value=1.0, step=0.05)
 
                                 with gr.Group(visible=False) as pro_mode_group:
                                     with gr.Row():
@@ -1854,22 +1988,35 @@ def build_ui():
                                     value=False,
                                     elem_classes="kw-checkbox")
                                 with gr.Group(visible=False) as pip_settings_group:
-                                    gr.HTML(
-                                        '<div style="background:#f0f9ff;border:1.5px solid #bae6fd;'
-                                        'border-radius:12px;padding:12px 14px;margin-bottom:12px;">'
-                                        '<div style="font-size:13px;font-weight:700;color:#0c4a6e;margin-bottom:6px;">📁 使用说明</div>'
-                                        '<div style="font-size:11px;color:#0369a1;line-height:1.8;">'
-                                        '1. 在 <b>画中画/</b> 文件夹下建立关键词子文件夹<br>'
-                                        '（如 <b>画中画/猫粮/</b>、<b>画中画/性价比/</b>）<br>'
-                                        '2. 在子文件夹中放入对应的视频素材（MP4等）<br>'
-                                        '3. 程序根据文案中的关键词自动匹配对应素材<br>'
-                                        '4. 匹配句子时长精确对齐，自动组合或截断素材<br>'
-                                        '5. 不足3秒的句子会自动扩展合并相邻句子</div></div>'
-                                    )
-                                    pip_folder_hint = gr.HTML(
-                                        value=f'<div style="font-size:11px;color:#64748b;padding:4px 8px;">'
-                                              f'📂 素材路径：<b>{os.path.join(BASE_DIR, "画中画")}</b></div>'
-                                    )
+                                    pip_mode = gr.Radio(
+                                        choices=["🌐 在线生成", "📁 本地上传"],
+                                        value="🌐 在线生成",
+                                        label="画中画模式",
+                                        elem_classes="audio-mode-radio")
+                                    # 在线模式：提示词
+                                    with gr.Group() as pip_online_group:
+                                        pip_prompt = gr.TextArea(
+                                            label="🎬 画中画提示词",
+                                            placeholder="描述你想要的实景画面，如：现代室内装修施工场景，画面干净高级...\n（AI改写时会自动生成）",
+                                            lines=3, max_lines=5)
+                                        gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:2px 8px;">'
+                                                '提示词越详细，生成的画面越精准。点击「AI改写+标题标签」可自动生成。</div>')
+                                    # 本地上传模式
+                                    with gr.Group(visible=False) as pip_local_group:
+                                        pip_local_files = gr.File(
+                                            label="📁 上传画中画视频素材",
+                                            file_types=["video"],
+                                            file_count="multiple")
+                                        gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:2px 8px;">'
+                                                '上传1-3个视频片段，将静音后穿插到合成视频中。</div>')
+                                    # 通用设置（AI自动决定穿插位置和时长，隐藏手动控制）
+                                    with gr.Row(visible=False):
+                                        pip_interval = gr.Slider(
+                                            minimum=8, maximum=30, value=15, step=1,
+                                            label="穿插间隔(秒)")
+                                        pip_clip_dur = gr.Slider(
+                                            minimum=3, maximum=8, value=5, step=1,
+                                            label="每段时长(秒)")
                                     pip_btn = gr.Button("🎬 生成画中画视频", variant="primary", size="lg")
                                     pip_hint = gr.HTML(value="")
                             
@@ -1882,6 +2029,11 @@ def build_ui():
                                     '<span class="subtitle-panel-tip">✨ 支持关键词高亮</span>'
                                     '</div>'
                                 )
+                                # 片头开关
+                                intro_enable = gr.Checkbox(
+                                    label="🎬 启用人物片头（2秒抠图片头+标题）",
+                                    value=False,
+                                    elem_classes="kw-checkbox")
                                 # 基本设置：字体 字号 位置（始终可见）
                                 with gr.Row():
                                     _font_grouped = _sub.get_font_choices_grouped() if _LIBS_OK else [("🖥️ 系统字体（默认）", "系统字体"), ("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
@@ -1981,11 +2133,11 @@ def build_ui():
                                                 label="标题颜色", value="#FFD700", scale=1)
                                             sub_title_outline_color = gr.ColorPicker(
                                                 label="标题描边颜色", value="#000000", scale=1)
-                                        gr.HTML('<div class="sub-modal-section" style="margin-top:14px;">📝 字幕内容</div>')
                                         sub_text_modal = gr.Textbox(
                                             label="字幕内容",
-                                            placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
-                                            lines=3)
+                                            value="",
+                                            visible=False,
+                                            lines=1)
                                 # ── 底部按钮（全宽）──
                                 with gr.Row():
                                     sub_settings_cancel_btn = gr.Button(
@@ -2000,7 +2152,8 @@ def build_ui():
                                 sub_text = gr.Textbox(
                                     label="字幕内容（语音合成后自动填入）",
                                     placeholder="完成步骤1语音合成后会自动填入文字，也可手动编辑...",
-                                    lines=2)
+                                    lines=2,
+                                    visible=False)
                                 sub_btn = gr.Button("✨  生成带字幕视频", variant="primary", size="lg")
                                 sub_hint = gr.HTML(value="")
                         
@@ -2284,6 +2437,9 @@ def build_ui():
 
                 bt_tasks_state = gr.State([])
 
+                # ── AI优化状态跟踪 ──
+                ai_rewrite_done = gr.State(False)
+
                 # ── 事件：切换音频来源 ──
                 bt_audio_mode.change(
                     lambda m: (gr.update(visible=(m=="文字合成语音")),
@@ -2558,6 +2714,8 @@ def build_ui():
                                 douyin_title_val="", douyin_topics_val="",
                                 # 字幕标题参数
                                 sub_title_text_val="",
+                                # 画中画提示词
+                                pip_prompt_val=None,
                                 # 可选：用于 AI 改写场景，按原文查找已有记录并替换
                                 search_key=None):
             """自动保存当前工作台状态 - 相同文本则更新，不同文本则新建
@@ -2664,6 +2822,8 @@ def build_ui():
                     # 发布参数
                     "douyin_title": to_json_safe(douyin_title_val),
                     "douyin_topics": to_json_safe(douyin_topics_val),
+                    # 画中画提示词
+                    "pip_prompt": to_json_safe(pip_prompt_val) if pip_prompt_val is not None else "",
                 }
                 
                 # 读取现有记录
@@ -2686,7 +2846,9 @@ def build_ui():
                         existing_idx = 0
                 
                 if existing_idx >= 0:
-                    # 更新现有记录
+                    # 更新现有记录 - 画中画提示词为空时保留旧值
+                    if pip_prompt_val is None and records[existing_idx].get("pip_prompt"):
+                        record["pip_prompt"] = records[existing_idx]["pip_prompt"]
                     records[existing_idx] = record
                     msg = f"已更新：{record_name}"
                 else:
@@ -2710,17 +2872,17 @@ def build_ui():
             try:
                 if not record_idx_str:
                     # 未选择记录，只更新提示，其他组件不动
-                    return [gr.update()] * 27 + [_hint_html("warning", "请先选择一条记录")]
+                    return [gr.update()] * 28 + [_hint_html("warning", "请先选择一条记录")]
                 
                 try:
                     record_idx = int(record_idx_str)
                 except (ValueError, TypeError):
-                    return [gr.update()] * 27 + [_hint_html("error", "无效的记录索引")]
+                    return [gr.update()] * 28 + [_hint_html("error", "无效的记录索引")]
                 
                 records = _load_workspace_records()
                 
                 if record_idx < 0 or record_idx >= len(records):
-                    return [gr.update()] * 27 + [_hint_html("error", "记录不存在")]
+                    return [gr.update()] * 28 + [_hint_html("error", "记录不存在")]
                 
                 rec = records[record_idx]
                 
@@ -2838,6 +3000,8 @@ def build_ui():
                     # 发布参数
                     gr.update(value=rec.get("douyin_title", "")),           # douyin_title
                     gr.update(value=rec.get("douyin_topics", "")),          # douyin_topics
+                    # 画中画提示词
+                    gr.update(value=rec.get("pip_prompt", "")),             # pip_prompt
                     _hint_html("ok", f"已恢复记录：{rec.get('record_name', rec.get('time', '未知'))}")
                 ]
                 
@@ -2846,7 +3010,7 @@ def build_ui():
                 
                 return result
             except Exception as e:
-                return [gr.update()] * 27 + [_hint_html("error", f"恢复失败: {str(e)}")]
+                return [gr.update()] * 28 + [_hint_html("error", f"恢复失败: {str(e)}")]
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, voice_name, spd, tp, tk, temp, nb, rp, mmt,
@@ -3004,92 +3168,210 @@ def build_ui():
             inputs=[pip_enable],
             outputs=[pip_settings_group])
 
+        # ── 画中画模式切换（在线/本地）──
+        def _pip_mode_switch(mode_val):
+            is_online = ("在线" in str(mode_val))
+            return gr.update(visible=is_online), gr.update(visible=not is_online)
+        pip_mode.change(
+            _pip_mode_switch,
+            inputs=[pip_mode],
+            outputs=[pip_online_group, pip_local_group])
+
         # ── 画中画生成按钮 ──
-        def generate_pip_video(current_video, current_audio, text_content, progress=gr.Progress()):
-            """独立的画中画视频生成函数"""
+        def generate_pip_video(current_video, pip_mode_val, pip_prompt_val,
+                               pip_local_val, pip_interval_val, pip_clip_dur_val,
+                               progress=gr.Progress()):
+            """画中画视频生成：在线模式通过 WebSocket chatglm_video 生成，本地模式用用户上传的素材"""
             if not current_video:
-                return gr.update(), '<div class="hint-err">⚠ 请先在步骤3生成视频</div>'
+                return gr.update(), _hint_html("error", "请先在步骤3生成视频")
             if not os.path.exists(str(current_video)):
-                return gr.update(), '<div class="hint-err">⚠ 视频文件不存在，请重新生成</div>'
-            if not text_content or not text_content.strip():
-                return gr.update(), '<div class="hint-err">⚠ 请先输入文案内容</div>'
-            
+                return gr.update(), _hint_html("error", "视频文件不存在，请重新生成")
+
+            is_online = ("在线" in str(pip_mode_val))
+
             try:
-                progress(0.05, desc="🖼 开始处理画中画...")
-                
-                # 调用画中画处理函数
-                pip_result = _pip.apply_pip(
-                    str(current_video), 
-                    str(current_audio) if current_audio else str(current_video),
-                    text_content,
-                    progress_cb=lambda pct, msg: progress(pct, desc=f"🖼 {msg}")
-                )
-                
+                if is_online:
+                    if not pip_prompt_val or not pip_prompt_val.strip():
+                        return gr.update(), _hint_html("warning", "请输入画中画提示词（或点击「AI改写+标题标签」自动生成）")
+                    progress(0.02, desc="🎬 在线生成画中画...")
+                    # 按换行拆分为多个提示词
+                    prompts_list = [p.strip() for p in pip_prompt_val.strip().split('\n') if p.strip()]
+                    if not prompts_list:
+                        prompts_list = [pip_prompt_val.strip()]
+
+                    # 使用 TextExtractor 连接生成画中画
+                    extractor = get_text_extractor()
+                    if len(prompts_list) == 1:
+                        # 单个提示词
+                        pip_result = _pip_ws.generate_pip_via_extractor(
+                            prompts_list[0],
+                            extractor,
+                            progress_cb=lambda pct, msg: progress(pct, desc=f"🖼 {msg}")
+                        )
+                    else:
+                        # 多个提示词，批量生成
+                        clips = _pip_ws.generate_multiple_pips(
+                            prompts_list,
+                            extractor,
+                            progress_cb=lambda pct, msg: progress(pct, desc=f"🖼 {msg}")
+                        )
+                        # TODO: 需要将多个片段合成到主视频中
+                        pip_result = clips[0] if clips else ""
+                else:
+                    # 本地上传模式
+                    if not pip_local_val:
+                        return gr.update(), _hint_html("warning", "请上传画中画视频素材")
+                    # Gradio File 组件返回的是 NamedString / tempfile 路径列表
+                    local_paths = []
+                    if isinstance(pip_local_val, list):
+                        for f in pip_local_val:
+                            p = f.name if hasattr(f, 'name') else str(f)
+                            if p and os.path.exists(p):
+                                local_paths.append(p)
+                    elif hasattr(pip_local_val, 'name'):
+                        local_paths.append(pip_local_val.name)
+                    elif isinstance(pip_local_val, str) and os.path.exists(pip_local_val):
+                        local_paths.append(pip_local_val)
+
+                    if not local_paths:
+                        return gr.update(), _hint_html("warning", "上传的文件无效，请重新选择")
+
+                    progress(0.05, desc="🖼 本地画中画处理...")
+                    pip_result = _pip.apply_pip_local(
+                        str(current_video),
+                        local_paths,
+                        interval=float(pip_interval_val),
+                        clip_duration=float(pip_clip_dur_val),
+                        progress_cb=lambda pct, msg: progress(pct, desc=f"🖼 {msg}")
+                    )
+
                 if pip_result and os.path.exists(pip_result):
                     safe_print(f"[PIP] 画中画处理完成: {pip_result}")
                     progress(1.0, desc="✅ 画中画生成完成")
-                    return pip_result, '<div class="hint-ok">✅ 画中画视频生成完成</div>'
+                    return pip_result, _hint_html("ok", "画中画视频生成完成")
                 else:
-                    safe_print("[PIP] 画中画处理返回空结果，请查看控制台日志")
-                    return gr.update(), '<div class="hint-warn">⚠ 画中画处理失败，请查看控制台日志了解详情</div>'
-                    
+                    return gr.update(), _hint_html("error", "画中画处理失败，请查看控制台日志")
+
             except Exception as e:
                 safe_print(f"[PIP] 画中画处理失败: {e}")
                 traceback.print_exc()
-                return gr.update(), f'<div class="hint-err">❌ 画中画生成失败: {str(e)}</div>'
-        
+                return gr.update(), _hint_html("error", f"画中画生成失败: {str(e)}")
+
         pip_btn.click(
             generate_pip_video,
-            inputs=[output_video, audio_for_ls, input_text],
+            inputs=[output_video, pip_mode, pip_prompt, pip_local_files,
+                    pip_interval, pip_clip_dur],
             outputs=[output_video, pip_hint])
 
-        # ── AI优化字幕函数（只优化字幕标题和关键词）──
-        def _optimize_subtitle_with_deepseek(video_text):
-            """使用DeepSeek AI优化字幕标题和关键词"""
+        # ── AI优化字幕函数（根据是否已AI改写，执行不同优化范围）──
+        def _optimize_subtitle_with_deepseek(video_text, already_optimized=False):
+            """
+            使用DeepSeek AI优化字幕。
+            - 如果未优化过(already_optimized=False)：关键词+字幕标题+视频标题+话题+画中画提示词
+            - 如果已优化过(already_optimized=True)：只优化关键词+字幕标题
+            """
             if not video_text or not video_text.strip():
-                return "", "", False, _hint_html("warning", "请先输入视频文本内容")
+                if not already_optimized:
+                    return "", "", "", "", "", False, _hint_html("warning", "请先输入视频文本内容")
+                else:
+                    return "", "", False, _hint_html("warning", "请先输入视频文本内容")
             
-            prompt = f"""请根据以下视频文本内容，完成两个任务：
+            if not already_optimized:
+                # 全量优化：关键词+字幕标题+视频标题+话题+多个画中画提示词
+                prompt = f"""请根据以下视频文本内容，完成五个任务：
 
 任务一：生成一个简短的字幕标题（不超过15字，概括视频主题）
-任务二：从文本中提取3-5个最重要的关键词（用于字幕高亮显示），用逗号分隔
+任务二：从文本中提取尽可能多的关键词（用于字幕高亮显示），包括核心名词、动词、形容词等重要词语，不限数量，用逗号分隔
+任务三：生成一个吸引人的短视频标题（不超过30字，吸引眼球、引发好奇）
+任务四：生成5个相关的热门话题标签，用逗号分隔
+任务五：为画中画视频生成提示词。每30秒视频生成1个提示词（例如30秒文案生成1个，60秒文案生成2个，90秒文案生成3个）。每个提示词描述一个适合口播推广的真实场景画面，用于AI生成实景B-roll视频素材。
+要求：根据文案朗读时长估算（约每秒3-4个字），按每30秒1个提示词的规则生成对应数量。每个不超过80字。
+场景要求：实物场景，适合短视频口播画中画素材，主要用于展示厂家、商品、工作场景或服务环境。画面干净高级，空间通透，主体明确，构图简洁，具有短视频B-roll质感，灯光柔和，真实细节丰富，整体高级感强，生活化但不杂乱，超清写实风格。场景必须不同。
+
+视频文本内容：
+{video_text[:500]}
+
+请严格按照以下格式输出，不要添加其他内容：
+字幕标题：[你的字幕标题]
+关键词：[关键词1,关键词2,关键词3,...]
+视频标题：[你的视频标题]
+话题：[话馘1,话馘2,话馘3,话馘4,话馘5]
+提示词1：[第一处画中画场景描述]
+提示词2：[第二处画中画场景描述]
+..."""
+                
+                result, error = _call_deepseek_api(prompt)
+                if error:
+                    return "", "", "", "", "", False, _hint_html("error", error)
+                
+                if result:
+                    lines = result.strip().split('\n')
+                    sub_title = ""
+                    new_keywords = ""
+                    video_title = ""
+                    new_topics = ""
+                    pip_prompts_list = []
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("字幕标题：") or line.startswith("字幕标题:"):
+                            sub_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        elif line.startswith("关键词：") or line.startswith("关键词:"):
+                            new_keywords = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        elif line.startswith("视频标题：") or line.startswith("视频标题:"):
+                            video_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        elif line.startswith("话题：") or line.startswith("话题:"):
+                            new_topics = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        elif re.match(r'提示词\d*[：:]', line):
+                            pip_line = re.sub(r'^提示词\d*[：:]\s*', '', line).strip()
+                            if pip_line:
+                                pip_prompts_list.append(pip_line)
+                    
+                    kw_enable = bool(new_keywords.strip())
+                    new_pip_prompt = "\n".join(pip_prompts_list) if pip_prompts_list else ""
+                    pip_count = len(pip_prompts_list)
+                    return sub_title, new_keywords, video_title, new_topics, new_pip_prompt, kw_enable, _hint_html("ok", f"AI优化完成！已生成字幕标题、关键词、视频标题、话题和{pip_count}个画中画提示词")
+                else:
+                    return "", "", "", "", "", False, _hint_html("error", "AI优化失败，未返回内容")
+            else:
+                # 精简优化：只优化关键词+字幕标题
+                prompt = f"""请根据以下视频文本内容，完成两个任务：
+
+任务一：生成一个简短的字幕标题（不超过15字，概括视频主题）
+任务二：从文本中提取尽可能多的关键词（用于字幕高亮显示），包括核心名词、动词、形容词等重要词语，不限数量，用逗号分隔
 
 视频文本内容：
 {video_text[:300]}
 
 请严格按照以下格式输出，不要添加其他内容：
 标题：[你的标题]
-关键词：[关键词1,关键词2,关键词3]"""
-            
-            result, error = _call_deepseek_api(prompt)
-            
-            if error:
-                return "", "", False, _hint_html("error", error)
-            
-            if result:
-                # 解析返回结果
-                lines = result.strip().split('\n')
-                new_title = ""
-                new_keywords = ""
+关键词：[关键词1,关键词2,关键词3,...]"""
                 
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith("标题：") or line.startswith("标题:"):
-                        new_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    elif line.startswith("关键词：") or line.startswith("关键词:"):
-                        new_keywords = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                result, error = _call_deepseek_api(prompt)
+                if error:
+                    return "", "", False, _hint_html("error", error)
                 
-                # 如果有关键词，自动开启关键词高亮
-                kw_enable = bool(new_keywords.strip())
-                
-                return new_title, new_keywords, kw_enable, _hint_html("ok", "AI优化完成！已生成字幕标题和关键词")
-            else:
-                return "", "", False, _hint_html("error", "AI优化失败，未返回内容")
+                if result:
+                    lines = result.strip().split('\n')
+                    new_title = ""
+                    new_keywords = ""
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("标题：") or line.startswith("标题:"):
+                            new_title = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        elif line.startswith("关键词：") or line.startswith("关键词:"):
+                            new_keywords = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    
+                    kw_enable = bool(new_keywords.strip())
+                    return new_title, new_keywords, kw_enable, _hint_html("ok", "AI优化完成！已生成字幕标题和关键词")
+                else:
+                    return "", "", False, _hint_html("error", "AI优化失败，未返回内容")
 
         # ── 字幕高级设置弹窗 ──
         sub_settings_open_btn.click(
-            lambda txt: (gr.update(visible=True), gr.update(value=txt)),
-            inputs=[sub_text],
+            lambda txt: (gr.update(visible=True), gr.update(value=txt or "")),
+            inputs=[input_text],
             outputs=[sub_settings_modal, sub_text_modal])
         
         def _close_sub_settings_and_save(sub_text_modal_val,
@@ -3107,7 +3389,7 @@ def build_ui():
                 save_hint, dropdown_update = _auto_save_workspace(
                     inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                     avatar_sel, aud_for_ls, out_aud, out_vid,
-                    sub_text_modal_val, sub_vid,
+                    inp_txt, sub_vid,
                     sub_fnt, sub_sz, sub_ps, sub_ps_off,
                     sub_col, sub_hi, sub_out, sub_out_sz,
                     sub_bg_col, sub_bg_op,
@@ -3118,7 +3400,7 @@ def build_ui():
             except Exception as e:
                 save_hint = _hint_html("error", f"保存失败: {e}")
                 dropdown_update = gr.update()
-            return gr.update(visible=False), gr.update(value=sub_text_modal_val), save_hint, dropdown_update
+            return gr.update(visible=False), gr.update(value=inp_txt or ""), save_hint, dropdown_update
         
         sub_settings_close_btn.click(
             _close_sub_settings_and_save,
@@ -3138,8 +3420,8 @@ def build_ui():
             lambda: gr.update(visible=False),
             outputs=[sub_settings_modal])
         
-        # ── AI优化字幕按钮（只优化字幕标题和关键词，并保存到工作台）──
-        def _subtitle_ai_optimize_and_save(video_text,
+        # ── AI优化字幕按钮（根据是否已AI改写，执行不同范围优化，并保存到工作台）──
+        def _subtitle_ai_optimize_and_save(video_text, ai_rewrite_done_val,
                                            prmt_aud, voice_sel, audio_mode_val, direct_aud,
                                            avatar_sel, aud_for_ls, out_aud, out_vid,
                                            sub_txt, sub_vid,
@@ -3148,26 +3430,65 @@ def build_ui():
                                            sub_bg_col, sub_bg_op,
                                            sub_kw_en, sub_hi_sc, sub_kw_txt,
                                            douyin_title_val, douyin_topics_val):
-            new_title, new_keywords, kw_enable, hint = _optimize_subtitle_with_deepseek(video_text)
-            try:
-                save_hint, dropdown_update = _auto_save_workspace(
-                    video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
-                    avatar_sel, aud_for_ls, out_aud, out_vid,
-                    sub_txt, sub_vid,
-                    sub_fnt, sub_sz, sub_ps, sub_ps_off,
-                    sub_col, sub_hi, sub_out, sub_out_sz,
-                    sub_bg_col, sub_bg_op,
-                    kw_enable, sub_hi_sc, new_keywords,
-                    douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
-                    sub_title_text_val=new_title
-                )
-            except Exception as e:
-                save_hint = _hint_html("error", f"保存失败: {e}")
-                dropdown_update = gr.update()
-            return new_title, new_keywords, kw_enable, hint, save_hint, dropdown_update
+            already_optimized = bool(ai_rewrite_done_val)
+
+            if not already_optimized:
+                # 全量优化：字幕标题+关键词+视频标题+话题+画中画提示词
+                result = _optimize_subtitle_with_deepseek(video_text, already_optimized=False)
+                # result: (sub_title, keywords, video_title, topics, pip_prompt, kw_enable, hint)
+                if len(result) == 7:
+                    sub_title, new_keywords, video_title, new_topics, new_pip_prompt, kw_enable, hint = result
+                else:
+                    # 出错时返回少量值
+                    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), True, gr.update(), gr.update()
+                try:
+                    save_hint, dropdown_update = _auto_save_workspace(
+                        video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                        avatar_sel, aud_for_ls, out_aud, out_vid,
+                        sub_txt, sub_vid,
+                        sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                        sub_col, sub_hi, sub_out, sub_out_sz,
+                        sub_bg_col, sub_bg_op,
+                        kw_enable, sub_hi_sc, new_keywords,
+                        douyin_title_val=video_title or douyin_title_val,
+                        douyin_topics_val=new_topics or douyin_topics_val,
+                        sub_title_text_val=sub_title,
+                        pip_prompt_val=new_pip_prompt
+                    )
+                except Exception as e:
+                    save_hint = _hint_html("error", f"保存失败: {e}")
+                    dropdown_update = gr.update()
+                # outputs: sub_title_text, sub_kw_text, sub_kw_enable, douyin_title, douyin_topics, pip_prompt, tts_hint, ai_rewrite_done, workspace_hint, workspace_dropdown
+                return sub_title, new_keywords, kw_enable, video_title, new_topics, new_pip_prompt, hint, True, save_hint, dropdown_update
+            else:
+                # 精简优化：只优化关键词+字幕标题
+                result = _optimize_subtitle_with_deepseek(video_text, already_optimized=True)
+                # result: (title, keywords, kw_enable, hint)
+                if len(result) == 4:
+                    new_title, new_keywords, kw_enable, hint = result
+                else:
+                    return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), True, gr.update(), gr.update()
+                try:
+                    save_hint, dropdown_update = _auto_save_workspace(
+                        video_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
+                        avatar_sel, aud_for_ls, out_aud, out_vid,
+                        sub_txt, sub_vid,
+                        sub_fnt, sub_sz, sub_ps, sub_ps_off,
+                        sub_col, sub_hi, sub_out, sub_out_sz,
+                        sub_bg_col, sub_bg_op,
+                        kw_enable, sub_hi_sc, new_keywords,
+                        douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
+                        sub_title_text_val=new_title
+                    )
+                except Exception as e:
+                    save_hint = _hint_html("error", f"保存失败: {e}")
+                    dropdown_update = gr.update()
+                # 精简模式不更新 douyin_title, douyin_topics, pip_prompt
+                return new_title, new_keywords, kw_enable, gr.update(), gr.update(), gr.update(), hint, True, save_hint, dropdown_update
+
         subtitle_ai_optimize_btn.click(
             _subtitle_ai_optimize_and_save,
-            inputs=[input_text,
+            inputs=[input_text, ai_rewrite_done,
                     prompt_audio, voice_select, audio_mode, direct_audio_upload,
                     avatar_select, audio_for_ls, output_audio, output_video,
                     sub_text, sub_video,
@@ -3176,7 +3497,9 @@ def build_ui():
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_hi_scale, sub_kw_text,
                     douyin_title, douyin_topics],
-            outputs=[sub_title_text, sub_kw_text, sub_kw_enable, tts_hint,
+            outputs=[sub_title_text, sub_kw_text, sub_kw_enable,
+                    douyin_title, douyin_topics, pip_prompt, tts_hint,
+                    ai_rewrite_done,
                     workspace_record_hint, workspace_record_dropdown]
         )
 
@@ -3319,12 +3642,14 @@ def build_ui():
             filter_mode = mode  # "local" 或 "online"
             new_choices = _vc.get_choices(filter_mode) if _LIBS_OK else []
             
-            return gr.update(choices=new_choices, value=None)
+            # 本地版显示语音风格/合成速度/语速，在线版隐藏
+            is_local = (mode == "local")
+            return gr.update(choices=new_choices, value=None), gr.update(visible=is_local)
         
         tts_mode_switch.change(
             _on_tts_mode_switch,
             inputs=[tts_mode_switch],
-            outputs=[voice_select]
+            outputs=[voice_select, local_only_settings_group]
         )
 
         # ── 数字人库事件 ──
@@ -3549,6 +3874,7 @@ def build_ui():
                          title_text="", title_duration=5,
                          title_color="#FFD700", title_outline_color="#000000",
                          title_margin_top=30, title_font_size=48,
+                         intro_enable=False,
                          progress=gr.Progress()):
             if not _LIBS_OK:
                 return gr.update(visible=False), _hint_html("error","扩展模块未加载")
@@ -3584,6 +3910,7 @@ def build_ui():
                     title_outline_color=title_outline_color or "#000000",
                     title_margin_top=int(title_margin_top or 30),
                     title_font_size=int(title_font_size or 48),
+                    intro_enable=bool(intro_enable),
                     progress_cb=_cb
                 )
                 return (out,
@@ -3599,12 +3926,16 @@ def build_ui():
                              sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
                              # 标题参数
                              title_txt, title_fs, title_dur, title_col, title_out_col, title_mt,
+                             # 片头参数
+                             intro_en,
                              # 保存需要的其他参数
                              inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                              avatar_sel, out_aud,
                              douyin_title_val, douyin_topics_val,
                              progress=gr.Progress()):
             """生成字幕并自动保存工作台状态"""
+            # 字幕内容直接使用文案内容（避免维护两份文本）
+            sub_txt = inp_txt or ""
             # 先生成字幕
             sub_vid_path, sub_hnt = _do_subtitle(
                 out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps, sub_ps_off,
@@ -3616,6 +3947,7 @@ def build_ui():
                 title_outline_color=title_out_col or "#000000",
                 title_margin_top=int(title_mt or 30),
                 title_font_size=int(title_fs or 48),
+                intro_enable=bool(intro_en),
                 progress=progress
             )
             
@@ -3624,7 +3956,7 @@ def build_ui():
             hint_msg, dropdown_update = _auto_save_workspace(
                 inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                 avatar_sel, aud_for_ls, aud_for_ls, out_vid,
-                sub_txt, sub_vid_path,
+                inp_txt, sub_vid_path,
                 sub_fnt, sub_sz, sub_ps, sub_ps_off,
                 sub_col, sub_hi, sub_out, sub_out_sz,
                 sub_bg_col, sub_bg_op,
@@ -3652,6 +3984,8 @@ def build_ui():
                 # 标题参数
                 sub_title_text, sub_title_font_size, sub_title_duration, sub_title_color,
                 sub_title_outline_color, sub_title_margin_top,
+                # 片头参数
+                intro_enable,
                 # 保存需要的参数
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 avatar_select, output_audio,
@@ -3669,13 +4003,22 @@ def build_ui():
         # DeepSeek API 集成
         # ═══════════════════════════════════════════════════════════
         
+        _deepseek_last_call = [0.0]  # 上次调用时间戳（用列表以便闭包内修改）
+        _DEEPSEEK_COOLDOWN = 60     # 冷却时间（秒）
+
         def _call_deepseek_api(prompt, system_prompt="你是一个专业的文案创作助手。"):
             """
-            调用DeepSeek API
+            调用DeepSeek API（限流：60秒内只允许调用一次）
             :param prompt: 用户提示词
             :param system_prompt: 系统提示词
             :return: API返回的文本内容
             """
+            now = time.time()
+            elapsed = now - _deepseek_last_call[0]
+            if elapsed < _DEEPSEEK_COOLDOWN:
+                remaining = int(_DEEPSEEK_COOLDOWN - elapsed)
+                return None, f"⏳ 请求过于频繁，请 {remaining} 秒后再试"
+
             try:
                 import requests
                 
@@ -3693,6 +4036,9 @@ def build_ui():
                 
                 if not api_key:
                     return None, "❌ 未配置DeepSeek API密钥\n\n请在.env文件中添加：\nDEEPSEEK_API_KEY=your_api_key"
+                
+                # 记录本次调用时间（在实际发请求前记录，防止并发绕过）
+                _deepseek_last_call[0] = time.time()
                 
                 # 调用API
                 url = "https://ai.zhimengai.xyz/v1/chat/completions"
@@ -3732,11 +4078,11 @@ def build_ui():
                 return None, f"❌ API调用失败: {str(e)}"
         
         def _rewrite_text_with_deepseek(original_text):
-            """使用DeepSeek AI改写文案,同时优化标题、生成话题标签和关键词"""
+            """使用DeepSeek AI改写文案,同时优化标题、生成话题标签、关键词和画中画提示词"""
             if not original_text or not original_text.strip():
-                return original_text, "", "", "", False, _hint_html("warning", "请先输入文本内容")
+                return original_text, "", "", "", "", False, _hint_html("warning", "请先输入文本内容")
             
-            prompt = f"""请完成以下四个任务：
+            prompt = f"""请完成以下五个任务：
 
 任务一：将以下文案改写得更加生动、吸引人，保持原意但提升表达效果。
 要求：必须保留原文的所有段落和完整内容，不要删减、合并或缩短，保持和原文相近的字数和段落数。使用更生动的词汇和表达方式，让文案更有感染力和吸引力。
@@ -3745,7 +4091,16 @@ def build_ui():
 
 任务三：根据文案内容，生成5个相关的热门话题标签，用逗号分隔。
 
-任务四：从文案中提取3-5个最重要的关键词（用于字幕高亮显示），用逗号分隔。
+任务四：从文案中提取尽可能多的关键词（用于字幕高亮显示），包括核心名词、动词、形容词等重要词语，不限数量，用逗号分隔。
+
+任务五：根据文案内容，为画中画视频生成提示词。每30秒视频生成1个提示词（例如30秒文案=1个，60秒文案=2个，90秒文案=3个）。根据文案长度估算朗读时长（约每秒3-4个字），计算所需提示词数量。
+要求：
+- 每个提示词对应文案中一个适合插入画中画的位置（如讲解某个具体场景/物件/活动时）
+- 严格按每30秒1个的规则生成对应数量的提示词
+- 每个提示词不超过80字，必须包含动态元素和动作描述，画面要有运动感和生命力
+- 动态要求：必须包含人物动作、物体移动、镜头运动等动态元素，避免静态画面。例如：人物走动、手部操作、物品展示、镜头推拉摇移等
+- 画面风格：超清写实风格，构图简洁，光线明亮自然
+- 每个提示词的场景必须不同，与对应文案段落内容相关
 
 原文案：
 {original_text}
@@ -3753,13 +4108,16 @@ def build_ui():
 请严格按照以下格式输出，不要添加其他内容：
 文案：[改写后的完整文案]
 标题：[你的标题]
-话题：[话题1,话题2,话题3,话题4,话题5]
-关键词：[关键词1,关键词2,关键词3]"""
+话题：[话馘1,话馘2,话馘3,话馘4,话馘5]
+关键词：[关键词1,关键词2,关键词3,...]
+提示词1：[第一处画中画场景描述]
+提示词2：[第二处画中画场景描述]
+..."""
             
             result, error = _call_deepseek_api(prompt)
             
             if error:
-                return original_text, "", "", "", False, _hint_html("error", error)
+                return original_text, "", "", "", "", False, _hint_html("error", error)
             
             if result:
                 # 解析返回结果
@@ -3768,6 +4126,7 @@ def build_ui():
                 new_title = ""
                 new_topics = ""
                 new_keywords = ""
+                pip_prompts_list = []  # 多个画中画提示词
                 
                 # 解析多行文案：文案可能跨越多行，直到遇到"标题："或"话题："
                 in_text_block = False
@@ -3788,6 +4147,11 @@ def build_ui():
                     elif stripped.startswith("关键词：") or stripped.startswith("关键词:"):
                         in_text_block = False
                         new_keywords = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif re.match(r'提示词\d*[：:]', stripped):
+                        in_text_block = False
+                        pip_line = re.sub(r'^提示词\d*[：:]\s*', '', stripped).strip()
+                        if pip_line:
+                            pip_prompts_list.append(pip_line)
                     elif in_text_block and stripped:
                         text_lines.append(stripped)
                 
@@ -3798,11 +4162,10 @@ def build_ui():
                 if new_text == original_text and not any(
                     line.strip().startswith(("文案：", "文案:")) for line in lines
                 ):
-                    # 尝试把标题/话题之前的内容作为文案
                     text_parts = []
                     for line in lines:
                         line = line.strip()
-                        if line.startswith(("标题：", "标题:", "话题：", "话题:", "关键词：", "关键词:")):
+                        if line.startswith(("标题：", "标题:", "话题：", "话题:", "关键词：", "关键词:")) or re.match(r'提示词\d*[：:]', line):
                             break
                         if line:
                             text_parts.append(line)
@@ -3812,9 +4175,13 @@ def build_ui():
                 # 如果有关键词，自动开启关键词高亮
                 kw_enable = bool(new_keywords.strip())
                 
-                return new_text, new_title, new_topics, new_keywords, kw_enable, _hint_html("ok", "AI改写完成！已生成标题、话题和关键词")
+                # 多个提示词用换行分隔
+                new_pip_prompt = "\n".join(pip_prompts_list) if pip_prompts_list else ""
+                
+                pip_count = len(pip_prompts_list)
+                return new_text, new_title, new_topics, new_keywords, new_pip_prompt, kw_enable, _hint_html("ok", f"AI改写完成！已生成标题、话题、关键词和{pip_count}个画中画提示词")
             else:
-                return original_text, "", "", "", False, _hint_html("error", "AI改写失败，未返回内容")
+                return original_text, "", "", "", "", False, _hint_html("error", "AI改写失败，未返回内容")
         
         def _optimize_title_with_deepseek(current_title, current_topics, video_text):
             """使用DeepSeek AI优化标题并生成话题标签"""
@@ -3857,7 +4224,7 @@ def build_ui():
             else:
                 return current_title, current_topics, _hint_html("error", "AI优化失败，未返回内容")
         
-        # 绑定AI改写按钮（一次API调用同时改写文案+生成标题+生成标签）
+        # 绑定AI改写按钮（一次API调用同时改写文案+生成标题+生成标签+画中画提示词）
         def _rewrite_and_save(original_text,
                               # 保存需要的参数
                               prmt_aud, voice_sel, audio_mode_val, direct_aud,
@@ -3869,14 +4236,12 @@ def build_ui():
                               sub_kw_en, sub_hi_sc, sub_kw_txt):
             """改写文案并同步返回给字幕，同时保存工作台记录"""
             try:
-                new_text, title, topics, new_keywords, kw_enable, hint = _rewrite_text_with_deepseek(original_text)
+                new_text, title, topics, new_keywords, new_pip_prompt, kw_enable, hint = _rewrite_text_with_deepseek(original_text)
             except Exception as e:
                 new_text = original_text
-                title, topics, new_keywords, kw_enable = "", "", "", False
+                title, topics, new_keywords, new_pip_prompt, kw_enable = "", "", "", "", False
                 hint = _hint_html("error", f"AI改写异常: {e}")
             
-            # 保存工作台状态（使用改写后的文案）
-            # search_key=original_text → 按原文查找已有记录并替换，避免重复创建
             try:
                 save_hint, dropdown_update = _auto_save_workspace(
                     new_text, prmt_aud, voice_sel, audio_mode_val, direct_aud,
@@ -3887,7 +4252,8 @@ def build_ui():
                     sub_bg_col, sub_bg_op,
                     kw_enable, sub_hi_sc, new_keywords,
                     douyin_title_val=title, douyin_topics_val=topics,
-                    sub_title_text_val=title,  # AI改写生成的标题也作为字幕标题
+                    sub_title_text_val=title,
+                    pip_prompt_val=new_pip_prompt,
                     search_key=original_text
                 )
             except Exception as e:
@@ -3896,7 +4262,8 @@ def build_ui():
                 save_hint = _hint_html("error", f"保存工作台失败: {e}")
                 dropdown_update = gr.update()
             
-            return new_text, title, topics, new_keywords, kw_enable, hint, new_text, title, save_hint, dropdown_update
+            # outputs: input_text, douyin_title, douyin_topics, sub_kw_text, sub_kw_enable, pip_prompt, tts_hint, sub_text, sub_title_text, ai_rewrite_done, workspace_hint, workspace_dropdown
+            return new_text, title, topics, new_keywords, kw_enable, new_pip_prompt, hint, new_text, title, True, save_hint, dropdown_update
         rewrite_btn.click(
             _rewrite_and_save,
             inputs=[input_text,
@@ -3908,7 +4275,9 @@ def build_ui():
                     sub_color_txt, sub_hi_txt, sub_outline_txt, sub_outline_size,
                     sub_bg_color, sub_bg_opacity,
                     sub_kw_enable, sub_hi_scale, sub_kw_text],
-            outputs=[input_text, douyin_title, douyin_topics, sub_kw_text, sub_kw_enable, tts_hint, sub_text, sub_title_text,
+            outputs=[input_text, douyin_title, douyin_topics, sub_kw_text, sub_kw_enable,
+                    pip_prompt, tts_hint, sub_text, sub_title_text,
+                    ai_rewrite_done,
                     workspace_record_hint, workspace_record_dropdown])
         
         
@@ -4427,7 +4796,8 @@ def build_ui():
 
         # 视频合成按钮点击 - 直接在完成后保存
         def video_and_save(avatar_sel, aud_for_ls, inp_txt, quality_name,
-                          pip_enabled,
+                          pip_enabled, pip_mode_val, pip_prompt_val,
+                          pip_local_val, pip_interval_val, pip_clip_dur_val,
                           # 保存需要的其他参数
                           prmt_aud, voice_sel, audio_mode_val, direct_aud,
                           out_aud, sub_txt, sub_vid,
@@ -4439,20 +4809,30 @@ def build_ui():
                           douyin_title_val, douyin_topics_val,
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
-            # 先合成视频（ls_wrap 是生成器，需要逐步 yield）
             final_result = None
             for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, quality_name=quality_name, progress=progress):
-                # 在视频合成过程中，传递中间结果，但不保存工作台
-                # 返回 4 个值：前 2 个来自 ls_wrap，后 2 个是空的工作台更新
                 yield result + (gr.update(), gr.update())
                 final_result = result
             
-            # 视频合成完成后，保存工作台状态
             if final_result:
                 video_path, ls_detail = final_result
 
                 # ── 画中画处理 ──
+                # 只有在勾选画中画且有有效提示词或素材时才处理
+                should_process_pip = False
                 if pip_enabled and video_path and os.path.exists(str(video_path)):
+                    is_online = ("在线" in str(pip_mode_val))
+                    if is_online:
+                        # 在线模式：需要有提示词
+                        should_process_pip = pip_prompt_val and pip_prompt_val.strip()
+                    else:
+                        # 本地模式：需要有上传的素材
+                        if isinstance(pip_local_val, list):
+                            should_process_pip = any(hasattr(f, 'name') or os.path.exists(str(f)) for f in pip_local_val)
+                        elif pip_local_val:
+                            should_process_pip = True
+
+                if should_process_pip:
                     try:
                         yield gr.update(), gr.update(
                             value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;'
@@ -4464,15 +4844,58 @@ def build_ui():
                                   '🖼 正在处理画中画替换…</span>'
                                   '<style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>',
                             visible=True), gr.update(), gr.update()
-                        pip_result = _pip.apply_pip(
-                            str(video_path), str(aud_for_ls), inp_txt,
-                            progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
-                        )
+
+                        is_online = ("在线" in str(pip_mode_val))
+                        pip_result = ""
+                        if is_online:
+                            if pip_prompt_val and pip_prompt_val.strip():
+                                prompts_list = [p.strip() for p in pip_prompt_val.strip().split('\n') if p.strip()]
+                                if not prompts_list:
+                                    prompts_list = [pip_prompt_val.strip()]
+
+                                # 使用 TextExtractor 连接生成画中画
+                                extractor = get_text_extractor()
+                                if len(prompts_list) == 1:
+                                    pip_result = _pip_ws.generate_pip_via_extractor(
+                                        prompts_list[0],
+                                        extractor,
+                                        progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
+                                    )
+                                else:
+                                    clips = _pip_ws.generate_multiple_pips(
+                                        prompts_list,
+                                        extractor,
+                                        progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
+                                    )
+                                    pip_result = clips[0] if clips else ""
+                            else:
+                                safe_print("[PIP] 在线模式但无提示词，跳过画中画")
+                        else:
+                            local_paths = []
+                            if isinstance(pip_local_val, list):
+                                for f in pip_local_val:
+                                    p = f.name if hasattr(f, 'name') else str(f)
+                                    if p and os.path.exists(p):
+                                        local_paths.append(p)
+                            elif pip_local_val:
+                                p = pip_local_val.name if hasattr(pip_local_val, 'name') else str(pip_local_val)
+                                if p and os.path.exists(p):
+                                    local_paths.append(p)
+                            if local_paths:
+                                pip_result = _pip.apply_pip_local(
+                                    str(video_path), local_paths,
+                                    interval=float(pip_interval_val),
+                                    clip_duration=float(pip_clip_dur_val),
+                                    progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
+                                )
+                            else:
+                                safe_print("[PIP] 本地模式但无有效素材，跳过画中画")
+
                         if pip_result and os.path.exists(pip_result):
                             safe_print(f"[PIP] 画中画处理完成: {pip_result}")
                             video_path = pip_result
                         else:
-                            safe_print("[PIP] 无匹配关键词或处理未产出结果")
+                            safe_print("[PIP] 画中画处理未产出结果")
                     except Exception as e:
                         safe_print(f"[PIP] 画中画处理失败（不影响视频输出）: {e}")
                         traceback.print_exc()
@@ -4495,7 +4918,8 @@ def build_ui():
                     sub_bg_col, sub_bg_op,
                     sub_kw_en, sub_hi_sc, sub_kw_txt,
                     douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
-                    sub_title_text_val=sub_title_txt
+                    sub_title_text_val=sub_title_txt,
+                    pip_prompt_val=pip_prompt_val
                 )
                 
                 # 最后一次 yield，包含保存结果
@@ -4506,7 +4930,8 @@ def build_ui():
             video_and_save,
             inputs=[
                 avatar_select, audio_for_ls, input_text, quality_preset,
-                pip_enable,
+                pip_enable, pip_mode, pip_prompt, pip_local_files,
+                pip_interval, pip_clip_dur,
                 # 保存需要的参数
                 prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 output_audio, sub_text, sub_video,
@@ -4548,6 +4973,7 @@ def build_ui():
                 sub_kw_enable, sub_hi_scale, sub_kw_text,
                 sub_title_text,
                 douyin_title, douyin_topics,
+                pip_prompt,
                 workspace_record_hint
             ])
         
@@ -4685,7 +5111,7 @@ def _license_gate():
 
     tk.Label(
         top,
-        text="请输入有效卡密完成激活。首次使用前需阅读并勾选平台发布协议。",
+        text="请输入有效卡密完成激活。首次使用前需阅读并勾选用户协议。",
         font=("Microsoft YaHei", 9),
         bg="#ffffff",
         fg="#64748b",
@@ -4730,7 +5156,7 @@ def _license_gate():
 
     tk.Label(
         agreement_box,
-        text="⚠ 使用平台功能与AI生成功能前，请先阅读并同意协议与风险提示",
+        text="⚠ 使用前请先阅读并同意《用户协议》与《隐私协议》",
         font=("Microsoft YaHei", 9, "bold"),
         bg="#fff7ed",
         fg="#c2410c",
@@ -4776,22 +5202,78 @@ def _license_gate():
     agree_text_label.pack(side="left")
     agree_text_label.bind("<Button-1>", _toggle_agreement)
 
+    def _render_md_to_tk(text_widget, md_text):
+        """将 Markdown 渲染到 tkinter Text widget（带格式标签）"""
+        import re
+        tw = text_widget
+        tw.tag_configure("h1", font=("Microsoft YaHei", 16, "bold"), foreground="#0f172a",
+                         spacing1=14, spacing3=6)
+        tw.tag_configure("h2", font=("Microsoft YaHei", 13, "bold"), foreground="#1e293b",
+                         spacing1=12, spacing3=4)
+        tw.tag_configure("h3", font=("Microsoft YaHei", 11, "bold"), foreground="#334155",
+                         spacing1=8, spacing3=3)
+        tw.tag_configure("body", font=("Microsoft YaHei", 9), foreground="#475569",
+                         spacing1=1, spacing3=1, lmargin1=8, lmargin2=8)
+        tw.tag_configure("bold", font=("Microsoft YaHei", 9, "bold"), foreground="#1e293b")
+        tw.tag_configure("li", font=("Microsoft YaHei", 9), foreground="#475569",
+                         lmargin1=24, lmargin2=36, spacing1=1, spacing3=1)
+        tw.tag_configure("hr", font=("Microsoft YaHei", 6), foreground="#cbd5e1",
+                         spacing1=6, spacing3=6, justify="center")
+        tw.tag_configure("sub_li", font=("Microsoft YaHei", 9), foreground="#64748b",
+                         lmargin1=44, lmargin2=56, spacing1=1, spacing3=1)
+
+        def _strip_inline(s):
+            segments = []
+            pos = 0
+            for m in re.finditer(r'\*{2,3}(.+?)\*{2,3}', s):
+                if m.start() > pos:
+                    segments.append((s[pos:m.start()], False))
+                segments.append((m.group(1), True))
+                pos = m.end()
+            if pos < len(s):
+                segments.append((s[pos:], False))
+            if not segments:
+                segments = [(s, False)]
+            return segments
+
+        for line in md_text.splitlines():
+            if re.match(r'^\s*[\*\-_]{3,}\s*$', line):
+                tw.insert("end", "━" * 60 + "\n", "hr")
+                continue
+            m = re.match(r'^(#{1,6})\s+(.*)', line)
+            if m:
+                level = len(m.group(1))
+                title = re.sub(r'\*{1,3}(.+?)\*{1,3}', r'\1', m.group(2).strip())
+                tag = "h1" if level == 1 else ("h2" if level == 2 else "h3")
+                tw.insert("end", title + "\n", tag)
+                continue
+            if not line.strip():
+                tw.insert("end", "\n")
+                continue
+            li_m = re.match(r'^(\s*)([\*\-]|\d+[\.\)])\s+(.*)', line)
+            if li_m:
+                indent = len(li_m.group(1))
+                content = li_m.group(3)
+                tag = "sub_li" if indent >= 4 else "li"
+                prefix = "  • " if not li_m.group(2)[0].isdigit() else f"  {li_m.group(2)} "
+                segs = _strip_inline(content)
+                tw.insert("end", prefix)
+                for txt, is_bold in segs:
+                    tw.insert("end", txt, (tag, "bold") if is_bold else tag)
+                tw.insert("end", "\n")
+                continue
+            segs = _strip_inline(line)
+            for txt, is_bold in segs:
+                tw.insert("end", txt, ("body", "bold") if is_bold else "body")
+            tw.insert("end", "\n")
+
     def _load_agreement_text():
-        default_text = """平台与AI功能使用协议
-
-协议文件缺失：platform_ai_usage_agreement.txt（兼容旧文件名）
-
-请将协议文件放在程序同目录下。"""
+        default_text = "用户协议文件缺失，请将 user_agreement.md 放在程序同目录下。"
         try:
-            candidates = []
-            for _name in ("PLATFORM_AGREEMENT_FILE", "LEGACY_AGREEMENT_FILE", "DOUYIN_AGREEMENT_FILE"):
-                if _name in globals():
-                    candidates.append(globals().get(_name))
-            candidates.extend([
+            candidates = [
+                os.path.join(BASE_DIR, "user_agreement.md"),
                 os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt"),
-                os.path.join(BASE_DIR, "platform_publish_agreement.txt"),
-                os.path.join(BASE_DIR, "douyin_publish_agreement.txt"),
-            ])
+            ]
             for p in candidates:
                 if p and os.path.exists(p):
                     with open(p, "r", encoding="utf-8") as f:
@@ -4802,9 +5284,22 @@ def _license_gate():
             return default_text + "\n\n读取错误：%s" % (e,)
         return default_text
 
+    def _load_privacy_text():
+        default_text = "隐私协议文件缺失，请将 privacy_policy.md 放在程序同目录下。"
+        try:
+            p = os.path.join(BASE_DIR, "privacy_policy.md")
+            if os.path.exists(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        return content
+        except Exception as e:
+            return default_text + "\n\n读取错误：%s" % (e,)
+        return default_text
+
     def show_agreement():
         agreement_window = tk.Toplevel(root)
-        agreement_window.title("平台与AI功能使用协议")
+        agreement_window.title("用户协议与隐私协议")
         agreement_window.geometry("860x700")
         agreement_window.minsize(760, 620)
         agreement_window.configure(bg="#f1f5f9")
@@ -4827,65 +5322,84 @@ def _license_gate():
 
         header = tk.Frame(shell, bg="#ffffff", relief="solid", bd=1)
         header.pack(fill="x")
-        tk.Label(header, text="平台与AI功能使用协议", font=("Microsoft YaHei", 13, "bold"), bg="#ffffff", fg="#0f172a").pack(anchor="w", padx=14, pady=(12, 2))
-        tk.Label(header, text="请完整阅读后勾选同意。建议由实际运营负责人阅读并确认。", font=("Microsoft YaHei", 9), bg="#ffffff", fg="#64748b").pack(anchor="w", padx=14, pady=(0, 12))
+        tk.Label(header, text="用户协议与隐私协议", font=("Microsoft YaHei", 13, "bold"),
+                 bg="#ffffff", fg="#0f172a").pack(anchor="w", padx=14, pady=(12, 2))
+        tk.Label(header, text="请完整阅读后勾选同意。建议由实际运营负责人阅读并确认。",
+                 font=("Microsoft YaHei", 9), bg="#ffffff", fg="#64748b").pack(anchor="w", padx=14, pady=(0, 12))
 
-        text_wrap = tk.Frame(shell, bg="#f1f5f9")
-        text_wrap.pack(fill="both", expand=True, pady=12)
+        # ── Tab 按钮栏 ──
+        tab_bar = tk.Frame(shell, bg="#f1f5f9")
+        tab_bar.pack(fill="x", pady=(10, 0))
 
-        text_border = tk.Frame(text_wrap, bg="#cbd5e1", padx=1, pady=1)
-        text_border.pack(fill="both", expand=True)
+        tab_btns = {}
+        tab_frames = {}
+        current_tab = [0]  # mutable for closure
 
-        text_container = tk.Frame(text_border, bg="#ffffff")
-        text_container.pack(fill="both", expand=True)
+        def switch_tab(idx):
+            current_tab[0] = idx
+            for i, (btn, frm) in enumerate(zip(tab_btns.values(), tab_frames.values())):
+                if i == idx:
+                    btn.config(bg="#4f46e5", fg="#ffffff", relief="flat")
+                    frm.pack(fill="both", expand=True)
+                else:
+                    btn.config(bg="#e2e8f0", fg="#475569", relief="flat")
+                    frm.pack_forget()
 
-        scrollbar = tk.Scrollbar(text_container)
-        scrollbar.pack(side="right", fill="y")
+        tab_btns["user"] = tk.Button(tab_bar, text="📄 用户协议", font=("Microsoft YaHei", 10, "bold"),
+                                     bg="#4f46e5", fg="#ffffff", relief="flat", bd=0, padx=18, pady=6,
+                                     cursor="hand2", command=lambda: switch_tab(0))
+        tab_btns["user"].pack(side="left", padx=(0, 4))
 
-        text_widget = tk.Text(
-            text_container,
-            wrap="word",
-            yscrollcommand=scrollbar.set,
-            font=("Microsoft YaHei", 9),
-            padx=16,
-            pady=14,
-            relief="flat",
-            bd=0,
-            bg="#ffffff",
-            fg="#334155",
-            insertbackground="#334155",
-            spacing1=2,
-            spacing2=2,
-            spacing3=2
-        )
-        text_widget.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=text_widget.yview)
-        text_widget.insert("1.0", _load_agreement_text())
-        text_widget.config(state="disabled")
+        tab_btns["privacy"] = tk.Button(tab_bar, text="🔒 隐私协议", font=("Microsoft YaHei", 10, "bold"),
+                                        bg="#e2e8f0", fg="#475569", relief="flat", bd=0, padx=18, pady=6,
+                                        cursor="hand2", command=lambda: switch_tab(1))
+        tab_btns["privacy"].pack(side="left")
+
+        # ── 内容区 ──
+        content_area = tk.Frame(shell, bg="#f1f5f9")
+        content_area.pack(fill="both", expand=True, pady=8)
+
+        def _make_text_panel(parent, md_content):
+            border = tk.Frame(parent, bg="#cbd5e1", padx=1, pady=1)
+            border.pack(fill="both", expand=True)
+            container = tk.Frame(border, bg="#ffffff")
+            container.pack(fill="both", expand=True)
+            sb = tk.Scrollbar(container)
+            sb.pack(side="right", fill="y")
+            tw = tk.Text(container, wrap="word", yscrollcommand=sb.set,
+                         font=("Microsoft YaHei", 9), padx=16, pady=14,
+                         relief="flat", bd=0, bg="#ffffff", fg="#334155")
+            tw.pack(side="left", fill="both", expand=True)
+            sb.config(command=tw.yview)
+            _render_md_to_tk(tw, md_content)
+            tw.config(state="disabled")
+            return border
+
+        # 用户协议 tab
+        tab_frames["user"] = tk.Frame(content_area, bg="#f1f5f9")
+        _make_text_panel(tab_frames["user"], _load_agreement_text())
+
+        # 隐私协议 tab
+        tab_frames["privacy"] = tk.Frame(content_area, bg="#f1f5f9")
+        _make_text_panel(tab_frames["privacy"], _load_privacy_text())
+
+        # 默认显示第一个 tab
+        switch_tab(0)
 
         footer = tk.Frame(shell, bg="#f1f5f9")
         footer.pack(fill="x")
         tk.Label(footer, text="提示：勾选协议仅表示您已知悉并承诺合规使用，不代表平台审核通过或账号安全无风险。",
                  font=("Microsoft YaHei", 8), bg="#f1f5f9", fg="#64748b", wraplength=760, justify="left").pack(anchor="w", pady=(0, 10))
         tk.Button(
-            footer,
-            text="关闭",
-            command=agreement_window.destroy,
-            font=("Microsoft YaHei", 10, "bold"),
-            bg="#4f46e5",
-            fg="white",
-            activebackground="#4338ca",
-            activeforeground="white",
-            relief="flat",
-            cursor="hand2",
-            bd=0,
-            padx=20,
-            pady=8
+            footer, text="关闭", command=agreement_window.destroy,
+            font=("Microsoft YaHei", 10, "bold"), bg="#4f46e5", fg="white",
+            activebackground="#4338ca", activeforeground="white",
+            relief="flat", cursor="hand2", bd=0, padx=20, pady=8
         ).pack(side="right")
 
     link_label = tk.Label(
         agree_row,
-        text="《平台与AI功能使用协议》",
+        text="《用户协议》与《隐私协议》",
         font=("Microsoft YaHei", 9, "underline"),
         bg="#fff7ed",
         fg="#4338ca",
@@ -5089,7 +5603,7 @@ def _license_gate():
             msg_label.config(text="请输入卡密", fg="#ef4444")
             return
         if not agreement_var.get():
-            msg_label.config(text="请先阅读并勾选《平台与AI功能使用协议》", fg="#ef4444")
+            msg_label.config(text="请先阅读并勾选《用户协议》与《隐私协议》", fg="#ef4444")
             return
 
         msg_label.config(text="正在验证卡密，请稍候...", fg="#4f46e5")
@@ -5130,7 +5644,7 @@ def _license_gate():
     agreement_var.trace_add("write", _sync_login_btn)
     _set_btn_enabled(False)
 
-    key_entry.bind("<Return>", lambda e: _do_login() if agreement_var.get() else msg_label.config(text="请先勾选并同意《平台与AI功能使用协议》", fg="#ef4444"))
+    key_entry.bind("<Return>", lambda e: _do_login() if agreement_var.get() else msg_label.config(text="请先勾选并同意《用户协议》与《隐私协议》", fg="#ef4444"))
 
     def _on_close():
         result["passed"] = False

@@ -17,7 +17,7 @@ except ImportError:
 
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 INDEXTTS_DIR = os.path.join(BASE_DIR, "_internal_tts")
-PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
+PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")
 
 
 def has_local_tts_content():
@@ -51,7 +51,7 @@ def has_local_tts_content():
         print(f"[TTS检测] 检查 _internal_tts 内容失败: {e}")
         return False
 LEGACY_PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
-LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")
+LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")
 
 # 从.env文件读取版本信息
 def _load_version_from_env():
@@ -1048,10 +1048,87 @@ ENV_CONFIG = load_env_config()
 
 
 
+def _render_md_to_tk(text_widget, md_text):
+    """将 Markdown 渲染到 tkinter Text widget（带格式标签）"""
+    import re
+    tw = text_widget
+
+    # 定义样式 tag
+    tw.tag_configure("h1", font=("Microsoft YaHei", 16, "bold"), foreground="#0f172a",
+                     spacing1=14, spacing3=6)
+    tw.tag_configure("h2", font=("Microsoft YaHei", 13, "bold"), foreground="#1e293b",
+                     spacing1=12, spacing3=4)
+    tw.tag_configure("h3", font=("Microsoft YaHei", 11, "bold"), foreground="#334155",
+                     spacing1=8, spacing3=3)
+    tw.tag_configure("body", font=("Microsoft YaHei", 9), foreground="#475569",
+                     spacing1=1, spacing3=1, lmargin1=8, lmargin2=8)
+    tw.tag_configure("bold", font=("Microsoft YaHei", 9, "bold"), foreground="#1e293b")
+    tw.tag_configure("li", font=("Microsoft YaHei", 9), foreground="#475569",
+                     lmargin1=24, lmargin2=36, spacing1=1, spacing3=1)
+    tw.tag_configure("hr", font=("Microsoft YaHei", 6), foreground="#cbd5e1",
+                     spacing1=6, spacing3=6, justify="center")
+    tw.tag_configure("sub_li", font=("Microsoft YaHei", 9), foreground="#64748b",
+                     lmargin1=44, lmargin2=56, spacing1=1, spacing3=1)
+
+    def _strip_inline(s):
+        """去掉 markdown 行内标记，返回 (text, segments) 用于加粗渲染"""
+        segments = []
+        pos = 0
+        for m in re.finditer(r'\*{2,3}(.+?)\*{2,3}', s):
+            if m.start() > pos:
+                segments.append((s[pos:m.start()], False))
+            segments.append((m.group(1), True))
+            pos = m.end()
+        if pos < len(s):
+            segments.append((s[pos:], False))
+        if not segments:
+            segments = [(s, False)]
+        return segments
+
+    for line in md_text.splitlines():
+        # 水平线
+        if re.match(r'^\s*[\*\-_]{3,}\s*$', line):
+            tw.insert("end", "━" * 60 + "\n", "hr")
+            continue
+
+        # 标题
+        m = re.match(r'^(#{1,6})\s+(.*)', line)
+        if m:
+            level = len(m.group(1))
+            title = re.sub(r'\*{1,3}(.+?)\*{1,3}', r'\1', m.group(2).strip())
+            tag = "h1" if level == 1 else ("h2" if level == 2 else "h3")
+            tw.insert("end", title + "\n", tag)
+            continue
+
+        # 空行
+        if not line.strip():
+            tw.insert("end", "\n")
+            continue
+
+        # 列表项（子级缩进）
+        li_m = re.match(r'^(\s*)([\*\-]|\d+[\.\)])\s+(.*)', line)
+        if li_m:
+            indent = len(li_m.group(1))
+            content = li_m.group(3)
+            tag = "sub_li" if indent >= 4 else "li"
+            prefix = "  • " if not li_m.group(2)[0].isdigit() else f"  {li_m.group(2)} "
+            segs = _strip_inline(content)
+            tw.insert("end", prefix)
+            for txt, is_bold in segs:
+                tw.insert("end", txt, (tag, "bold") if is_bold else tag)
+            tw.insert("end", "\n")
+            continue
+
+        # 普通段落（支持行内加粗）
+        segs = _strip_inline(line)
+        for txt, is_bold in segs:
+            tw.insert("end", txt, ("body", "bold") if is_bold else "body")
+        tw.insert("end", "\n")
+
+
 def _load_platform_ai_agreement_text():
-    """加载平台与AI功能使用协议文本 - 直接读取douyin_publish_agreement.txt"""
-    agreement_file = os.path.join(BASE_DIR, "douyin_publish_agreement.txt")
-    
+    """加载用户协议原始 markdown 文本"""
+    agreement_file = os.path.join(BASE_DIR, "user_agreement.md")
     if os.path.exists(agreement_file):
         try:
             with open(agreement_file, "r", encoding="utf-8") as f:
@@ -1060,13 +1137,21 @@ def _load_platform_ai_agreement_text():
                     return content
         except Exception as e:
             print(f"[WARNING] 读取协议文件失败: {e}")
-    
-    # 如果文件不存在，返回默认文本
-    return """平台与AI功能使用协议
+    return "用户协议文件 (user_agreement.md) 未找到，请联系技术支持。"
 
-请阅读完整协议内容后再勾选同意。
 
-协议文件 (douyin_publish_agreement.txt) 未找到，请联系技术支持。"""
+def _load_privacy_policy_text():
+    """加载隐私协议原始 markdown 文本"""
+    privacy_file = os.path.join(BASE_DIR, "privacy_policy.md")
+    if os.path.exists(privacy_file):
+        try:
+            with open(privacy_file, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    return content
+        except Exception as e:
+            print(f"[WARNING] 读取隐私协议文件失败: {e}")
+    return "隐私协议文件 (privacy_policy.md) 未找到，请联系技术支持。"
 
 # ══════════════════════════════════════════════════════════════
 #  错误弹窗
@@ -1749,29 +1834,58 @@ if __name__ == "__main__":
             
             def show_agreement():
                 agreement_window = tk.Toplevel(root)
-                agreement_window.title("平台与AI功能使用协议")
+                agreement_window.title("用户协议与隐私协议")
                 agreement_window.geometry("700x600")
                 agreement_window.resizable(True, True)
                 
-                # 创建滚动文本框
-                text_frame = tk.Frame(agreement_window)
-                text_frame.pack(fill="both", expand=True, padx=20, pady=20)
-                
-                scrollbar = tk.Scrollbar(text_frame)
-                scrollbar.pack(side="right", fill="y")
-                
-                text_widget = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set,
-                                     font=("Microsoft YaHei", 9), padx=10, pady=10)
-                text_widget.pack(side="left", fill="both", expand=True)
-                scrollbar.config(command=text_widget.yview)
-                
-                # 插入协议内容
-                try:
-                    agreement_text = _load_platform_ai_agreement_text()
-                except Exception as e:
-                    agreement_text = f"协议加载失败：{e}"
-                text_widget.insert("1.0", agreement_text if str(agreement_text).strip() else "协议内容为空，请检查协议文件。")
-                text_widget.config(state="disabled")
+                # Tab 栏
+                tab_bar = tk.Frame(agreement_window, bg="#f1f5f9")
+                tab_bar.pack(fill="x", padx=20, pady=(16, 0))
+
+                tab_btns = {}
+                tab_frames = {}
+
+                def switch_tab(idx):
+                    for i, (btn, frm) in enumerate(zip(tab_btns.values(), tab_frames.values())):
+                        if i == idx:
+                            btn.config(bg="#4f46e5", fg="#ffffff")
+                            frm.pack(fill="both", expand=True)
+                        else:
+                            btn.config(bg="#e2e8f0", fg="#475569")
+                            frm.pack_forget()
+
+                tab_btns["user"] = tk.Button(tab_bar, text="📄 用户协议",
+                    font=("Microsoft YaHei", 10, "bold"), bg="#4f46e5", fg="#ffffff",
+                    relief="flat", bd=0, padx=16, pady=5, cursor="hand2",
+                    command=lambda: switch_tab(0))
+                tab_btns["user"].pack(side="left", padx=(0, 4))
+
+                tab_btns["privacy"] = tk.Button(tab_bar, text="🔒 隐私协议",
+                    font=("Microsoft YaHei", 10, "bold"), bg="#e2e8f0", fg="#475569",
+                    relief="flat", bd=0, padx=16, pady=5, cursor="hand2",
+                    command=lambda: switch_tab(1))
+                tab_btns["privacy"].pack(side="left")
+
+                content_area = tk.Frame(agreement_window)
+                content_area.pack(fill="both", expand=True, padx=20, pady=10)
+
+                def _make_text_panel(parent, md_content):
+                    frm = tk.Frame(parent)
+                    sb = tk.Scrollbar(frm)
+                    sb.pack(side="right", fill="y")
+                    tw = tk.Text(frm, wrap="word", yscrollcommand=sb.set,
+                                 font=("Microsoft YaHei", 9), padx=14, pady=12,
+                                 bg="#ffffff", fg="#334155", relief="flat", bd=0)
+                    tw.pack(side="left", fill="both", expand=True)
+                    sb.config(command=tw.yview)
+                    _render_md_to_tk(tw, md_content)
+                    tw.config(state="disabled")
+                    return frm
+
+                tab_frames["user"] = _make_text_panel(content_area, _load_platform_ai_agreement_text())
+                tab_frames["privacy"] = _make_text_panel(content_area, _load_privacy_policy_text())
+
+                switch_tab(0)
                 
                 # 关闭按钮
                 btn_frame = tk.Frame(agreement_window)
@@ -1780,7 +1894,7 @@ if __name__ == "__main__":
                          font=("Microsoft YaHei", 10), bg="#6366f1", fg="white",
                          relief="flat", padx=20, pady=5).pack()
             
-            link_label = tk.Label(check_frame, text="《平台与AI功能使用协议》",
+            link_label = tk.Label(check_frame, text="《用户协议》与《隐私协议》",
                                  font=("Microsoft YaHei", 10), 
                                  bg="#ffffff", fg="#6366f1",
                                  cursor="hand2")
@@ -1873,7 +1987,7 @@ if __name__ == "__main__":
             
             def _do_login():
                 if not agreement_var.get():
-                    msg_label.config(text="[警告] 请先阅读并同意《平台与AI功能使用协议》", fg="#f59e0b")
+                    msg_label.config(text="[警告] 请先阅读并同意《用户协议》与《隐私协议》", fg="#f59e0b")
                     return
                 key = key_entry.get().strip()
                 if not key:

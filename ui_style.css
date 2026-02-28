@@ -1170,3 +1170,32 @@ div.svelte-1nguped,
 .font-dropdown-option[data-font="霞鹜文楷"] {
   font-family: '霞鹜文楷', 'Microsoft YaHei', sans-serif !important;
 }
+
+
+/* ── 视频放大预览关闭按钮 ── */
+.zdai-lightbox-close-btn {
+  position: fixed !important;
+  top: 18px !important;
+  right: 18px !important;
+  z-index: 999999 !important;
+  background: rgba(0, 0, 0, 0.75) !important;
+  color: #fff !important;
+  border: 2px solid rgba(255, 255, 255, 0.6) !important;
+  border-radius: 12px !important;
+  padding: 10px 22px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  font-family: 'Microsoft YaHei', system-ui, sans-serif !important;
+  cursor: pointer !important;
+  backdrop-filter: blur(8px) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+  transition: all 0.2s ease !important;
+  letter-spacing: 1px !important;
+  user-select: none !important;
+}
+.zdai-lightbox-close-btn:hover {
+  background: rgba(239, 68, 68, 0.85) !important;
+  border-color: #fff !important;
+  transform: scale(1.05) !important;
+  box-shadow: 0 6px 24px rgba(239, 68, 68, 0.4) !important;
+}
