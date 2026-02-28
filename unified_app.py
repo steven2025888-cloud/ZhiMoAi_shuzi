@@ -3333,8 +3333,8 @@ def build_ui():
                 # 全量优化：关键词+字幕标题+视频标题+话题+多个画中画提示词
                 prompt = f"""请根据以下视频文本内容，完成五个任务：
 
-任务一：生成两行字幕标题（每行最多10个字）。标题要口语化、有冲击力、适合短视频封面。
-        输出时请用“｜”分隔两行，例如：第一行｜第二行（不要超过10字/行）。
+任务一：生成两行字幕标题（每行8-10个字，尽量接近10个字）。标题要口语化、有冲击力、适合短视频封面。
+        输出时请用"｜"分隔两行，例如：第一行｜第二行（每行8-10字）。
 任务二：从文本中提取尽可能多的关键词（用于字幕高亮显示），包括核心名词、动词、形容词等重要词语，不限数量，用逗号分隔
 任务三：生成一个吸引人的短视频标题（不超过30字，吸引眼球、引发好奇）
 任务四：生成5个相关的热门话题标签，用逗号分隔
@@ -3393,7 +3393,7 @@ def build_ui():
                 # 精简优化：只优化关键词+字幕标题
                 prompt = f"""请根据以下视频文本内容，完成两个任务：
 
-任务一：生成两行字幕标题（每行最多10个字）。输出用“｜”分隔两行，例如：第一行｜第二行。
+任务一：生成两行字幕标题（每行8-10个字，尽量接近10个字）。输出用"｜"分隔两行，例如：第一行｜第二行。
 任务二：从文本中提取尽可能多的关键词（用于字幕高亮显示），包括核心名词、动词、形容词等重要词语，不限数量，用逗号分隔
 
 视频文本内容：
@@ -4031,6 +4031,9 @@ def build_ui():
                              douyin_title_val, douyin_topics_val,
                              progress=gr.Progress()):
             """生成字幕并自动保存工作台状态"""
+            # 先返回加载状态
+            yield gr.update(), _hint_html("info", "🎬 正在生成字幕视频，请稍候..."), gr.update(), gr.update()
+
             # 字幕内容直接使用文案内容（避免维护两份文本）
             sub_txt = inp_txt or ""
             # 先生成字幕
@@ -4048,7 +4051,7 @@ def build_ui():
                 intro_enable=bool(intro_en),
                 progress=progress
             )
-            
+
             # 保存工作台状态
             # 注意：使用实际的音频和视频路径
             hint_msg, dropdown_update = _auto_save_workspace(
@@ -4063,14 +4066,14 @@ def build_ui():
                 sub_title_text_val=title_txt,
                 sub_title_text2_val=title_txt2
             )
-            
+
             # 返回字幕视频，需要设置 visible=True 和 show_download_button=True
             if sub_vid_path:
                 sub_vid_update = gr.update(value=sub_vid_path, visible=True, show_download_button=True)
             else:
                 sub_vid_update = gr.update(visible=False)
-            
-            return sub_vid_update, sub_hnt, hint_msg, dropdown_update
+
+            yield sub_vid_update, sub_hnt, hint_msg, dropdown_update
         
         sub_btn.click(
             subtitle_and_save,

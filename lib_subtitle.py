@@ -1255,25 +1255,42 @@ def generate_intro(video_path: str, title_text: str,
             if font is None:
                 font = ImageFont.load_default()
 
+            # 处理两行标题（支持多种分隔符）
             title = title_text.strip()
-            # 计算文字位置（顶部居中，距顶 15%）
-            bbox = draw.textbbox((0, 0), title, font=font)
-            tw = bbox[2] - bbox[0]
-            tx = (vid_w - tw) // 2
-            ty = int(vid_h * 0.08)
+            title_lines = []
+            for sep in ("\n", "｜", "|", "\\"):
+                if sep in title:
+                    parts = [p.strip() for p in title.split(sep) if p.strip()]
+                    title_lines = parts[:2]  # 最多取两行
+                    break
+            if not title_lines:
+                title_lines = [title]
 
-            # 描边
+            # 计算文字位置（顶部居中，距顶 8%）
             oc = tuple(int(title_outline_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
             tc = tuple(int(title_color.lstrip("#")[i:i+2], 16) for i in (0, 2, 4))
             outline_w = max(2, font_sz // 12)
-            # 画描边（8方向偏移）
-            for dx in range(-outline_w, outline_w + 1):
-                for dy in range(-outline_w, outline_w + 1):
-                    if dx == 0 and dy == 0:
-                        continue
-                    draw.text((tx + dx, ty + dy), title, font=font, fill=(*oc, 255))
-            # 画正文
-            draw.text((tx, ty), title, font=font, fill=(*tc, 255))
+
+            # 计算行高和起始Y位置
+            line_height = int(font_sz * 1.3)
+            total_height = line_height * len(title_lines)
+            start_y = int(vid_h * 0.08)
+
+            # 绘制每一行
+            for i, line in enumerate(title_lines):
+                bbox = draw.textbbox((0, 0), line, font=font)
+                tw = bbox[2] - bbox[0]
+                tx = (vid_w - tw) // 2
+                ty = start_y + i * line_height
+
+                # 画描边（8方向偏移）
+                for dx in range(-outline_w, outline_w + 1):
+                    for dy in range(-outline_w, outline_w + 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        draw.text((tx + dx, ty + dy), line, font=font, fill=(*oc, 255))
+                # 画正文
+                draw.text((tx, ty), line, font=font, fill=(*tc, 255))
 
         # 保存合成图片
         canvas_rgb = canvas.convert("RGB")
