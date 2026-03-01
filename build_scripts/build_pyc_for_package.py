@@ -24,7 +24,6 @@ PYTHON_FILES = [
     "lib_shipinhao_publish.py",
     "lib_xiaohongshu_publish.py",
     "lib_meta_store.py",
-    "ws_worker.py",
 ]
 
 

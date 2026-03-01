@@ -1,0 +1,14 @@
+/* Common App Font Stack（含本地字体优先级）
+   推荐全局引入顺序：
+   @import "@/uni_modules/zhimo-ui/styles/fonts-local.css";
+   @import "@/uni_modules/zhimo-ui/styles/app-font.css";
+*/
+:root{
+  --ui-font-sans: "Inter", "Roboto",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+    Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+
+  --ui-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}

@@ -20,7 +20,7 @@ echo.
 
 echo [检查1] 验证.pyc文件（应该存在）
 set PYC_COUNT=0
-for %%F in (app_backend.pyc unified_app.pyc lib_avatar.pyc lib_voice.pyc lib_subtitle.pyc lib_license.pyc lib_douyin_publish.pyc lib_meta_store.pyc ws_worker.pyc) do (
+for %%F in (app_backend.pyc unified_app.pyc lib_avatar.pyc lib_voice.pyc lib_subtitle.pyc lib_license.pyc lib_douyin_publish.pyc lib_meta_store.pyc) do (
     if exist "%TEST_DIR%\%%F" (
         echo   ✓ %%F
         set /a PYC_COUNT+=1
@@ -28,12 +28,12 @@ for %%F in (app_backend.pyc unified_app.pyc lib_avatar.pyc lib_voice.pyc lib_sub
         echo   ✗ %%F 缺失
     )
 )
-echo   共找到 %PYC_COUNT% 个.pyc文件（应为9个）
+echo   共找到 %PYC_COUNT% 个.pyc文件（应为8个）
 
 echo.
 echo [检查2] 验证.py文件（不应该存在）
 set PY_COUNT=0
-for %%F in (app_backend.py unified_app.py lib_avatar.py lib_voice.py lib_subtitle.py lib_license.py lib_douyin_publish.py lib_meta_store.py ws_worker.py) do (
+for %%F in (app_backend.py unified_app.py lib_avatar.py lib_voice.py lib_subtitle.py lib_license.py lib_douyin_publish.py lib_meta_store.py) do (
     if exist "%TEST_DIR%\%%F" (
         echo   ✗ %%F 存在（不应该有.py源文件！）
         set /a PY_COUNT+=1

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import os, sys, time, subprocess, traceback, shutil, re, json, queue as _queue, threading
 import asyncio
+import base64
+import ctypes
+import ctypes.wintypes
 
 # ── 加载 .env 配置 ──
 def load_env_file():
@@ -15,8 +18,76 @@ def load_env_file():
                         continue
                     key, value = line.split('=', 1)
                     os.environ[key.strip()] = value.strip()
+
+            if not os.getenv("LIPVOICE_SIGN"):
+                enc = (os.getenv("LIPVOICE_SIGN_ENC") or "").strip()
+                if enc:
+                    try:
+                        os.environ["LIPVOICE_SIGN"] = _dpapi_decrypt_text(enc)
+                    except Exception as _e:
+                        print(f"[WARN] LIPVOICE_SIGN_ENC 解密失败: {_e}")
         except Exception as e:
             print(f"[WARN] 加载.env文件失败: {e}")
+
+
+class _DATA_BLOB(ctypes.Structure):
+    _fields_ = [("cbData", ctypes.wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+
+def _dpapi_decrypt_text(b64_text: str) -> str:
+    if sys.platform != "win32":
+        raise RuntimeError("DPAPI only supported on Windows")
+    raw = base64.b64decode(b64_text.encode("utf-8"))
+    in_blob = _DATA_BLOB()
+    in_blob.cbData = len(raw)
+    in_blob.pbData = ctypes.cast(ctypes.create_string_buffer(raw, len(raw)), ctypes.POINTER(ctypes.c_byte))
+    out_blob = _DATA_BLOB()
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    if not crypt32.CryptUnprotectData(
+        ctypes.byref(in_blob),
+        None,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(out_blob),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        out = ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        return out.decode("utf-8")
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def dpapi_encrypt_text_to_b64(plain_text: str) -> str:
+    if sys.platform != "win32":
+        raise RuntimeError("DPAPI only supported on Windows")
+    if plain_text is None:
+        plain_text = ""
+    raw = plain_text.encode("utf-8")
+    in_blob = _DATA_BLOB()
+    in_blob.cbData = len(raw)
+    in_blob.pbData = ctypes.cast(ctypes.create_string_buffer(raw, len(raw)), ctypes.POINTER(ctypes.c_byte))
+    out_blob = _DATA_BLOB()
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    if not crypt32.CryptProtectData(
+        ctypes.byref(in_blob),
+        None,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(out_blob),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        out = ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        return base64.b64encode(out).decode("utf-8")
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
 
 load_env_file()
 
@@ -27,6 +98,11 @@ try:
 except ImportError:
     _WS_OK = False
     print("[WARN] websockets 模块未安装，提取文案功能将不可用")
+
+# ── 将 libs/ 加入模块搜索路径 ──
+_LIBS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "libs")
+if _LIBS_DIR not in sys.path:
+    sys.path.insert(0, _LIBS_DIR)
 
 # ── 新功能模块（数字人 / 音色 / 字幕）──
 try:
@@ -59,6 +135,10 @@ except Exception as _libs_err:
         'apply_pip_online_smart': staticmethod(lambda *a, **kw: ""),
         'apply_pip_local':  staticmethod(lambda *a, **kw: ""),
     })()
+    _pip_ws = type('_StubPipWs', (), {
+        'generate_pip_via_extractor': staticmethod(lambda *a, **kw: ""),
+        'generate_and_compose_pips': staticmethod(lambda *a, **kw: ""),
+    })()
 
 # ── 清除代理 ──
 for _k in ('http_proxy','https_proxy','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','all_proxy'):
@@ -70,14 +150,14 @@ os.environ['NO_PROXY'] = '127.0.0.1,localhost'
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
 LEGACY_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
-DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")  # 兼容旧版本
+DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "docs", "user_agreement.md")  # 兼容旧版本
 INDEXTTS_DIR   = os.path.join(BASE_DIR, "_internal_tts")
 HEYGEM_DIR     = os.path.join(BASE_DIR, "heygem-win-50")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
 WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-MUSIC_DATABASE_FILE = os.path.join(BASE_DIR, "music_database.json")
+MUSIC_DATABASE_FILE = os.path.join(BASE_DIR, "data", "music_database.json")
 BGM_CACHE_DIR = os.path.join(BASE_DIR, "bgm_cache")  # 独立的BGM缓存目录
 os.makedirs(BGM_CACHE_DIR, exist_ok=True)
 
@@ -287,13 +367,13 @@ def _warmup_heygem():
 # ══════════════════════════════════════════════════════════════
 # 从外部文件加载JS，并注入版本号
 try:
-    with open(os.path.join(BASE_DIR, "ui_init.js"), "r", encoding="utf-8") as f:
+    with open(os.path.join(BASE_DIR, "ui", "ui_init.js"), "r", encoding="utf-8") as f:
         INIT_JS = f.read()
         # 替换版本号占位符
         INIT_JS = INIT_JS.replace('{{APP_VERSION}}', APP_VERSION)
         INIT_JS = INIT_JS.replace('{{APP_BUILD}}', str(APP_BUILD))
 except Exception as e:
-    print(f"[WARNING] 无法加载 ui_init.js: {e}")
+    print(f"[WARNING] 无法加载 ui/ui_init.js: {e}")
     INIT_JS = "() => { console.log('[织梦AI] JS加载失败'); }"
 
 # ══════════════════════════════════════════════════════════════
@@ -301,10 +381,10 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════
 # 从外部文件加载CSS
 try:
-    with open(os.path.join(BASE_DIR, "ui_style.css"), "r", encoding="utf-8") as f:
+    with open(os.path.join(BASE_DIR, "ui", "ui_style.css"), "r", encoding="utf-8") as f:
         CUSTOM_CSS = f.read()
 except Exception as e:
-    print(f"[WARNING] 无法加载 ui_style.css: {e}")
+    print(f"[WARNING] 无法加载 ui/ui_style.css: {e}")
     CUSTOM_CSS = ""
 
 
@@ -474,77 +554,498 @@ def _restore_tts_gpu():
 # ══════════════════════════════════════════════════════════════
 #  语音合成（支持本地版和在线版）
 # ══════════════════════════════════════════════════════════════
-def download_voice_from_proxy(play_url: str, output_path: str, max_retries: int = 5) -> str:
-    """通过代理URL下载音频文件到指定路径（自动重试 + 流式/整体双模式）"""
+def download_voice_from_proxy(play_url: str, output_path: str, max_retries: int = 5, extra_headers=None) -> str:
+    """通过代理URL下载音频文件到指定路径（自动重试 + 流式下载）"""
     import requests
     from requests.adapters import HTTPAdapter
     from urllib3.util.retry import Retry
     import time as _time
+    import http.client as _http_client
 
     session = requests.Session()
-    # urllib3 层自动重试（仅针对连接级错误）
-    adapter = HTTPAdapter(
-        max_retries=Retry(total=2, backoff_factor=1,
-                          status_forcelist=[502, 503, 504])
-    )
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-
-    headers = {
-        "User-Agent": "ZhiMoAi-Client/1.0",
-        "Accept": "*/*",
-        "Connection": "keep-alive",
-    }
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            print(f"[下载] 第 {attempt}/{max_retries} 次尝试下载音频...")
-
-            # 第一轮尝试用整体下载（适合 <10MB 的 TTS 音频），后续用流式
-            use_stream = attempt > 2
-            r = session.get(
-                play_url, headers=headers,
-                timeout=(30, 600),   # 放宽超时
-                stream=use_stream,
+    try:
+        # urllib3 层自动重试（仅针对连接级错误）
+        adapter = HTTPAdapter(
+            max_retries=Retry(
+                total=2,
+                backoff_factor=1,
+                status_forcelist=[502, 503, 504],
+                allowed_methods=["GET"],
             )
-            r.raise_for_status()
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
 
-            if use_stream:
+        headers = {
+            "User-Agent": "ZhiMoAi-Client/1.0",
+            "Accept": "*/*",
+            "Connection": "keep-alive",
+            "Accept-Encoding": "identity",
+        }
+        if extra_headers and isinstance(extra_headers, dict):
+            headers.update({k: v for k, v in extra_headers.items() if v is not None})
+
+        def _looks_like_audio(path: str, content_type: str) -> (bool, str):
+            try:
+                if not os.path.exists(path):
+                    return False, "文件不存在"
+                size = os.path.getsize(path)
+                if size < 2048:
+                    return False, f"文件过小({size}字节)"
+
+                ct = (content_type or "").lower()
+                # 允许的 content-type
+                if ct and ("json" in ct or "text" in ct or "html" in ct):
+                    return False, f"Content-Type 异常: {content_type}"
+
+                with open(path, 'rb') as f:
+                    head = f.read(64)
+
+                # WAV: RIFF....WAVE
+                if len(head) >= 12 and head[0:4] == b"RIFF" and head[8:12] == b"WAVE":
+                    return True, "wav"
+                # MP3: ID3 or frame sync
+                if len(head) >= 3 and head[0:3] == b"ID3":
+                    return True, "mp3"
+                if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
+                    return True, "mp3"
+                # OGG: OggS
+                if len(head) >= 4 and head[0:4] == b"OggS":
+                    return True, "ogg"
+
+                # 如果 content-type 明确是音频，也放行（某些 wav 可能无 RIFF 头，极少见）
+                if ct.startswith("audio/"):
+                    return True, f"audio/{ct}"
+                return False, "文件头不符合常见音频格式"
+            except Exception as e:
+                return False, f"校验失败: {e}"
+
+        last_err = None
+        for attempt in range(1, max_retries + 1):
+            r = None
+            try:
+                print(f"[下载] 第 {attempt}/{max_retries} 次尝试下载音频...")
+
+                r = session.get(
+                    play_url,
+                    headers=headers,
+                    timeout=(30, 600),
+                    stream=True,
+                )
+                r.raise_for_status()
+
+                expected = int(r.headers.get('Content-Length', 0) or 0)
+                content_type = r.headers.get('Content-Type', '')
+
                 with open(output_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=65536):
+                    for chunk in r.iter_content(chunk_size=1024 * 256):
                         if chunk:
                             f.write(chunk)
-            else:
-                # 整体下载：一次性读取全部内容，避免 IncompleteRead
-                content = r.content
-                with open(output_path, 'wb') as f:
-                    f.write(content)
 
-            # 验证文件是否完整下载
-            file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-            expected = int(r.headers.get('Content-Length', 0) or 0)
-            if file_size > 0 and (expected == 0 or file_size >= expected):
-                print(f"[下载] 音频下载成功，大小: {file_size} 字节")
-                return output_path
-            else:
-                raise IOError(
-                    f"文件不完整: 已下载 {file_size} / 预期 {expected} 字节"
-                )
-        except Exception as e:
-            print(f"[下载] 第 {attempt} 次下载失败: {e}")
-            # 清理不完整的文件
+                file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+                if file_size > 0 and (expected == 0 or file_size >= expected):
+                    ok_audio, why = _looks_like_audio(output_path, content_type)
+                    if ok_audio:
+                        print(f"[下载] 音频下载成功，大小: {file_size} 字节")
+                        return output_path
+                    # 预览一下响应内容，帮助定位服务端返回的是什么
+                    try:
+                        with open(output_path, 'rb') as _f:
+                            preview = _f.read(256)
+                        try:
+                            preview_text = preview.decode('utf-8', errors='replace')
+                        except Exception:
+                            preview_text = str(preview)
+                    except Exception:
+                        preview_text = "(无法读取预览)"
+                    # 如果服务端返回的是鉴权/卡密相关 JSON，继续重试没有意义
+                    if '"code":7' in preview_text and (
+                        ("缺少 Authorization" in preview_text) or ("卡密已过期" in preview_text)
+                    ):
+                        raise RuntimeError(f"[AUTH]{preview_text}")
+
+                    raise IOError(
+                        f"下载内容不是有效音频: {why}; Content-Type={content_type}; 预览={preview_text}"
+                    )
+
+                raise IOError(f"文件不完整: 已下载 {file_size} / 预期 {expected} 字节")
+
+            except (_http_client.IncompleteRead, requests.exceptions.ChunkedEncodingError) as e:
+                last_err = e
+                print(f"[下载] 断流/半包(IncompleteRead)，第 {attempt} 次失败: {e}")
+            except RuntimeError as e:
+                last_err = e
+                # 鉴权/卡密错误不重试
+                if str(e).startswith("[AUTH]"):
+                    raise
+                print(f"[下载] 第 {attempt} 次下载失败: {e}")
+            except Exception as e:
+                last_err = e
+                print(f"[下载] 第 {attempt} 次下载失败: {e}")
+            finally:
+                if r is not None:
+                    try:
+                        r.close()
+                    except Exception:
+                        pass
+
             if os.path.exists(output_path):
                 try:
                     os.remove(output_path)
                 except OSError:
                     pass
+
             if attempt < max_retries:
-                wait = attempt * 5
+                wait = min(attempt * 5, 30)
                 print(f"[下载] 等待 {wait} 秒后重试...")
                 _time.sleep(wait)
             else:
-                raise
-    session.close()
+                raise last_err
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def download_voice_from_lipvoice_direct(voice_url: str, output_path: str, sign: str, max_retries: int = 3) -> str:
+    import requests
+    import time as _time
+    import http.client as _http_client
+
+    headers = {
+        "User-Agent": "ZhiMoAi-Client/1.0",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Accept-Encoding": "identity",
+        "sign": sign,
+    }
+
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        r = None
+        try:
+            print(f"[直连下载] 第 {attempt}/{max_retries} 次尝试...")
+            r = requests.get(voice_url, headers=headers, timeout=(30, 600), stream=True)
+            r.raise_for_status()
+            content_type = r.headers.get('Content-Type', '')
+
+            with open(output_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=1024 * 256):
+                    if chunk:
+                        f.write(chunk)
+
+            ok_audio = os.path.exists(output_path) and os.path.getsize(output_path) >= 2048
+            if not ok_audio:
+                # 给出预览
+                preview_text = ""
+                try:
+                    with open(output_path, 'rb') as _f:
+                        preview = _f.read(256)
+                    preview_text = preview.decode('utf-8', errors='replace')
+                except Exception:
+                    preview_text = "(无法读取预览)"
+                raise IOError(f"直连下载内容异常: Content-Type={content_type}; 预览={preview_text}")
+
+            return output_path
+
+        except (_http_client.IncompleteRead, requests.exceptions.ChunkedEncodingError) as e:
+            last_err = e
+            print(f"[直连下载] 断流/半包，第 {attempt} 次失败: {e}")
+        except Exception as e:
+            last_err = e
+            print(f"[直连下载] 第 {attempt} 次失败: {e}")
+        finally:
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:
+                    pass
+
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+
+        if attempt < max_retries:
+            _time.sleep(attempt * 2)
+
+    raise last_err
+
+
+def _pip_force_chinese_person(prompt: str) -> str:
+    p = (prompt or "").strip()
+    if not p:
+        return p
+    p_low = p.lower()
+    if "中国" in p or "chinese" in p_low:
+        return p
+    human_keywords = [
+        "人", "人物", "真人", "模特", "男人", "女人", "男孩", "女孩", "少年", "少女", "大叔", "阿姨",
+        "person", "people", "man", "woman", "boy", "girl", "male", "female", "human",
+    ]
+    if any(k in p for k in human_keywords) or any(k in p_low for k in human_keywords):
+        return p + "，中国人"
+    return p
+
+
+def split_text_by_sentences(text, max_chars=100):
+    """将文本按句子分割，每段不超过max_chars字符
+
+    Args:
+        text: 要分割的文本
+        max_chars: 每段最大字符数
+
+    Returns:
+        list: 分割后的文本段列表
+    """
+    import re
+
+    # 按句子分割（中文句号、问号、感叹号、英文句号等）
+    sentences = re.split(r'([。！？!?；;])', text)
+
+    # 重新组合句子和标点
+    full_sentences = []
+    for i in range(0, len(sentences) - 1, 2):
+        if i + 1 < len(sentences):
+            full_sentences.append(sentences[i] + sentences[i + 1])
+        else:
+            full_sentences.append(sentences[i])
+    if len(sentences) % 2 == 1:
+        full_sentences.append(sentences[-1])
+
+    # 合并短句，确保每段不超过max_chars
+    chunks = []
+    current_chunk = ""
+
+    for sentence in full_sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        # 如果当前句子本身就超过max_chars，单独作为一段
+        if len(sentence) > max_chars:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            chunks.append(sentence)
+        # 如果加上当前句子会超过max_chars，先保存当前chunk
+        elif len(current_chunk) + len(sentence) > max_chars:
+            if current_chunk:
+                chunks.append(current_chunk)
+            current_chunk = sentence
+        # 否则继续累加
+        else:
+            current_chunk += sentence
+
+    # 添加最后一段
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
+def generate_speech_online_concurrent(text, voice_name, progress=gr.Progress()):
+    """在线版 TTS：并发调用云端 API 合成语音（优化版）
+
+    将长文本分割成多个100字以内的段落，并发请求，全部完成后合成
+    """
+    if not text.strip():
+        raise gr.Error("请输入要合成的文本内容")
+
+    try:
+        from voice_api import VoiceApiClient, API_BASE_URL, get_machine_code
+        from lib_license import check_saved_license
+        import lib_voice as _vc
+        import time as _time
+        import concurrent.futures
+        from pydub import AudioSegment
+
+        # 检查卡密
+        status, info = check_saved_license()
+        if status != "valid":
+            raise gr.Error("请先登录卡密后再使用在线版 TTS")
+
+        if not isinstance(info, dict):
+            raise gr.Error("卡密信息读取失败，请重新登录")
+
+        license_key = info.get("license_key", "")
+        if not license_key:
+            raise gr.Error("卡密无效，请重新登录")
+
+        # 获取 model_id
+        model_id = _vc.get_online_model_id(voice_name)
+        if not model_id:
+            raise gr.Error(f"未找到在线音色「{voice_name}」的模型 ID")
+
+        # 分割文本
+        text_chunks = split_text_by_sentences(text, max_chars=100)
+        chunk_count = len(text_chunks)
+
+        print(f"[TTS在线版-并发] 文本总长度: {len(text)}, 分割为 {chunk_count} 段")
+        for i, chunk in enumerate(text_chunks):
+            print(f"[TTS在线版-并发] 段落{i+1}: {len(chunk)}字 - {chunk[:30]}...")
+
+        progress(0.05, desc=f"[在线] 准备并发请求 {chunk_count} 个任务...")
+
+        client = VoiceApiClient(API_BASE_URL, license_key)
+
+        # 提交所有任务
+        task_ids = []
+        for i, chunk in enumerate(text_chunks):
+            try:
+                result = client.tts(model_id, chunk)
+                if result.get("code") != 0:
+                    raise gr.Error(f"段落{i+1}提交失败：{result.get('msg', '未知错误')}")
+
+                data = result.get("data", {})
+                task_id = data.get("task_id") or data.get("taskId") or data.get("id")
+                if not task_id:
+                    raise gr.Error(f"段落{i+1}未返回任务ID")
+
+                task_ids.append((i, task_id, chunk))
+                print(f"[TTS在线版-并发] 段落{i+1}已提交，任务ID: {task_id}")
+            except Exception as e:
+                raise gr.Error(f"段落{i+1}提交失败：{e}")
+
+        progress(0.15, desc=f"[在线] 已提交 {chunk_count} 个任务，等待处理...")
+
+        # 并发轮询所有任务
+        def poll_task(task_info):
+            idx, task_id, chunk_text = task_info
+            start_time = _time.time()
+
+            while True:
+                try:
+                    result = client.tts_result(task_id)
+
+                    if not isinstance(result, dict):
+                        return (idx, None, f"轮询结果异常")
+
+                    data = result.get("data", {})
+                    task_status = data.get("status", "")
+
+                    is_completed = (
+                        task_status in ["completed", "success", "done"] or
+                        task_status == 2 or
+                        (isinstance(task_status, int) and task_status >= 2)
+                    )
+
+                    is_failed = (
+                        task_status in ["failed", "error"] or
+                        task_status == -1 or
+                        (isinstance(task_status, int) and task_status < 0)
+                    )
+
+                    if result.get("code") == 0 and is_completed:
+                        voice_url = (
+                            data.get("audio_url") or
+                            data.get("audioUrl") or
+                            data.get("voiceUrl") or
+                            data.get("voice_url") or
+                            data.get("url")
+                        )
+
+                        if voice_url:
+                            print(f"[TTS在线版-并发] 段落{idx+1}已完成: {voice_url}")
+                            return (idx, voice_url, None)
+                        else:
+                            return (idx, None, "未返回音频URL")
+
+                    elif is_failed:
+                        error_msg = data.get("message") or data.get("msg") or data.get("error") or "未知错误"
+                        return (idx, None, error_msg)
+
+                    # 超时检查（每个任务最多等待5分钟）
+                    if _time.time() - start_time > 300:
+                        return (idx, None, "任务超时")
+
+                    _time.sleep(2)
+
+                except Exception as e:
+                    return (idx, None, str(e))
+
+        # 使用线程池并发轮询
+        audio_urls = [None] * chunk_count
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(chunk_count, 10)) as executor:
+            futures = [executor.submit(poll_task, task_info) for task_info in task_ids]
+
+            completed = 0
+            for future in concurrent.futures.as_completed(futures):
+                idx, url, error = future.result()
+                completed += 1
+
+                if error:
+                    raise gr.Error(f"段落{idx+1}处理失败：{error}")
+
+                audio_urls[idx] = url
+                progress(0.15 + 0.6 * completed / chunk_count,
+                        desc=f"[在线] 已完成 {completed}/{chunk_count} 个任务...")
+
+        progress(0.75, desc="[在线] 下载音频文件...")
+
+        # 下载所有音频文件
+        audio_files = []
+        sign = os.getenv("LIPVOICE_SIGN", "").strip()
+
+        for i, voice_url in enumerate(audio_urls):
+            try:
+                ts = int(_time.time())
+                local_file = os.path.join(OUTPUT_DIR, f"tts_online_chunk_{ts}_{i}.wav")
+
+                if sign:
+                    download_voice_from_lipvoice_direct(voice_url, local_file, sign)
+                else:
+                    from urllib.parse import quote
+                    proxy_url = f"{API_BASE_URL}/api/dsp/voice/tts/download?voice_url={quote(voice_url)}"
+                    download_voice_from_proxy(
+                        proxy_url,
+                        local_file,
+                        extra_headers={
+                            "Authorization": f"Bearer {license_key}",
+                            "X-Machine-Code": get_machine_code(),
+                        },
+                    )
+
+                audio_files.append(local_file)
+                print(f"[TTS在线版-并发] 段落{i+1}已下载: {local_file}")
+
+            except Exception as e:
+                raise gr.Error(f"段落{i+1}下载失败：{e}")
+
+        progress(0.90, desc="[在线] 合成音频...")
+
+        # 合成所有音频
+        if len(audio_files) == 1:
+            final_file = audio_files[0]
+        else:
+            combined = AudioSegment.from_wav(audio_files[0])
+            for audio_file in audio_files[1:]:
+                segment = AudioSegment.from_wav(audio_file)
+                combined += segment
+
+            ts = int(_time.time())
+            final_file = os.path.join(OUTPUT_DIR, f"tts_online_{ts}.wav")
+            combined.export(final_file, format="wav")
+
+            # 清理临时文件
+            for audio_file in audio_files:
+                try:
+                    os.remove(audio_file)
+                except Exception:
+                    pass
+
+        progress(1.0, desc="[OK] 合成完成")
+        print(f"[TTS在线版-并发] 合成成功: {final_file}")
+
+        return final_file, "[OK] 在线语音合成完成", final_file
+
+    except gr.Error:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise gr.Error(f"在线 TTS 失败：{e}")
 
 
 def generate_speech_online(text, voice_name, progress=gr.Progress()):
@@ -561,7 +1062,10 @@ def generate_speech_online(text, voice_name, progress=gr.Progress()):
         status, info = check_saved_license()
         if status != "valid":
             raise gr.Error("请先登录卡密后再使用在线版 TTS")
-        
+
+        if not isinstance(info, dict):
+            raise gr.Error("卡密信息读取失败，请重新登录")
+
         license_key = info.get("license_key", "")
         if not license_key:
             raise gr.Error("卡密无效，请重新登录")
@@ -579,11 +1083,16 @@ def generate_speech_online(text, voice_name, progress=gr.Progress()):
         
         result = client.tts(model_id, text)
         print(f"[TTS在线版] 服务器返回: {result}")
+
+        if not isinstance(result, dict):
+            raise gr.Error(f"在线 TTS 失败：服务器返回异常（非JSON对象）：{result}")
         
         if result.get("code") != 0:
             raise gr.Error(f"合成失败：{result.get('msg', '未知错误')}")
         
         data = result.get("data", {})
+        if data is None:
+            data = {}
         # 兼容不同的字段名：task_id, taskId, id
         task_id = data.get("task_id") or data.get("taskId") or data.get("id")
         
@@ -599,9 +1108,14 @@ def generate_speech_online(text, voice_name, progress=gr.Progress()):
         while True:
             result = client.tts_result(task_id)
             print(f"[TTS在线版] 轮询结果: {result}")
+
+            if not isinstance(result, dict):
+                raise gr.Error(f"在线 TTS 失败：轮询结果返回异常（非JSON对象）：{result}")
             
             status_code = result.get("code")
             data = result.get("data", {})
+            if data is None:
+                data = {}
             task_status = data.get("status", "")
             
             # 兼容不同的状态表示：
@@ -633,6 +1147,7 @@ def generate_speech_online(text, voice_name, progress=gr.Progress()):
                     progress(0.9, desc="[在线] 下载音频文件...")
                     from urllib.parse import quote
                     from voice_api import API_BASE_URL
+                    from voice_api import get_machine_code
                     
                     try:
                         print(f"[TTS在线版] 下载音频: {voice_url}")
@@ -641,9 +1156,21 @@ def generate_speech_online(text, voice_name, progress=gr.Progress()):
                         ts = int(_time.time())
                         local_file = os.path.join(OUTPUT_DIR, f"tts_online_{ts}.wav")
                         
-                        # 构造代理URL并下载
-                        proxy_url = f"{API_BASE_URL}/api/voice/tts/play?voice_url={quote(voice_url)}"
-                        download_voice_from_proxy(proxy_url, local_file)
+                        sign = os.getenv("LIPVOICE_SIGN", "").strip()
+                        if sign:
+                            print("[TTS在线版] 使用直连下载音频...")
+                            download_voice_from_lipvoice_direct(voice_url, local_file, sign)
+                        else:
+                            # 未配置 LIPVOICE_SIGN 时回退走服务端代理下载
+                            proxy_url = f"{API_BASE_URL}/api/dsp/voice/tts/download?voice_url={quote(voice_url)}"
+                            download_voice_from_proxy(
+                                proxy_url,
+                                local_file,
+                                extra_headers={
+                                    "Authorization": f"Bearer {license_key}",
+                                    "X-Machine-Code": get_machine_code(),
+                                },
+                            )
                         
                         progress(1.0, desc="[OK] 合成完成")
                         print(f"[TTS在线版] 合成成功: {local_file}")
@@ -730,19 +1257,19 @@ def generate_speech(text, prompt_audio, voice_name, top_p, top_k, temperature, n
                     repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
                     emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
                     progress=gr.Progress()):
-    """语音合成入口：根据音色类型自动选择本地版或在线版"""
-    import lib_voice as _vc
-    
-    # 判断是否为在线版音色
-    if voice_name and _vc.is_online(voice_name):
-        # 在线版：只传文本内容，忽略其他参数
-        return generate_speech_online(text, voice_name, progress)
-    else:
-        # 本地版：使用完整参数
-        return generate_speech_local(text, prompt_audio, top_p, top_k, temperature, num_beams,
-                                     repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
-                                     emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
-                                     progress)
+    """语音合成入口：以当前 TTS_MODE 为准选择本地/在线。
+
+    说明：之前仅根据 voice_name 是否为在线音色来决定走在线合成，
+    会导致「登录时选在线版 → UI 切到本地版」后仍然误走在线合成（表现为非常慢）。
+    """
+    tts_mode = os.getenv('TTS_MODE', 'local')
+    if tts_mode == 'online':
+        # 使用并发优化版本
+        return generate_speech_online_concurrent(text, voice_name, progress)
+    return generate_speech_local(text, prompt_audio, top_p, top_k, temperature, num_beams,
+                                 repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
+                                 emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                                 progress)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1281,6 +1808,293 @@ def run_heygem(video_path, audio_path, progress=gr.Progress(), detail_cb=None,
     return out, "✅ 视频合成完成"
 
 
+def _md5_of_local_file(path):
+    """计算本地文件的 MD5 hash"""
+    import hashlib
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=None,
+                      output_path_override=None, **_kw):
+    """使用 Linux HeyGem 服务器在线合成口型视频。
+
+    流程：计算hash → 检查服务器是否已有 → 仅上传缺失文件 → 提交任务 → 轮询进度 → 下载结果
+    """
+    import requests as _req
+
+    server_url = os.getenv("HEYGEM_SERVER_URL", "").strip().rstrip("/")
+    api_secret = os.getenv("HEYGEM_API_SECRET", "").strip()
+
+    if not server_url:
+        raise gr.Error("HEYGEM_SERVER_URL 未配置，请在 .env 中设置 Linux HeyGem 服务器地址\n"
+                       "格式示例: http://192.168.1.100:8383")
+    # 自动补全 http:// 前缀
+    if not server_url.startswith("http://") and not server_url.startswith("https://"):
+        server_url = "http://" + server_url
+    # 自动补全端口
+    from urllib.parse import urlparse
+    parsed = urlparse(server_url)
+    if not parsed.port:
+        server_url = server_url.rstrip("/") + ":8383"
+
+    if not video_path or not os.path.exists(str(video_path)):
+        raise gr.Error("视频文件不存在，请重新上传")
+    if not audio_path or not os.path.exists(str(audio_path)):
+        raise gr.Error("音频文件不存在，请重新选择")
+
+    headers = {}
+    if api_secret:
+        headers["Authorization"] = f"Bearer {api_secret}"
+
+    ts = int(time.time())
+    out = output_path_override or os.path.join(OUTPUT_DIR, f"lipsync_online_{ts}.mp4")
+    t0 = time.time()
+
+    video_path = str(video_path)
+    audio_path = str(audio_path)
+    video_ext = os.path.splitext(video_path)[1] or ".mp4"
+    audio_ext = os.path.splitext(audio_path)[1] or ".wav"
+
+    # ── 0) 健康检查 ──
+    try:
+        resp = _req.get(f"{server_url}/api/heygem/health", headers=headers, timeout=10)
+        resp.raise_for_status()
+        hdata = resp.json()
+        if hdata.get("code") != 0 or not hdata.get("initialized"):
+            raise gr.Error("HeyGem 服务器尚未初始化完成，请稍后再试")
+        safe_print(f"[HEYGEM-ONLINE] 服务器健康: {hdata}")
+    except _req.exceptions.RequestException as e:
+        # GPU 服务器离线时，提示用户等待而不是直接报错
+        error_msg = str(e)
+        if "Connection" in error_msg or "timeout" in error_msg.lower() or "Max retries" in error_msg:
+            raise gr.Error(
+                "⏳ GPU 服务器未上线，任务已排队\n\n"
+                "服务器启动中，请等待约 2 分钟后重试\n"
+                "或稍后在「历史记录」中查看结果\n\n"
+                f"提示：如需立即处理，请联系管理员启动 GPU 服务器"
+            )
+        else:
+            raise gr.Error(f"无法连接 HeyGem 服务器 ({server_url}): {e}")
+
+    # ── 1) 计算本地文件 hash ──
+    progress(0.02, desc="计算文件指纹...")
+    if detail_cb:
+        try: detail_cb(_dual_progress_html("准备上传", 2, "计算文件hash", 0, 0))
+        except Exception: pass
+
+    video_hash = _md5_of_local_file(video_path)
+    audio_hash = _md5_of_local_file(audio_path)
+    safe_print(f"[HEYGEM-ONLINE] video hash={video_hash}, audio hash={audio_hash}")
+
+    # ── 2) 检查服务器是否已有这些文件 ──
+    progress(0.03, desc="检查服务器文件...")
+    if detail_cb:
+        try: detail_cb(_dual_progress_html("检查文件", 3, "比对服务器", 0, 0))
+        except Exception: pass
+
+    try:
+        resp = _req.post(
+            f"{server_url}/api/heygem/check_files",
+            json={"files": [
+                {"hash": video_hash, "ext": video_ext},
+                {"hash": audio_hash, "ext": audio_ext},
+            ]},
+            headers=headers,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        check_data = resp.json().get("data", {})
+    except Exception as e:
+        safe_print(f"[HEYGEM-ONLINE] check_files 失败，将全量上传: {e}")
+        check_data = {}
+
+    video_exists = check_data.get(video_hash, False)
+    audio_exists = check_data.get(audio_hash, False)
+
+    # ── 3) 仅上传缺失的文件 ──
+    upload_items = []
+    if not video_exists:
+        upload_items.append(("video", video_path, video_hash, video_ext))
+    else:
+        safe_print(f"[HEYGEM-ONLINE] 视频文件已在服务器，跳过上传")
+    if not audio_exists:
+        upload_items.append(("audio", audio_path, audio_hash, audio_ext))
+    else:
+        safe_print(f"[HEYGEM-ONLINE] 音频文件已在服务器，跳过上传")
+
+    for i, (ftype, fpath, fhash, fext) in enumerate(upload_items):
+        pct = 4 + i * 3
+        progress(pct / 100, desc=f"上传{ftype}到服务器...")
+        if detail_cb:
+            try:
+                sz = os.path.getsize(fpath)
+                detail_cb(_dual_progress_html("上传文件", pct, f"{ftype} ({sz//1024}KB)", int(i / max(len(upload_items), 1) * 100), int(time.time() - t0)))
+            except Exception: pass
+
+        try:
+            with open(fpath, "rb") as f:
+                resp = _req.post(
+                    f"{server_url}/api/heygem/upload_file",
+                    files={"file": (os.path.basename(fpath), f)},
+                    data={"hash": fhash, "ext": fext},
+                    headers=headers,
+                    timeout=(30, 600),
+                )
+            resp.raise_for_status()
+            udata = resp.json()
+            if udata.get("code") != 0:
+                raise RuntimeError(udata.get("msg", "上传失败"))
+            safe_print(f"[HEYGEM-ONLINE] 上传完成: {ftype} -> {udata.get('data', {}).get('hash')}")
+        except _req.exceptions.RequestException as e:
+            raise gr.Error(f"上传{ftype}到服务器失败: {e}")
+
+    # ── 4) 通过 hash 提交合成任务 ──
+    progress(0.10, desc="提交合成任务...")
+    if detail_cb:
+        try: detail_cb(_dual_progress_html("提交任务", 10, "发送请求", 0, int(time.time() - t0)))
+        except Exception: pass
+
+    try:
+        resp = _req.post(
+            f"{server_url}/api/heygem/submit",
+            json={
+                "audio_hash": audio_hash,
+                "audio_ext": audio_ext,
+                "video_hash": video_hash,
+                "video_ext": video_ext,
+            },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise RuntimeError(data.get("msg", "提交失败"))
+        task_id = data["data"]["task_id"]
+        queue_info = data["data"].get("queue", {})
+        safe_print(f"[HEYGEM-ONLINE] 任务已提交: {task_id}, 队列: {queue_info}")
+    except _req.exceptions.RequestException as e:
+        raise gr.Error(f"提交合成任务失败: {e}")
+    except Exception as e:
+        raise gr.Error(f"提交合成任务失败: {e}")
+
+    # ── 5) 轮询进度 ──
+    progress(0.12, desc="等待服务器处理...")
+    poll_interval = 2
+    max_wait = 1800
+
+    while True:
+        elapsed = time.time() - t0
+        if elapsed > max_wait:
+            raise gr.Error(f"合成超时 ({int(elapsed)}s)，请检查服务器状态")
+
+        try:
+            resp = _req.get(
+                f"{server_url}/api/heygem/progress",
+                params={"task_id": task_id},
+                headers=headers,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            pdata = resp.json().get("data", {})
+        except Exception as e:
+            safe_print(f"[HEYGEM-ONLINE] 轮询异常: {e}")
+            time.sleep(poll_interval)
+            continue
+
+        status = pdata.get("status", "")
+        pct = pdata.get("progress", 0)
+        msg = pdata.get("message", "")
+        queue_pos = pdata.get("queue_position", 0)
+        el = int(elapsed)
+
+        if status == "queued":
+            desc = f"排队中 (第{queue_pos}位)..."
+            progress(0.12, desc=desc)
+            if detail_cb:
+                try: detail_cb(_dual_progress_html("排队等待", 12, f"队列位置 {queue_pos}", 0, el))
+                except Exception: pass
+
+        elif status in ("processing", "synthesizing", "encoding"):
+            safe_pct = max(12, min(95, pct))
+            grad_pct = 0.12 + (safe_pct - 12) * 0.01
+            progress(min(0.95, grad_pct), desc=f"{msg} ({safe_pct}%)")
+            if detail_cb:
+                try:
+                    cur_frame = pdata.get("current_frame", 0)
+                    total_frame = pdata.get("total_frames", 0)
+                    step_label = f"{cur_frame}/{total_frame} 帧" if total_frame else msg
+                    detail_cb(_dual_progress_html("在线合成", safe_pct, step_label, safe_pct, el))
+                except Exception: pass
+
+        elif status == "done":
+            safe_print(f"[HEYGEM-ONLINE] 合成完成，开始下载结果...")
+            progress(0.95, desc="下载合成结果...")
+            if detail_cb:
+                try: detail_cb(_dual_progress_html("下载结果", 95, "正在下载", 50, el))
+                except Exception: pass
+            break
+
+        elif status == "error":
+            err = pdata.get("error", "未知错误")
+            raise gr.Error(f"服务器合成失败: {err}")
+
+        time.sleep(poll_interval)
+
+    # ── 6) 下载结果 ──
+    try:
+        resp = _req.get(
+            f"{server_url}/api/heygem/download",
+            params={"task_id": task_id},
+            headers=headers,
+            timeout=(15, 600),
+            stream=True,
+        )
+        resp.raise_for_status()
+
+        with open(out, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=256 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        if not os.path.exists(out) or os.path.getsize(out) < 1024:
+            raise RuntimeError("下载的结果文件异常")
+
+        safe_print(f"[HEYGEM-ONLINE] 下载完成: {out} ({os.path.getsize(out)} bytes)")
+    except _req.exceptions.RequestException as e:
+        raise gr.Error(f"下载合成结果失败: {e}")
+
+    el = int(time.time() - t0)
+    if detail_cb:
+        try: detail_cb(_dual_progress_html("完成", 100, "全部完成", 100, el))
+        except Exception: pass
+    progress(1.0, desc="✅ 完成")
+    return out, "✅ 在线视频合成完成"
+
+
+def run_heygem_auto(video_path, audio_path, progress=gr.Progress(), detail_cb=None,
+                    output_path_override=None, steps=12, if_gfpgan=False,
+                    heygem_mode=None):
+    """根据 heygem_mode 参数或 HEYGEM_MODE 环境变量选择本地或在线合成"""
+    if heygem_mode is None:
+        mode = os.getenv("HEYGEM_MODE", "local").strip().lower()
+    else:
+        mode = str(heygem_mode).strip().lower()
+        # UI 传入的可能是中文
+        if "在线" in mode or "online" in mode:
+            mode = "online"
+        else:
+            mode = "local"
+    if mode == "online":
+        return run_heygem_online(video_path, audio_path, progress, detail_cb,
+                                output_path_override)
+    return run_heygem(video_path, audio_path, progress, detail_cb,
+                      output_path_override, steps, if_gfpgan)
+
 
 # ══════════════════════════════════════════════════════════════
 #  批量任务辅助函数
@@ -1575,6 +2389,11 @@ class TextExtractor:
                     msg_type = data.get("type", "")
                     if msg_type == "ack":
                         continue  # 跳过 ack，继续等待最终结果
+                    elif msg_type == "gpu_offline" or msg_type == "gpu.power.offline":
+                        return False, data.get("msg", "GPU服务器未上线，任务已排队，服务器启动后自动执行（约2分钟）")
+                    elif msg_type == "gpu.power.online":
+                        # 开机在线广播，不是本请求最终结果，继续等待业务结果
+                        continue
                     elif msg_type == "error":
                         return False, data.get("message", "请求失败")
                     elif msg_type == "kicked":
@@ -1943,20 +2762,37 @@ def build_ui():
                                 label="用于视频合成的音频",
                                 type="filepath", interactive=True)
 
-                            # ── 生成质量选择 ──
-                            gr.HTML('<div class="section-label">⚙️ 生成质量</div>')
-                            quality_preset = gr.Radio(
-                                label="速度 ↔ 质量",
-                                choices=list(QUALITY_PRESETS.keys()),
-                                value="⚖️ 标准",
+                            # ── 合成模式选择（本地版/在线版）──
+                            _default_heygem = os.getenv("HEYGEM_MODE", "local").strip().lower()
+                            _heygem_default_label = "🌐 在线版（服务器）" if _default_heygem == "online" else "💻 本地版"
+                            gr.HTML('<div class="section-label">🖥️ 合成模式</div>')
+                            heygem_mode_radio = gr.Radio(
+                                label="选择合成方式",
+                                choices=["💻 本地版", "🌐 在线版（服务器）"],
+                                value=_heygem_default_label,
                                 elem_classes="voice-style-radio")
                             gr.HTML(
                                 '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
-                                '⚡极快：6步，速度最快，适合预览<br>'
-                                '🚀快速：8步，速度与质量兼顾<br>'
-                                '⚖️标准：12步，默认推荐<br>'
-                                '✨高质量：20步，效果最佳但较慢</div>'
+                                '💻本地版：使用本机GPU合成，需要 heygem-win-50<br>'
+                                '🌐在线版：上传到Linux服务器合成，需配置 HEYGEM_SERVER_URL</div>'
                             )
+
+                            # ── 生成质量选择（仅本地版可见）──
+                            _show_quality = (_default_heygem != "online")
+                            with gr.Group(visible=_show_quality) as quality_group:
+                                gr.HTML('<div class="section-label">⚙️ 生成质量</div>')
+                                quality_preset = gr.Radio(
+                                    label="速度 ↔ 质量",
+                                    choices=list(QUALITY_PRESETS.keys()),
+                                    value="⚖️ 标准",
+                                    elem_classes="voice-style-radio")
+                                gr.HTML(
+                                    '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
+                                    '⚡极快：6步，速度最快，适合预览<br>'
+                                    '🚀快速：8步，速度与质量兼顾<br>'
+                                    '⚖️标准：12步，默认推荐<br>'
+                                    '✨高质量：20步，效果最佳但较慢</div>'
+                                )
 
                             ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
                             
@@ -2029,11 +2865,6 @@ def build_ui():
                                     '<span class="subtitle-panel-tip">✨ 支持关键词高亮</span>'
                                     '</div>'
                                 )
-                                # 片头开关
-                                intro_enable = gr.Checkbox(
-                                    label="🎬 启用人物片头（2秒抠图片头+标题）",
-                                    value=False,
-                                    elem_classes="kw-checkbox")
                                 # 基本设置：字体 字号 位置（始终可见）
                                 with gr.Row():
                                     _font_grouped = _sub.get_font_choices_grouped() if _LIBS_OK else [("🖥️ 系统字体（默认）", "系统字体"), ("【中文简体】思源黑体 Bold", "SourceHanSansCN-Bold")]
@@ -2566,7 +3397,7 @@ def build_ui():
                                     raise RuntimeError("专属视频不存在")
                             op = os.path.join(batch_dir, f"任务{idx}.mp4")
                             progress(0.3, desc=f"[{idx}/{total}] {tn} — 视频合成...")
-                            run_heygem(vp, ap, output_path_override=op, steps=12, if_gfpgan=False)
+                            run_heygem_auto(vp, ap, output_path_override=op, steps=12, if_gfpgan=False)
                             rt[i]["status"] = "✅ 完成"
                             yield _y(idx,"运行中",f"✅ {tn} 完成 → 任务{idx}.mp4")
                         except Exception as e:
@@ -2719,6 +3550,8 @@ def build_ui():
                                 # 字幕标题参数
                                 sub_title_text_val="",
                                 sub_title_text2_val="",
+                                # 片头参数
+                                intro_enable_val=None,
                                 # 画中画参数
                                 pip_enable_val=None,
                                 pip_mode_val=None,
@@ -2829,6 +3662,8 @@ def build_ui():
                     # 字幕标题
                     "sub_title_text": to_json_safe(sub_title_text_val),
                     "sub_title_text2": to_json_safe(sub_title_text2_val),
+                    # 片头参数
+                    "intro_enable": bool(intro_enable_val) if intro_enable_val is not None else False,
                     # 发布参数
                     "douyin_title": to_json_safe(douyin_title_val),
                     "douyin_topics": to_json_safe(douyin_topics_val),
@@ -2895,17 +3730,17 @@ def build_ui():
             try:
                 if not record_idx_str:
                     # 未选择记录,只更新提示,其他组件不动
-                    return [gr.update()] * 33 + [_hint_html("warning", "请先选择一条记录")]
+                    return [gr.update()] * 34 + [_hint_html("warning", "请先选择一条记录")]
 
                 try:
                     record_idx = int(record_idx_str)
                 except (ValueError, TypeError):
-                    return [gr.update()] * 32 + [_hint_html("error", "无效的记录索引")]
+                    return [gr.update()] * 34 + [_hint_html("error", "无效的记录索引")]
 
                 records = _load_workspace_records()
 
                 if record_idx < 0 or record_idx >= len(records):
-                    return [gr.update()] * 32 + [_hint_html("error", "记录不存在")]
+                    return [gr.update()] * 34 + [_hint_html("error", "记录不存在")]
                 
                 rec = records[record_idx]
                 
@@ -3038,7 +3873,7 @@ def build_ui():
                 
                 return result
             except Exception as e:
-                return [gr.update()] * 33 + [_hint_html("error", f"恢复失败: {str(e)}")]
+                return [gr.update()] * 34 + [_hint_html("error", f"恢复失败: {str(e)}")]
 
         # TTS — 后台线程执行，流式返回进度，UI 不卡
         def tts_wrap(text, pa, voice_name, spd, tp, tk, temp, nb, rp, mmt,
@@ -3049,11 +3884,10 @@ def build_ui():
             if not text or not text.strip():
                 raise gr.Error("请在文案内容中输入文本")
             
-            # 检查音色是否为在线版
-            is_online = False
-            if _LIBS_OK and voice_name and not voice_name.startswith("（"):
-                is_online = _vc.is_online(voice_name)
-            
+            # 在线/本地以当前 TTS_MODE 为准
+            tts_mode = os.getenv('TTS_MODE', 'local')
+            is_online = (tts_mode == 'online')
+
             # 在线版不需要 prompt_audio，本地版需要
             if not is_online and pa is None:
                 raise gr.Error("请先选择音色或上传参考音频")
@@ -3224,9 +4058,9 @@ def build_ui():
                         return gr.update(), _hint_html("warning", "请输入画中画提示词（或点击「AI改写+标题标签」自动生成）")
                     progress(0.02, desc="🎬 在线生成画中画...")
                     # 按换行拆分为多个提示词
-                    prompts_list = [p.strip() for p in pip_prompt_val.strip().split('\n') if p.strip()]
+                    prompts_list = [_pip_force_chinese_person(p.strip()) for p in pip_prompt_val.strip().split('\n') if p.strip()]
                     if not prompts_list:
-                        prompts_list = [pip_prompt_val.strip()]
+                        prompts_list = [_pip_force_chinese_person(pip_prompt_val.strip())]
 
                     # 使用 TextExtractor 连接生成画中画
                     extractor = get_text_extractor()
@@ -3961,10 +4795,9 @@ def build_ui():
                          title_text="", title_text2="", title_duration=5,
                          title_color="#FFD700", title_outline_color="#000000",
                          title_margin_top=200, title_font_size=68,
-                         intro_enable=False,
                          progress=gr.Progress()):
             if not _LIBS_OK:
-                return gr.update(visible=False), _hint_html("error","扩展模块未加载")
+                return "", _hint_html("error","扩展模块未加载")
 
             # 解析视频路径（gr.Video 在不同 Gradio 版本返回格式不同）
             if isinstance(vid, dict):
@@ -3972,7 +4805,7 @@ def build_ui():
             else:
                 vid_path = str(vid) if vid else ""
             if not vid_path or not os.path.exists(vid_path):
-                return gr.update(visible=False), _hint_html("warning","请先完成视频合成再添加字幕")
+                return "", _hint_html("warning","请先完成视频合成再添加字幕")
 
             aud_path = str(aud) if (aud and isinstance(aud, str)) else None
 
@@ -4007,15 +4840,24 @@ def build_ui():
                     title_outline_color=title_outline_color or "#000000",
                     title_margin_top=int(title_margin_top or 200),
                     title_font_size=int(title_font_size or 68),
-                    intro_enable=bool(intro_enable),
+                    intro_enable=False,
                     progress_cb=_cb
                 )
                 return (out,
                         _hint_html("ok", "字幕视频已生成: " + os.path.basename(out)))
             except Exception as e:
-                traceback.print_exc()
+                # 安全打印异常堆栈
+                try:
+                    traceback.print_exc()
+                except:
+                    print(f"[ERROR] Exception: {repr(e)}")
+                # 安全处理异常消息，避免编码错误
+                try:
+                    error_msg = str(e)[:300]
+                except:
+                    error_msg = repr(e)[:300]
                 return ("",
-                        _hint_html("error", f"字幕生成失败: {str(e)[:300]}"))
+                        _hint_html("error", f"字幕生成失败: {error_msg}"))
 
         # 字幕按钮点击 - 直接在完成后保存
         def subtitle_and_save(out_vid, aud_for_ls, sub_txt, sub_fnt, sub_sz, sub_ps, sub_ps_off,
@@ -4023,8 +4865,6 @@ def build_ui():
                              sub_bg_col, sub_bg_op, sub_kw_en, sub_kw_txt, sub_hi_sc,
                              # 标题参数
                              title_txt, title_txt2, title_fs, title_dur, title_col, title_out_col, title_mt,
-                             # 片头参数
-                             intro_en,
                              # 保存需要的其他参数
                              inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
                              avatar_sel, out_aud,
@@ -4048,7 +4888,6 @@ def build_ui():
                 title_outline_color=title_out_col or "#000000",
                 title_margin_top=int(title_mt or 200),
                 title_font_size=int(title_fs or 68),
-                intro_enable=bool(intro_en),
                 progress=progress
             )
 
@@ -4064,7 +4903,8 @@ def build_ui():
                 sub_kw_en, sub_hi_sc, sub_kw_txt,
                 douyin_title_val=douyin_title_val, douyin_topics_val=douyin_topics_val,
                 sub_title_text_val=title_txt,
-                sub_title_text2_val=title_txt2
+                sub_title_text2_val=title_txt2,
+                intro_enable_val=False
             )
 
             # 返回字幕视频，需要设置 visible=True 和 show_download_button=True
@@ -4086,8 +4926,6 @@ def build_ui():
                 # 标题参数
                 sub_title_text, sub_title_text2, sub_title_font_size, sub_title_duration, sub_title_color,
                 sub_title_outline_color, sub_title_margin_top,
-                # 片头参数
-                intro_enable,
                 # 保存需要的参数
                 input_text, prompt_audio, voice_select, audio_mode, direct_audio_upload,
                 avatar_select, output_audio,
@@ -4874,12 +5712,20 @@ def build_ui():
         )
 
         # 视频合成
-        def ls_wrap(avatar_name, auto_a, input_txt, quality_name="⚖️ 标准", progress=gr.Progress()):
+        def ls_wrap(avatar_name, auto_a, input_txt, quality_name="⚖️ 标准",
+                    heygem_mode_val="💻 本地版", progress=gr.Progress()):
             # 把数字人名转换成文件路径
             video = None
             if _LIBS_OK and avatar_name and not avatar_name.startswith("（"):
                 video = _av.get_path(avatar_name)
+            if not video:
+                if not avatar_name or avatar_name.startswith("（"):
+                    raise gr.Error("请先在步骤3左侧选择一个数字人")
+                else:
+                    raise gr.Error(f"数字人 '{avatar_name}' 的视频文件不存在，请重新添加该数字人")
             audio  = auto_a
+            if not audio or not os.path.exists(str(audio)):
+                raise gr.Error("音频文件不存在，请先在步骤1生成或上传音频，再点击合成")
             preset = QUALITY_PRESETS.get(quality_name, QUALITY_PRESETS["⚖️ 标准"])
             q      = _queue.Queue()
             result = {"out": None, "err": None}
@@ -4889,9 +5735,10 @@ def build_ui():
 
             def _run():
                 try:
-                    out, _ = run_heygem(video, audio, progress, detail_cb=_detail_cb,
-                                        steps=preset.get("inference_steps", 12),
-                                        if_gfpgan=False)
+                    out, _ = run_heygem_auto(video, audio, progress, detail_cb=_detail_cb,
+                                             steps=preset.get("inference_steps", 12),
+                                             if_gfpgan=False,
+                                             heygem_mode=heygem_mode_val)
                     result["out"] = out
                 except Exception as e:
                     result["err"] = e
@@ -4951,7 +5798,7 @@ def build_ui():
             yield out, gr.update(value=_dual_progress_html("✅ 完成", 100, "全部完成", 100, int(time.time() - _t0)), visible=True)
 
         # 视频合成按钮点击 - 直接在完成后保存
-        def video_and_save(avatar_sel, aud_for_ls, inp_txt, quality_name,
+        def video_and_save(avatar_sel, aud_for_ls, inp_txt, quality_name, heygem_mode_val,
                           pip_enabled, pip_mode_val, pip_prompt_val,
                           pip_local_val, pip_interval_val, pip_clip_dur_val,
                           # 保存需要的其他参数
@@ -4966,7 +5813,8 @@ def build_ui():
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
             final_result = None
-            for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, quality_name=quality_name, progress=progress):
+            for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, quality_name=quality_name,
+                                 heygem_mode_val=heygem_mode_val, progress=progress):
                 yield result + (gr.update(), gr.update())
                 final_result = result
             
@@ -4990,6 +5838,14 @@ def build_ui():
 
                 if should_process_pip:
                     try:
+                        # 等待视频文件完全写入（最多等待5秒）
+                        import time as _wait_time
+                        for _ in range(10):
+                            if os.path.exists(str(video_path)) and os.path.getsize(str(video_path)) > 1024:
+                                _wait_time.sleep(0.5)  # 再等待0.5秒确保文件完全写入
+                                break
+                            _wait_time.sleep(0.5)
+
                         yield gr.update(), gr.update(
                             value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;'
                                   'background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;">'
@@ -5005,9 +5861,9 @@ def build_ui():
                         pip_result = ""
                         if is_online:
                             if pip_prompt_val and pip_prompt_val.strip():
-                                prompts_list = [p.strip() for p in pip_prompt_val.strip().split('\n') if p.strip()]
+                                prompts_list = [_pip_force_chinese_person(p.strip()) for p in pip_prompt_val.strip().split('\n') if p.strip()]
                                 if not prompts_list:
-                                    prompts_list = [pip_prompt_val.strip()]
+                                    prompts_list = [_pip_force_chinese_person(pip_prompt_val.strip())]
 
                                 # 使用 TextExtractor 连接生成画中画
                                 extractor = get_text_extractor()
@@ -5089,7 +5945,7 @@ def build_ui():
         ls_btn.click(
             video_and_save,
             inputs=[
-                avatar_select, audio_for_ls, input_text, quality_preset,
+                avatar_select, audio_for_ls, input_text, quality_preset, heygem_mode_radio,
                 pip_enable, pip_mode, pip_prompt, pip_local_files,
                 pip_interval, pip_clip_dur,
                 # 保存需要的参数
@@ -5104,6 +5960,12 @@ def build_ui():
             ],
             outputs=[output_video, ls_detail_html,
                     workspace_record_hint, workspace_record_dropdown])
+
+        # 合成模式切换：在线版隐藏质量选项
+        heygem_mode_radio.change(
+            lambda m: gr.update(visible=("本地" in m)),
+            inputs=[heygem_mode_radio],
+            outputs=[quality_group])
 
         # ══════════════════════════════════════════════════════════
         #  工作台记录事件绑定
@@ -5431,7 +6293,7 @@ def _license_gate():
         default_text = "用户协议文件缺失，请将 user_agreement.md 放在程序同目录下。"
         try:
             candidates = [
-                os.path.join(BASE_DIR, "user_agreement.md"),
+                os.path.join(BASE_DIR, "docs", "user_agreement.md"),
                 os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt"),
             ]
             for p in candidates:
@@ -5445,14 +6307,18 @@ def _license_gate():
         return default_text
 
     def _load_privacy_text():
-        default_text = "隐私协议文件缺失，请将 privacy_policy.md 放在程序同目录下。"
+        default_text = "隐私协议文件缺失，请将 privacy_policy_total.md 或 privacy_policy.md 放在程序同目录下。"
         try:
-            p = os.path.join(BASE_DIR, "privacy_policy.md")
-            if os.path.exists(p):
-                with open(p, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
-                    if content:
-                        return content
+            candidates = [
+                os.path.join(BASE_DIR, "docs", "privacy_policy_total.md"),
+                os.path.join(BASE_DIR, "docs", "privacy_policy.md"),
+            ]
+            for p in candidates:
+                if p and os.path.exists(p):
+                    with open(p, "r", encoding="utf-8") as f:
+                        content = f.read().strip()
+                        if content:
+                            return content
         except Exception as e:
             return default_text + "\n\n读取错误：%s" % (e,)
         return default_text
@@ -5551,7 +6417,7 @@ def _license_gate():
         tk.Label(footer, text="提示：勾选协议仅表示您已知悉并承诺合规使用，不代表平台审核通过或账号安全无风险。",
                  font=("Microsoft YaHei", 8), bg="#f1f5f9", fg="#64748b", wraplength=760, justify="left").pack(anchor="w", pady=(0, 10))
         tk.Button(
-            footer, text="关闭", command=agreement_window.destroy,
+            footer, text="同意", command=agreement_window.destroy,
             font=("Microsoft YaHei", 10, "bold"), bg="#4f46e5", fg="white",
             activebackground="#4338ca", activeforeground="white",
             relief="flat", cursor="hand2", bd=0, padx=20, pady=8

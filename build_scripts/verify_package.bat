@@ -22,7 +22,7 @@ if exist "%PYTHON_EXE%" (
 
 echo.
 echo [检查2] 验证核心Python文件...
-set CORE_FILES=app_backend.py unified_app.py lib_avatar.py lib_voice.py lib_subtitle.py lib_license.py lib_douyin_publish.py lib_meta_store.py ws_worker.py
+set CORE_FILES=app_backend.py unified_app.py lib_avatar.py lib_voice.py lib_subtitle.py lib_license.py lib_douyin_publish.py lib_meta_store.py
 for %%F in (%CORE_FILES%) do (
     if exist "%%F" (
         echo   ✓ %%F

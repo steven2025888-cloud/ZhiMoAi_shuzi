@@ -1,0 +1,82 @@
+{
+	"pages": [
+		{
+			"path": "pages/login/login",
+			"style": {
+				"navigationBarTitleText": "织梦AI",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/index/index",
+			"style": {
+				"navigationBarTitleText": "首页",
+				"navigationBarBackgroundColor": "#6366f1",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/tts/tts",
+			"style": {
+				"navigationBarTitleText": "语音合成",
+				"navigationBarBackgroundColor": "#6366f1",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/synthesis/synthesis",
+			"style": {
+				"navigationBarTitleText": "视频合成",
+				"navigationBarBackgroundColor": "#6366f1",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/mine/mine",
+			"style": {
+				"navigationBarTitleText": "我的",
+				"navigationBarBackgroundColor": "#6366f1",
+				"navigationBarTextStyle": "white"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "white",
+		"navigationBarTitleText": "织梦AI",
+		"navigationBarBackgroundColor": "#6366f1",
+		"backgroundColor": "#f1f4fa"
+	},
+	"tabBar": {
+		"color": "#94a3b8",
+		"selectedColor": "#6366f1",
+		"borderStyle": "white",
+		"backgroundColor": "#ffffff",
+		"list": [
+			{
+				"pagePath": "pages/index/index",
+				"text": "首页",
+				"iconPath": "static/tab-home.png",
+				"selectedIconPath": "static/tab-home-active.png"
+			},
+			{
+				"pagePath": "pages/tts/tts",
+				"text": "语音",
+				"iconPath": "static/tab-voice.png",
+				"selectedIconPath": "static/tab-voice-active.png"
+			},
+			{
+				"pagePath": "pages/synthesis/synthesis",
+				"text": "合成",
+				"iconPath": "static/tab-video.png",
+				"selectedIconPath": "static/tab-video-active.png"
+			},
+			{
+				"pagePath": "pages/mine/mine",
+				"text": "我的",
+				"iconPath": "static/tab-mine.png",
+				"selectedIconPath": "static/tab-mine-active.png"
+			}
+		]
+	},
+	"uniIdRouter": {}
+}

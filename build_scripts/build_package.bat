@@ -58,7 +58,6 @@ if not exist "lib_subtitle.pyc" set MISSING=1
 if not exist "lib_license.pyc" set MISSING=1
 if not exist "lib_douyin_publish.pyc" set MISSING=1
 if not exist "lib_meta_store.pyc" set MISSING=1
-if not exist "ws_worker.pyc" set MISSING=1
 
 if %MISSING%==1 (
     echo   ✗ 错误：部分.pyc文件缺失

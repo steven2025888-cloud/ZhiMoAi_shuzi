@@ -23,7 +23,6 @@ PYTHON_FILES = [
     "lib_license.py",
     "lib_douyin_publish.py",
     "lib_meta_store.py",
-    "ws_worker.py",
 ]
 
 # 备份目录

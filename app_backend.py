@@ -17,7 +17,15 @@ except ImportError:
 
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 INDEXTTS_DIR = os.path.join(BASE_DIR, "_internal_tts")
-PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")
+
+# ── 将 libs/ 加入模块搜索路径（lib_*.py 已移动到 libs/）──
+_LIBS_DIR = os.path.join(BASE_DIR, "libs")
+if _LIBS_DIR not in sys.path:
+    sys.path.insert(0, _LIBS_DIR)
+
+PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "docs", "user_agreement.md")
+if not os.path.exists(PLATFORM_AI_AGREEMENT_FILE):
+    PLATFORM_AI_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")
 
 
 def has_local_tts_content():
@@ -50,6 +58,7 @@ def has_local_tts_content():
     except Exception as e:
         print(f"[TTS检测] 检查 _internal_tts 内容失败: {e}")
         return False
+
 LEGACY_PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")
 
@@ -444,9 +453,13 @@ def show_update_dialog(update_info, is_force):
         
         url = update_info["url"]
         # 从 URL 中提取文件名
-        filename = url.split('/')[-1].split('?')[0]
-        if not filename:
-            filename = f"ZhiMoAI_Update_{update_info['version']}.exe"
+        filename = "download"
+        if '/file=' in update_info["url"]:
+            raw = update_info["url"].split('/file=', 1)[1]
+            raw = urllib.parse.unquote(raw)
+            filename = os.path.basename(raw)
+        
+        ext = os.path.splitext(filename)[1].lower() or '.mp4'
         
         # 下载到用户临时目录
         download_dir = os.path.join(tempfile.gettempdir(), "ZhiMoAI_Updates")
@@ -494,17 +507,6 @@ def show_update_dialog(update_info, is_force):
         
         try:
             dialog.after(0, _on_complete)
-        except Exception:
-            pass
-    
-    def _safe_close_dialog():
-        """安全关闭对话框"""
-        try:
-            dialog.quit()
-        except Exception:
-            pass
-        try:
-            dialog.destroy()
         except Exception:
             pass
     
@@ -1128,7 +1130,7 @@ def _render_md_to_tk(text_widget, md_text):
 
 def _load_platform_ai_agreement_text():
     """加载用户协议原始 markdown 文本"""
-    agreement_file = os.path.join(BASE_DIR, "user_agreement.md")
+    agreement_file = os.path.join(BASE_DIR, "docs", "user_agreement.md")
     if os.path.exists(agreement_file):
         try:
             with open(agreement_file, "r", encoding="utf-8") as f:
@@ -1142,16 +1144,20 @@ def _load_platform_ai_agreement_text():
 
 def _load_privacy_policy_text():
     """加载隐私协议原始 markdown 文本"""
-    privacy_file = os.path.join(BASE_DIR, "privacy_policy.md")
-    if os.path.exists(privacy_file):
-        try:
-            with open(privacy_file, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if content:
-                    return content
-        except Exception as e:
-            print(f"[WARNING] 读取隐私协议文件失败: {e}")
-    return "隐私协议文件 (privacy_policy.md) 未找到，请联系技术支持。"
+    candidates = [
+        os.path.join(BASE_DIR, "docs", "privacy_policy_total.md"),
+        os.path.join(BASE_DIR, "docs", "privacy_policy.md"),
+    ]
+    for privacy_file in candidates:
+        if os.path.exists(privacy_file):
+            try:
+                with open(privacy_file, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content:
+                        return content
+            except Exception as e:
+                print(f"[WARNING] 读取隐私协议文件失败: {e}")
+    return "隐私协议文件 (privacy_policy_total.md / privacy_policy.md) 未找到，请联系技术支持。"
 
 # ══════════════════════════════════════════════════════════════
 #  错误弹窗
@@ -1411,6 +1417,7 @@ def _splash_default_logo(parent):
     c = tk.Canvas(parent, width=52, height=52, bg="#ffffff", highlightthickness=0)
     c.pack(side="left", padx=(0, 14))
     c.create_oval(2, 2, 50, 50, fill="#6366f1", outline="#8b5cf6", width=2)
+    c.create_oval(2, 2, 50, 50, fill="", outline="#a78bfa", width=1, dash=(5, 3))
     c.create_text(26, 26, text="织", font=("Microsoft YaHei", 18, "bold"), fill="#ffffff")
 
 
@@ -1444,18 +1451,31 @@ if __name__ == "__main__":
     _lock_socket = None
     try:
         _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            _lock_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except Exception:
+            pass
         _lock_socket.bind(('127.0.0.1', 17870))
         print("[LOCK] 单实例锁已获取")
-    except OSError:
+    except OSError as e:
         print("[LOCK] 程序已在运行，激活现有窗口...")
+        ok_activate = False
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.0)
             s.connect(('127.0.0.1', 17871))
             s.send(b'ACTIVATE')
             s.close()
+            ok_activate = True
         except Exception:
-            pass
-        sys.exit(0)
+            ok_activate = False
+
+        if ok_activate:
+            sys.exit(0)
+
+        # 激活失败：可能是 TIME_WAIT/残留端口占用 或旧进程异常退出。
+        # 为避免双击无反应，这里继续启动。
+        print(f"[LOCK] 激活失败，继续启动: {e}")
 
     # ── 检查更新 ─────────────────────────────────────────
     if ENV_CONFIG.get('CHECK_UPDATE', True):
@@ -1890,7 +1910,7 @@ if __name__ == "__main__":
                 # 关闭按钮
                 btn_frame = tk.Frame(agreement_window)
                 btn_frame.pack(pady=10)
-                tk.Button(btn_frame, text="关闭", command=agreement_window.destroy,
+                tk.Button(btn_frame, text="同意", command=agreement_window.destroy,
                          font=("Microsoft YaHei", 10), bg="#6366f1", fg="white",
                          relief="flat", padx=20, pady=5).pack()
             

@@ -79,7 +79,6 @@ Source: "{#SourceRoot}\lib_bilibili_publish.pyc"; DestDir: "{app}"; Flags: ignor
 Source: "{#SourceRoot}\lib_shipinhao_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\lib_xiaohongshu_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\lib_meta_store.pyc";       DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\ws_worker.pyc";            DestDir: "{app}"; Flags: ignoreversion
 
 ; 注意：不打包任何.py源文件，只打包.pyc加密文件
 

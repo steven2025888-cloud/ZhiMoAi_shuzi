@@ -1,0 +1,61 @@
+{
+  "id": "zhimo-ui",
+  "displayName": "织梦UI",
+  "version": "1.0.2",
+  "description": "织梦 UI 是一套 Uni-App / Vue 3 的现代化跨端 UI 组件库，专注于 一致性设计、实用性组件和真实业务遵循移动端主流交互规范。  适用于 App、H5、小程序 等多端场景。",
+  "keywords": [
+    "uni-app",
+    "vue3",
+    "ui",
+    "component",
+    "zhimo"
+],
+  "repository": "",
+  "engines": {
+    "HBuilderX": "^3.0.0",
+    "uni-app": "^3.6.16",
+    "uni-app-x": ""
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "app": {},
+      "h5": {},
+      "mp-weixin": {},
+      "mp-alipay": {},
+      "mp-baidu": {},
+      "mp-toutiao": {},
+      "mp-qq": {},
+      "mp-kuaishou": {},
+      "cloud": {
+        "tcb": "√",
+        "aliyun": "√",
+        "alipay": "√"
+      }
+    }
+  },
+  "dcloudext": {
+    "type": "component-vue",
+    "sale": {
+      "regular": {
+        "price": "0.00"
+      },
+      "sourcecode": {
+        "price": "0.00"
+      }
+    },
+    "contact": {
+      "qq": "1444877090"
+    },
+    "declaration": {
+      "ads": "无",
+      "data": "插件不采集任何数据",
+      "permissions": "无"
+    },
+    "npmurl": "",
+    "darkmode": "√",
+    "i18n": "x",
+    "widescreen": "√"
+  }
+}
