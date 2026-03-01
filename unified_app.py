@@ -5946,9 +5946,9 @@ def build_ui():
                                 video_path = pip_result
                             else:
                                 safe_print("[PIP] 画中画处理未产出结果")
-                    except Exception as e:
-                        safe_print(f"[PIP] 画中画处理失败（不影响视频输出）: {e}")
-                        traceback.print_exc()
+                        except Exception as e:
+                            safe_print(f"[PIP] 画中画处理失败（不影响视频输出）: {e}")
+                            traceback.print_exc()
 
                 # 调试输出
                 debug_file = os.path.join(OUTPUT_DIR, "debug_video_save.txt")
