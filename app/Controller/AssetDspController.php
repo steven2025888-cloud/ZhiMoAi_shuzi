@@ -9,7 +9,7 @@ use App\WebSocket\DspTaskDispatcher;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\Redis\Redis;
-
+use function Hyperf\Support\env;
 /**
  * 资产管理（手机/PC端通过 PHP API 端操作）
  *

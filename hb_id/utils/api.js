@@ -7,7 +7,8 @@ import { getLicenseKey, getMachineCode, getServerUrl, getSynthUrl, getSynthSecre
 
 // ── PHP 服务器请求 ──
 function request(path, options = {}) {
-  const baseUrl = getServerUrl()
+  // 修复：移除 baseUrl 末尾的斜杠，避免双斜杠问题
+  const baseUrl = getServerUrl().replace(/\/+$/, '')
   const url = `${baseUrl}${path}`
   const licenseKey = getLicenseKey()
   const machineCode = getMachineCode()
@@ -39,11 +40,35 @@ function request(path, options = {}) {
   })
 }
 
+// ── 下载文件（带卡密鉴权，用于 uni.downloadFile） ──
+export function downloadFileWithAuth(url, timeout = 60000) {
+  const licenseKey = getLicenseKey()
+  const machineCode = getMachineCode()
+
+  return new Promise((resolve, reject) => {
+    uni.downloadFile({
+      url,
+      timeout,
+      header: {
+        'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
+        'X-Machine-Code': machineCode,
+        'X-Device-Type': 'mobile',
+      },
+      success: (res) => {
+        if (res.statusCode === 200 && res.tempFilePath) resolve(res)
+        else reject(new Error('下载失败'))
+      },
+      fail: reject,
+    })
+  })
+}
+
 // ── 合成服务器请求 (run_server.py) ──
 function synthRequest(path, options = {}) {
+  // 修复：移除 baseUrl 末尾的斜杠，避免双斜杠问题
   const baseUrl = getSynthUrl()
   if (!baseUrl) return Promise.reject(new Error('合成服务器未配置，请重新登录'))
-  const url = `${baseUrl}${path}`
+  const url = `${baseUrl.replace(/\/+$/, '')}${path}`
   const secret = getSynthSecret()
 
   return new Promise((resolve, reject) => {
@@ -94,6 +119,40 @@ export function login(licenseKey) {
   })
 }
 
+// ── 语音模型 ──
+export function listVoiceModels() {
+  return request('/api/dsp/voice/model/list', { method: 'GET' })
+}
+
+export function uploadVoiceModel(filePath, name) {
+  const baseUrl = getServerUrl()
+  const licenseKey = getLicenseKey()
+  const machineCode = getMachineCode()
+
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: `${baseUrl}/api/dsp/voice/model/upload`,
+      filePath,
+      name: 'file',
+      formData: { name },
+      header: {
+        'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
+        'X-Machine-Code': machineCode,
+        'X-Device-Type': 'mobile',
+      },
+      timeout: 600000,
+      success(res) {
+        if (res.statusCode === 200) {
+          resolve(typeof res.data === 'string' ? JSON.parse(res.data) : res.data)
+        } else {
+          reject(new Error(`Upload HTTP ${res.statusCode}`))
+        }
+      },
+      fail: reject,
+    })
+  })
+}
+
 // ── TTS 相关 ──
 export function ttsCreate(text, modelId) {
   return request('/api/dsp/voice/tts', {
@@ -110,8 +169,26 @@ export function ttsResult(taskId) {
 }
 
 export function ttsDownloadUrl(voiceUrl) {
-  const baseUrl = getServerUrl()
+  const baseUrl = getServerUrl().replace(/\/+$/, '')
   return `${baseUrl}/api/dsp/voice/tts/download?voice_url=${encodeURIComponent(voiceUrl)}`
+}
+
+// 查询合成记录列表
+export function ttsHistory(page = 1, limit = 20) {
+  return request('/api/dsp/voice/tts/history', {
+    method: 'GET',
+    data: { page, limit },
+    timeout: 30000,
+  })
+}
+
+// 查询合成记录详情
+export function ttsHistoryDetail(id) {
+  return request('/api/dsp/voice/tts/history/detail', {
+    method: 'GET',
+    data: { id },
+    timeout: 30000,
+  })
 }
 
 // ── 资产管理 ──

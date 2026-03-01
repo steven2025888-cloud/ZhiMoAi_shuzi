@@ -109,13 +109,18 @@ Router::addGroup('/api/dsp/voice', function () {
     Router::post('/model/delete', [App\Controller\VoiceModelDspController::class, 'delete']);
 
     Router::post('/tts', [App\Controller\VoiceTtsDspController::class, 'create']);
-    
-    Router::get('/tts/result', [App\Controller\VoiceTtsDspController::class, 'result']);
-    
+
+    // 修复：同时支持 GET 和 POST 方法
+    Router::addRoute(['GET', 'POST'], '/tts/result', [App\Controller\VoiceTtsDspController::class, 'result']);
+
+    // 合成记录
+    Router::get('/tts/history', [App\Controller\VoiceTtsDspController::class, 'history']);
+    Router::get('/tts/history/detail', [App\Controller\VoiceTtsDspController::class, 'historyDetail']);
+
     Router::get('/tts/play', [App\Controller\VoiceTtsDspController::class, 'play']);
 
     Router::get('/tts/download', [App\Controller\VoiceTtsDspController::class, 'download']);
-    
+
 }, ['middleware' => [App\Middleware\LicenseCardAuthDspMiddleware::class]]);
 
 Router::addGroup('/api/heygem/task', function () {

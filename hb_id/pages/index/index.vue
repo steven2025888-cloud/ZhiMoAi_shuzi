@@ -24,6 +24,14 @@
         <text class="func-desc">数字人驱动</text>
       </view>
 
+      <view class="func-card" @tap="goTTSHistory">
+        <view class="func-icon" style="background: linear-gradient(135deg, #ec4899, #db2777);">
+          <text class="icon-text">📝</text>
+        </view>
+        <text class="func-name">合成记录</text>
+        <text class="func-desc">历史记录</text>
+      </view>
+
       <view class="func-card" @tap="goUploadVoice">
         <view class="func-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);">
           <text class="icon-text">🎵</text>
@@ -109,6 +117,7 @@ async function loadAssetCounts() {
 
 function goTTS() { uni.switchTab({ url: '/pages/tts/tts' }) }
 function goSynthesis() { uni.switchTab({ url: '/pages/synthesis/synthesis' }) }
+function goTTSHistory() { uni.navigateTo({ url: '/pages/tts/history' }) }
 function goMine() { uni.switchTab({ url: '/pages/mine/mine' }) }
 
 function goUploadVoice() {

@@ -134,13 +134,19 @@ public function download(RequestInterface $request)
 
     /**
      * 查询合成结果
+     * 支持 GET 和 POST 方法
      */
     public function result(RequestInterface $request)
     {
         try {
-            $taskId = $request->input('taskId');
+            // 同时支持 GET 查询参数和 POST body 参数
+            $taskId = $request->query('taskId')
+                   ?: $request->query('task_id')
+                   ?: $request->input('taskId')
+                   ?: $request->input('task_id');
+
             if (!$taskId) {
-                throw new \RuntimeException('缺少 taskId');
+                throw new \RuntimeException('缺少 taskId 参数');
             }
 
             $resp = $this->lip->ttsResult($taskId);
@@ -149,6 +155,118 @@ public function download(RequestInterface $request)
             }
 
             return ApiResponse::ok($resp['data']);
+        } catch (\Throwable $e) {
+            return ApiResponse::fail($e->getMessage());
+        }
+    }
+
+    /**
+     * 查询合成记录列表
+     * GET /api/dsp/voice/tts/history?page=1&limit=20
+     */
+    public function history(RequestInterface $request)
+    {
+        try {
+            $licenseKey = (string)$this->request->getAttribute('license_key');
+            $page = max(1, (int)$request->query('page', 1));
+            $limit = min(100, max(1, (int)$request->query('limit', 20)));
+            $offset = ($page - 1) * $limit;
+
+            // 查询总数
+            $total = Db::table('tts_logs')
+                ->where('license_key', $licenseKey)
+                ->count();
+
+            // 查询记录列表
+            $records = Db::table('tts_logs')
+                ->where('license_key', $licenseKey)
+                ->orderBy('id', 'desc')
+                ->offset($offset)
+                ->limit($limit)
+                ->get()
+                ->toArray();
+
+            // 格式化数据
+            $list = [];
+            foreach ($records as $record) {
+                $voiceUrl = $record->voice_url;
+
+                // 如果 voice_url 为空但有 task_id，尝试查询最新状态
+                if (empty($voiceUrl) && !empty($record->task_id) && $record->status == 1) {
+                    try {
+                        $resp = $this->lip->ttsResult($record->task_id);
+                        if (isset($resp['code']) && (int)$resp['code'] === 0) {
+                            $data = $resp['data'] ?? [];
+                            $voiceUrl = $data['voiceUrl'] ?? $data['voice_url'] ?? '';
+
+                            // 更新数据库
+                            if (!empty($voiceUrl)) {
+                                Db::table('tts_logs')
+                                    ->where('id', $record->id)
+                                    ->update(['voice_url' => $voiceUrl]);
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        // 查询失败，使用原值
+                    }
+                }
+
+                $list[] = [
+                    'id'         => $record->id,
+                    'model_id'   => $record->model_id,
+                    'text_len'   => $record->text_len,
+                    'task_id'    => $record->task_id,
+                    'voice_url'  => $voiceUrl ?: '',
+                    'status'     => $record->status, // 1=成功, 2=失败
+                    'error_msg'  => $record->error_msg,
+                    'created_at' => $record->created_at,
+                ];
+            }
+
+            return ApiResponse::ok([
+                'list'  => $list,
+                'total' => $total,
+                'page'  => $page,
+                'limit' => $limit,
+            ]);
+        } catch (\Throwable $e) {
+            return ApiResponse::fail($e->getMessage());
+        }
+    }
+
+    /**
+     * 查询单条合成记录详情
+     * GET /api/dsp/voice/tts/history/:id
+     */
+    public function historyDetail(RequestInterface $request)
+    {
+        try {
+            $licenseKey = (string)$this->request->getAttribute('license_key');
+            $id = (int)$request->query('id', 0);
+
+            if ($id <= 0) {
+                throw new \RuntimeException('缺少记录 ID');
+            }
+
+            $record = Db::table('tts_logs')
+                ->where('id', $id)
+                ->where('license_key', $licenseKey)
+                ->first();
+
+            if (!$record) {
+                throw new \RuntimeException('记录不存在');
+            }
+
+            return ApiResponse::ok([
+                'id'         => $record->id,
+                'model_id'   => $record->model_id,
+                'text_len'   => $record->text_len,
+                'task_id'    => $record->task_id,
+                'voice_url'  => $record->voice_url,
+                'status'     => $record->status,
+                'error_msg'  => $record->error_msg,
+                'created_at' => $record->created_at,
+            ]);
         } catch (\Throwable $e) {
             return ApiResponse::fail($e->getMessage());
         }

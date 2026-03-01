@@ -106,7 +106,7 @@
         <text class="card-title">合成完成</text>
       </view>
 
-      <video class="result-video" :src="resultVideoUrl" controls :autoplay="false" />
+      <video class="result-video" :src="resultLocalPath || resultVideoUrl" controls :autoplay="false" />
 
       <view class="result-actions">
         <z-button type="success" text="💾 保存到相册" round @click="saveVideo" />
@@ -146,7 +146,8 @@ import { isLoggedIn } from '@/utils/storage.js'
 import {
   listAssets, uploadAsset,
   heygemHealth, heygemSubmitByHash, heygemProgress, heygemDownloadUrl,
-  videoEditUpload, videoEditDownloadUrl
+  videoEditUpload, videoEditDownloadUrl,
+  downloadFileWithAuth
 } from '@/utils/api.js'
 
 const ttsAudioUrl = ref('')
@@ -190,8 +191,42 @@ onMounted(() => {
   const txt = uni.getStorageSync('tts_result_text')
   if (url) { ttsAudioUrl.value = url; ttsText.value = txt || '' }
 
+  // 恢复上次视频合成结果（刷新不丢失）
+  const lastVideoUrl = uni.getStorageSync('heygem_last_video_url')
+  const lastVideoLocal = uni.getStorageSync('heygem_last_video_local_path')
+  if (lastVideoUrl && !resultVideoUrl.value) resultVideoUrl.value = lastVideoUrl
+  if (lastVideoLocal && !resultLocalPath.value) resultLocalPath.value = lastVideoLocal
+
   loadAvatars()
 })
+
+async function downloadAndCacheVideo(url) {
+  uni.showLoading({ title: '准备视频...' })
+  try {
+    const dl = await new Promise((resolve, reject) => {
+      uni.downloadFile({
+        url,
+        timeout: 180000,
+        success: (r) => (r.statusCode === 200 && r.tempFilePath) ? resolve(r) : reject(new Error('下载失败')),
+        fail: reject,
+      })
+    })
+
+    const saved = await new Promise((resolve, reject) => {
+      uni.saveFile({
+        tempFilePath: dl.tempFilePath,
+        success: resolve,
+        fail: reject,
+      })
+    })
+
+    resultLocalPath.value = saved.savedFilePath
+    uni.setStorageSync('heygem_last_video_local_path', saved.savedFilePath)
+    return saved.savedFilePath
+  } finally {
+    uni.hideLoading()
+  }
+}
 
 function clearTTSAudio() {
   ttsAudioUrl.value = ''; ttsText.value = ''
@@ -351,13 +386,7 @@ async function startSynthesis() {
     } else if (ttsAudioUrl.value) {
       // TTS音频已在服务器，需要下载后上传
       progressMsg.value = '准备TTS音频...'
-      const dlRes = await new Promise((resolve, reject) => {
-        uni.downloadFile({
-          url: ttsAudioUrl.value, timeout: 60000,
-          success: (r) => r.statusCode === 200 ? resolve(r) : reject(new Error('下载失败')),
-          fail: reject,
-        })
-      })
+      const dlRes = await downloadFileWithAuth(ttsAudioUrl.value, 60000)
       const upRes = await uploadAsset(dlRes.tempFilePath, 'voice', 'tts_audio_' + Date.now())
       if (upRes.code !== 0) throw new Error('TTS音频上传失败')
       audioH = upRes.data.file_hash
@@ -386,6 +415,13 @@ async function startSynthesis() {
 
         if (d.status === 'done') {
           resultVideoUrl.value = heygemDownloadUrl(taskId)
+          uni.setStorageSync('heygem_last_video_url', resultVideoUrl.value)
+          // 播放更稳：先下载成“本地文件”再播放
+          try {
+            await downloadAndCacheVideo(resultVideoUrl.value)
+          } catch (e) {
+            console.error('缓存视频失败:', e)
+          }
           done = true
         } else if (d.status === 'error') {
           throw new Error(d.error || '合成失败')
@@ -410,21 +446,24 @@ async function startSynthesis() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 function saveVideo() {
-  if (!resultVideoUrl.value) return
-  uni.downloadFile({
-    url: resultVideoUrl.value,
-    success(res) {
-      if (res.statusCode === 200) {
-        resultLocalPath.value = res.tempFilePath
-        uni.saveVideoToPhotosAlbum({
-          filePath: res.tempFilePath,
-          success() { uni.showToast({ title: '已保存到相册', icon: 'success' }) },
-          fail() { uni.showToast({ title: '保存失败', icon: 'none' }) },
-        })
-      }
-    },
-    fail() { uni.showToast({ title: '下载失败', icon: 'none' }) },
-  })
+  if (!resultVideoUrl.value && !resultLocalPath.value) return
+
+  const doSave = (path) => {
+    uni.saveVideoToPhotosAlbum({
+      filePath: path,
+      success() { uni.showToast({ title: '已保存到相册', icon: 'success' }) },
+      fail() { uni.showToast({ title: '保存失败', icon: 'none' }) },
+    })
+  }
+
+  if (resultLocalPath.value) {
+    doSave(resultLocalPath.value)
+    return
+  }
+
+  downloadAndCacheVideo(resultVideoUrl.value)
+    .then((p) => doSave(p))
+    .catch(() => uni.showToast({ title: '下载失败', icon: 'none' }))
 }
 
 function choosePipVideo() {
@@ -462,17 +501,7 @@ async function doEdit(editType) {
     // 先下载合成结果到本地（如果还没下载）
     let videoPath = resultLocalPath.value
     if (!videoPath) {
-      uni.showLoading({ title: '准备视频...' })
-      const dl = await new Promise((resolve, reject) => {
-        uni.downloadFile({
-          url: resultVideoUrl.value, timeout: 120000,
-          success: (r) => r.statusCode === 200 ? resolve(r) : reject(new Error('下载失败')),
-          fail: reject,
-        })
-      })
-      videoPath = dl.tempFilePath
-      resultLocalPath.value = videoPath
-      uni.hideLoading()
+      videoPath = await downloadAndCacheVideo(resultVideoUrl.value)
     }
 
     const formData = {}

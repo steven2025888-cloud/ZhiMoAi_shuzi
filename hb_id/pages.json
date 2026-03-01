@@ -24,6 +24,14 @@
 			}
 		},
 		{
+			"path": "pages/tts/history",
+			"style": {
+				"navigationBarTitleText": "合成记录",
+				"navigationBarBackgroundColor": "#6366f1",
+				"navigationBarTextStyle": "white"
+			}
+		},
+		{
 			"path": "pages/synthesis/synthesis",
 			"style": {
 				"navigationBarTitleText": "视频合成",

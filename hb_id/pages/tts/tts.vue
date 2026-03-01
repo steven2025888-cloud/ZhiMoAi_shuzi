@@ -23,7 +23,8 @@
       <view class="card-header">
         <text class="card-icon">🎙️</text>
         <text class="card-title">选择音色</text>
-        <z-button size="xs" type="light" text="刷新" @click="loadVoices" />
+        <z-button size="xs" type="light" text="📝 记录" @click="goToHistory" />
+        <z-button size="xs" type="light" text="刷新" @click="loadVoices" style="margin-left: 12rpx;" />
         <z-button size="xs" type="primary" text="+ 上传" @click="uploadVoice" style="margin-left: 12rpx;" />
       </view>
 
@@ -31,7 +32,7 @@
         <text class="loading-text">加载音色列表...</text>
       </view>
 
-      <scroll-view v-else scroll-x class="voice-scroll">
+      <scroll-view v-else-if="voices.length > 0" scroll-x class="voice-scroll" :show-scrollbar="false">
         <view class="voice-list">
           <view
             v-for="voice in voices"
@@ -41,7 +42,7 @@
             @tap="selectedVoice = voice"
           >
             <text class="voice-name">{{ voice.name }}</text>
-            <text class="voice-tag">剩{{ voice.days_left }}天</text>
+            <text v-if="voice.is_default" class="voice-tag">默认</text>
           </view>
         </view>
       </scroll-view>
@@ -96,8 +97,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { ttsCreate, ttsResult, ttsDownloadUrl, listAssets, uploadAsset } from '@/utils/api.js'
+import { ref, computed, onMounted } from 'vue'
+import {
+  listVoiceModels,
+  ttsCreate, ttsResult, ttsDownloadUrl,
+  downloadFileWithAuth,
+} from '@/utils/api.js'
 import { isLoggedIn } from '@/utils/storage.js'
 
 const inputText = ref('')
@@ -109,6 +114,7 @@ const synthesizing = ref(false)
 const progressMsg = ref('')
 const resultUrl = ref('')
 const resultTaskId = ref('')
+const resultTempAudioPath = ref('')
 const playing = ref(false)
 
 let audioCtx = null
@@ -118,13 +124,20 @@ onMounted(() => {
     uni.redirectTo({ url: '/pages/login/login' })
     return
   }
+  // 恢复上次合成结果（刷新页面不丢失，直到新合成覆盖）
+  const lastUrl = uni.getStorageSync('tts_last_result_url')
+  const lastTaskId = uni.getStorageSync('tts_last_result_task_id')
+  if (lastUrl && !resultUrl.value) {
+    resultUrl.value = lastUrl
+    resultTaskId.value = lastTaskId || ''
+  }
   loadVoices()
 })
 
 async function loadVoices() {
   voicesLoading.value = true
   try {
-    const res = await listAssets('voice')
+    const res = await listVoiceModels()
     if (res.code === 0 && Array.isArray(res.data)) {
       voices.value = res.data
       if (voices.value.length > 0 && !selectedVoice.value) {
@@ -153,7 +166,7 @@ function uploadVoice() {
 
       uploading.value = true
       try {
-        const upRes = await uploadAsset(filePath, 'voice', name)
+        const upRes = await uploadVoiceModel(filePath, name)
         if (upRes.code === 0) {
           uni.showToast({ title: '上传成功', icon: 'success' })
           await loadVoices()
@@ -181,7 +194,7 @@ function uploadVoice() {
 
       uploading.value = true
       try {
-        const upRes = await uploadAsset(file.path, 'voice', name)
+        const upRes = await uploadVoiceModel(file.path, name)
         if (upRes.code === 0) {
           uni.showToast({ title: '上传成功', icon: 'success' })
           await loadVoices()
@@ -210,7 +223,7 @@ async function startSynthesize() {
 
   synthesizing.value = true
   progressMsg.value = '提交合成任务...'
-  resultUrl.value = ''
+  // 不清空已有结果：刷新/等待期间保持显示，直到新结果覆盖
 
   try {
     const createRes = await ttsCreate(inputText.value.trim(), selectedVoice.value.id)
@@ -224,6 +237,9 @@ async function startSynthesize() {
     if (voiceUrl) {
       resultUrl.value = ttsDownloadUrl(voiceUrl)
       resultTaskId.value = taskId
+      resultTempAudioPath.value = ''
+      uni.setStorageSync('tts_last_result_url', resultUrl.value)
+      uni.setStorageSync('tts_last_result_task_id', resultTaskId.value)
       progressMsg.value = ''
       uni.showToast({ title: '合成完成', icon: 'success' })
       return
@@ -246,6 +262,9 @@ async function startSynthesize() {
           const url = d.voiceUrl || d.voice_url
           resultUrl.value = ttsDownloadUrl(url)
           resultTaskId.value = taskId
+          resultTempAudioPath.value = ''
+          uni.setStorageSync('tts_last_result_url', resultUrl.value)
+          uni.setStorageSync('tts_last_result_task_id', resultTaskId.value)
           progressMsg.value = ''
           uni.showToast({ title: '合成完成', icon: 'success' })
           return
@@ -268,15 +287,40 @@ async function startSynthesize() {
 
 function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
 
+function goToHistory() {
+  uni.navigateTo({ url: '/pages/tts/history' })
+}
+
 function playAudio() {
   if (!resultUrl.value) return
-  stopAudio()
-  audioCtx = uni.createInnerAudioContext()
-  audioCtx.src = resultUrl.value
-  audioCtx.onPlay(() => { playing.value = true })
-  audioCtx.onEnded(() => { playing.value = false })
-  audioCtx.onError(() => { playing.value = false })
-  audioCtx.play()
+
+  const startPlay = (src) => {
+    stopAudio()
+    audioCtx = uni.createInnerAudioContext()
+    audioCtx.src = src
+    audioCtx.onPlay(() => { playing.value = true })
+    audioCtx.onEnded(() => { playing.value = false })
+    audioCtx.onError(() => { playing.value = false })
+    audioCtx.play()
+  }
+
+  // 直链在部分端上会无声：先下载到本地临时文件再播放
+  if (resultTempAudioPath.value) {
+    startPlay(resultTempAudioPath.value)
+    return
+  }
+
+  uni.showLoading({ title: '下载音频...' })
+  downloadFileWithAuth(resultUrl.value, 60000)
+    .then((res) => {
+      uni.hideLoading()
+      resultTempAudioPath.value = res.tempFilePath
+      startPlay(res.tempFilePath)
+    })
+    .catch(() => {
+      uni.hideLoading()
+      uni.showToast({ title: '下载失败', icon: 'none' })
+    })
 }
 
 function stopAudio() {
@@ -286,19 +330,19 @@ function stopAudio() {
 
 function downloadAudio() {
   if (!resultUrl.value) return
-  uni.downloadFile({
-    url: resultUrl.value,
-    success(res) {
-      if (res.statusCode === 200) {
-        uni.saveFile({
-          tempFilePath: res.tempFilePath,
-          success() { uni.showToast({ title: '已保存', icon: 'success' }) },
-          fail() { uni.showToast({ title: '保存失败', icon: 'none' }) },
-        })
-      }
-    },
-    fail() { uni.showToast({ title: '下载失败', icon: 'none' }) },
-  })
+  uni.showLoading({ title: '下载中...' })
+  downloadFileWithAuth(resultUrl.value, 60000)
+    .then((res) => {
+      uni.saveFile({
+        tempFilePath: res.tempFilePath,
+        success() { uni.hideLoading(); uni.showToast({ title: '保存成功', icon: 'success' }) },
+        fail() { uni.hideLoading(); uni.showToast({ title: '保存失败', icon: 'none' }) },
+      })
+    })
+    .catch(() => {
+      uni.hideLoading()
+      uni.showToast({ title: '下载失败', icon: 'none' })
+    })
 }
 
 function useForVideo() {

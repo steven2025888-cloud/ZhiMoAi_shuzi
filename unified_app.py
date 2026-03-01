@@ -1859,26 +1859,57 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
     video_ext = os.path.splitext(video_path)[1] or ".mp4"
     audio_ext = os.path.splitext(audio_path)[1] or ".wav"
 
-    # ── 0) 健康检查 ──
-    try:
-        resp = _req.get(f"{server_url}/api/heygem/health", headers=headers, timeout=10)
-        resp.raise_for_status()
-        hdata = resp.json()
-        if hdata.get("code") != 0 or not hdata.get("initialized"):
-            raise gr.Error("HeyGem 服务器尚未初始化完成，请稍后再试")
-        safe_print(f"[HEYGEM-ONLINE] 服务器健康: {hdata}")
-    except _req.exceptions.RequestException as e:
-        # GPU 服务器离线时，提示用户等待而不是直接报错
-        error_msg = str(e)
-        if "Connection" in error_msg or "timeout" in error_msg.lower() or "Max retries" in error_msg:
-            raise gr.Error(
-                "⏳ GPU 服务器未上线，任务已排队\n\n"
-                "服务器启动中，请等待约 2 分钟后重试\n"
-                "或稍后在「历史记录」中查看结果\n\n"
-                f"提示：如需立即处理，请联系管理员启动 GPU 服务器"
-            )
-        else:
-            raise gr.Error(f"无法连接 HeyGem 服务器 ({server_url}): {e}")
+    # ── 0) 健康检查（GPU离线时等待上线）──
+    health_check_interval = 5  # 每5秒检查一次
+    health_check_timeout = 1800  # 最多等待30分钟
+    health_start_time = time.time()
+    gpu_was_offline = False
+
+    while True:
+        try:
+            resp = _req.get(f"{server_url}/api/heygem/health", headers=headers, timeout=10)
+            resp.raise_for_status()
+            hdata = resp.json()
+            if hdata.get("code") != 0 or not hdata.get("initialized"):
+                # 服务器在线但未初始化，继续等待
+                elapsed = int(time.time() - health_start_time)
+                progress(0.01, desc=f"GPU 服务器初始化中... ({elapsed}s)")
+                if detail_cb:
+                    try: detail_cb(_dual_progress_html("等待GPU", 1, f"服务器初始化中 ({elapsed}s)", 0, elapsed))
+                    except Exception: pass
+                time.sleep(health_check_interval)
+                continue
+
+            # 健康检查成功
+            safe_print(f"[HEYGEM-ONLINE] 服务器健康: {hdata}")
+            if gpu_was_offline:
+                safe_print(f"[HEYGEM-ONLINE] GPU 服务器已上线，继续处理任务")
+            break
+
+        except _req.exceptions.RequestException as e:
+            # GPU 服务器离线，等待上线
+            error_msg = str(e)
+            elapsed = int(time.time() - health_start_time)
+
+            # 检查是否超时
+            if elapsed > health_check_timeout:
+                raise gr.Error(f"GPU 服务器等待超时 ({elapsed}s)，请检查服务器状态或联系管理员")
+
+            # 显示等待进度
+            if "Connection" in error_msg or "timeout" in error_msg.lower() or "Max retries" in error_msg:
+                gpu_was_offline = True
+                wait_minutes = elapsed // 60
+                wait_seconds = elapsed % 60
+                time_str = f"{wait_minutes}分{wait_seconds}秒" if wait_minutes > 0 else f"{wait_seconds}秒"
+                progress(0.01, desc=f"等待 GPU 服务器上线... (已等待 {time_str})")
+                if detail_cb:
+                    try: detail_cb(_dual_progress_html("等待GPU", 1, f"服务器启动中 (已等待 {time_str})", 0, elapsed))
+                    except Exception: pass
+                time.sleep(health_check_interval)
+                continue
+            else:
+                # 其他类型的错误，直接报错
+                raise gr.Error(f"无法连接 HeyGem 服务器 ({server_url}): {e}")
 
     # ── 1) 计算本地文件 hash ──
     progress(0.02, desc="计算文件指纹...")
@@ -5812,11 +5843,15 @@ def build_ui():
                           douyin_title_val, douyin_topics_val,
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
-            final_result = None
-            for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, quality_name=quality_name,
-                                 heygem_mode_val=heygem_mode_val, progress=progress):
-                yield result + (gr.update(), gr.update())
-                final_result = result
+            # 开始时禁用按钮，防止重复点击
+            yield gr.update(), gr.update(), gr.update(), gr.update(interactive=False)
+
+            try:
+                final_result = None
+                for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, quality_name=quality_name,
+                                     heygem_mode_val=heygem_mode_val, progress=progress):
+                    yield result + (gr.update(), gr.update(interactive=False))
+                    final_result = result
             
             if final_result:
                 video_path, ls_detail = final_result
@@ -5855,7 +5890,7 @@ def build_ui():
                                   '<span style="font-size:13px;color:#0369a1;font-weight:600;">'
                                   '🖼 正在处理画中画替换…</span>'
                                   '<style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>',
-                            visible=True), gr.update(), gr.update()
+                            visible=True), gr.update(), gr.update(), gr.update(interactive=False)
 
                         is_online = ("在线" in str(pip_mode_val))
                         pip_result = ""
@@ -5938,9 +5973,15 @@ def build_ui():
                     pip_prompt_val=pip_prompt_val
                 )
                 
-                # 最后一次 yield，包含保存结果
+                # 最后一次 yield，包含保存结果并重新启用按钮
                 # 注意：第一个值需要是视频路径，Gradio 会自动处理
-                yield video_path, ls_detail, hint_msg, dropdown_update
+                yield video_path, ls_detail, hint_msg, dropdown_update, gr.update(interactive=True)
+            except Exception as e:
+                # 发生错误时也要重新启用按钮
+                raise
+            finally:
+                # 确保按钮总是被重新启用
+                pass
         
         ls_btn.click(
             video_and_save,
@@ -5959,7 +6000,7 @@ def build_ui():
                 douyin_title, douyin_topics
             ],
             outputs=[output_video, ls_detail_html,
-                    workspace_record_hint, workspace_record_dropdown])
+                    workspace_record_hint, workspace_record_dropdown, ls_btn])
 
         # 合成模式切换：在线版隐藏质量选项
         heygem_mode_radio.change(
