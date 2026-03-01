@@ -5853,44 +5853,44 @@ def build_ui():
                     yield result + (gr.update(), gr.update(interactive=False))
                     final_result = result
             
-            if final_result:
-                video_path, ls_detail = final_result
+                if final_result:
+                    video_path, ls_detail = final_result
 
-                # ── 画中画处理 ──
-                # 只有在勾选画中画且有有效提示词或素材时才处理
-                should_process_pip = False
-                if pip_enabled and video_path and os.path.exists(str(video_path)):
-                    is_online = ("在线" in str(pip_mode_val))
-                    if is_online:
-                        # 在线模式：需要有提示词
-                        should_process_pip = pip_prompt_val and pip_prompt_val.strip()
-                    else:
-                        # 本地模式：需要有上传的素材
-                        if isinstance(pip_local_val, list):
-                            should_process_pip = any(hasattr(f, 'name') or os.path.exists(str(f)) for f in pip_local_val)
-                        elif pip_local_val:
-                            should_process_pip = True
+                    # ── 画中画处理 ──
+                    # 只有在勾选画中画且有有效提示词或素材时才处理
+                    should_process_pip = False
+                    if pip_enabled and video_path and os.path.exists(str(video_path)):
+                        is_online = ("在线" in str(pip_mode_val))
+                        if is_online:
+                            # 在线模式：需要有提示词
+                            should_process_pip = pip_prompt_val and pip_prompt_val.strip()
+                        else:
+                            # 本地模式：需要有上传的素材
+                            if isinstance(pip_local_val, list):
+                                should_process_pip = any(hasattr(f, 'name') or os.path.exists(str(f)) for f in pip_local_val)
+                            elif pip_local_val:
+                                should_process_pip = True
 
-                if should_process_pip:
-                    try:
-                        # 等待视频文件完全写入（最多等待5秒）
-                        import time as _wait_time
-                        for _ in range(10):
-                            if os.path.exists(str(video_path)) and os.path.getsize(str(video_path)) > 1024:
-                                _wait_time.sleep(0.5)  # 再等待0.5秒确保文件完全写入
-                                break
-                            _wait_time.sleep(0.5)
+                    if should_process_pip:
+                        try:
+                            # 等待视频文件完全写入（最多等待5秒）
+                            import time as _wait_time
+                            for _ in range(10):
+                                if os.path.exists(str(video_path)) and os.path.getsize(str(video_path)) > 1024:
+                                    _wait_time.sleep(0.5)  # 再等待0.5秒确保文件完全写入
+                                    break
+                                _wait_time.sleep(0.5)
 
-                        yield gr.update(), gr.update(
-                            value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;'
-                                  'background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;">'
-                                  '<div style="width:18px;height:18px;border:2.5px solid #bae6fd;'
-                                  'border-top-color:#0ea5e9;border-radius:50%;'
-                                  'animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div>'
-                                  '<span style="font-size:13px;color:#0369a1;font-weight:600;">'
-                                  '🖼 正在处理画中画替换…</span>'
-                                  '<style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>',
-                            visible=True), gr.update(), gr.update(), gr.update(interactive=False)
+                            yield gr.update(), gr.update(
+                                value='<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;'
+                                      'background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;">'
+                                      '<div style="width:18px;height:18px;border:2.5px solid #bae6fd;'
+                                      'border-top-color:#0ea5e9;border-radius:50%;'
+                                      'animation:zdai-spin .7s linear infinite;flex-shrink:0;"></div>'
+                                      '<span style="font-size:13px;color:#0369a1;font-weight:600;">'
+                                      '🖼 正在处理画中画替换…</span>'
+                                      '<style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>',
+                                visible=True), gr.update(), gr.update(), gr.update(interactive=False)
 
                         is_online = ("在线" in str(pip_mode_val))
                         pip_result = ""
