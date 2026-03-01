@@ -1903,23 +1903,34 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                     }))
                     safe_print(f"[WS] 已发送 GPU 状态查询")
 
-                    # 等待响应（最多等 120 秒，期间也监听 gpu.power.online）
+                    # 等待响应（最多等 600 秒 = 10分钟，足够 GPU 开机）
                     _boot_sent = False
-                    _deadline = asyncio.get_event_loop().time() + 120
-                    while asyncio.get_event_loop().time() < _deadline:
+                    _last_ping = time.time()
+                    _loop = asyncio.get_event_loop()
+                    _deadline = _loop.time() + 600
+                    while _loop.time() < _deadline:
                         try:
-                            raw = await asyncio.wait_for(ws.recv(), timeout=3)
+                            raw = await asyncio.wait_for(ws.recv(), timeout=5)
                             data = json.loads(raw)
                             msg_type = data.get("type", "")
 
+                            if msg_type == "pong":
+                                continue
+
                             if msg_type == "gpu.status.response":
-                                st = data.get("status", "unknown")
-                                safe_print(f"[WS] GPU 状态: {st}")
+                                st = str(data.get("status", "unknown")).strip().lower()
+                                state_raw = str(data.get("State", data.get("state", ""))).strip().lower()
+                                # 兼容服务端 status 与云厂商 State 字段
+                                if st in ("online",):
+                                    st = "running"
+                                if state_raw == "initializing":
+                                    st = "starting"
+                                safe_print(f"[WS] GPU 状态: {st} (State={state_raw or 'N/A'})")
                                 _gpu_ws_status["status"] = st
                                 if st == "running":
                                     _gpu_ws_status["online_event"].set()
                                     return
-                                elif st in ("stopped", "unknown") and not _boot_sent:
+                                elif st == "stopped" and not _boot_sent:
                                     # GPU 离线，立即发送开机请求
                                     await ws.send(json.dumps({
                                         "type": "gpu.power.boot",
@@ -1929,6 +1940,9 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                                     }))
                                     _boot_sent = True
                                     safe_print("[WS] GPU 离线，已发送开机请求")
+                                elif st in ("starting", "stopping", "unknown"):
+                                    # 启动中/未知状态先等待下一次状态回报，避免误触发重复开机
+                                    pass
 
                             elif msg_type in ("gpu.power.online", "gpu_online"):
                                 safe_print("[WS] ✓ 收到 GPU 上线通知!")
@@ -1945,13 +1959,22 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                                 else:
                                     safe_print(f"[WS] GPU 开机结果: {data.get('msg', '')}")
 
+                            elif msg_type == "registered":
+                                safe_print(f"[WS] 已注册: {data}")
+
                         except asyncio.TimeoutError:
-                            # 没收到消息，继续等
                             if not _boot_sent:
                                 break  # 没发过 boot 且超时，退出让 health check 接管
-                            continue
                         except Exception:
                             continue
+
+                        # 每 25 秒发一次心跳，保持 WS 连接不断
+                        if time.time() - _last_ping > 25:
+                            try:
+                                await ws.send(json.dumps({"type": "ping"}))
+                                _last_ping = time.time()
+                            except Exception:
+                                break
 
             except Exception as e:
                 safe_print(f"[WS] GPU 查询/开机异常: {e}")
@@ -1972,9 +1995,10 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
     gpu_was_offline = False
 
     while True:
-        # 如果 WS 已经确认 GPU 在线，先快速验证一下 health 再继续
+        # 如果 WS 已经确认 GPU 在线，直接跳过等待，立刻提交任务
         if _gpu_ws_status["online_event"].is_set():
-            safe_print("[HEYGEM-ONLINE] WS 报告 GPU 已上线，验证 health...")
+            safe_print("[HEYGEM-ONLINE] WS 确认 GPU 在线，直接提交任务")
+            break
 
         try:
             resp = _req.get(f"{server_url}/api/heygem/health", headers=headers, timeout=10)
@@ -1983,9 +2007,6 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
             if hdata.get("code") != 0 or not hdata.get("initialized"):
                 elapsed = int(time.time() - health_start_time)
                 progress(0.01, desc=f"GPU 服务器初始化中... ({elapsed}s)")
-                if detail_cb:
-                    try: detail_cb(_dual_progress_html("等待GPU", 1, f"服务器初始化中 ({elapsed}s)", 0, elapsed))
-                    except Exception: pass
                 time.sleep(health_check_interval)
                 continue
 
@@ -2007,9 +2028,6 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                 wait_seconds = elapsed % 60
                 time_str = f"{wait_minutes}分{wait_seconds}秒" if wait_minutes > 0 else f"{wait_seconds}秒"
                 progress(0.01, desc=f"等待 GPU 服务器上线... (已等待 {time_str})")
-                if detail_cb:
-                    try: detail_cb(_dual_progress_html("等待GPU", 1, f"服务器启动中 (已等待 {time_str})", 0, elapsed))
-                    except Exception: pass
                 time.sleep(health_check_interval)
                 continue
             else:
@@ -2225,8 +2243,8 @@ def run_heygem_auto(video_path, audio_path, progress=gr.Progress(), detail_cb=No
         else:
             mode = "local"
     if mode == "online":
-        return run_heygem_online(video_path, audio_path, progress, detail_cb,
-                                output_path_override)
+        return run_heygem_online(video_path, audio_path, progress, detail_cb=None,
+                                output_path_override=output_path_override)
     return run_heygem(video_path, audio_path, progress, detail_cb,
                       output_path_override, steps, if_gfpgan)
 

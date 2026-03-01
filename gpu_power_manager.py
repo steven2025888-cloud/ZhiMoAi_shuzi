@@ -247,7 +247,13 @@ class GPUPowerManager:
                 self._api_params["ready"] = True
 
                 state = inst.get("State", "unknown")
-                state_map = {"Running": "running", "Stopped": "stopped", "Starting": "starting", "Stopping": "stopping"}
+                state_map = {
+                    "Running": "running",
+                    "Stopped": "stopped",
+                    "Starting": "starting",
+                    "Initializing": "starting",
+                    "Stopping": "stopping",
+                }
                 self.gpu_status = state_map.get(state, "unknown")
 
                 print(f"[API] ✓ 已拦截实例信息: UHostId={inst.get('UHostId')}, State={state} → gpu_status={self.gpu_status}")
@@ -339,7 +345,13 @@ class GPUPowerManager:
         self._api_params["ready"] = True
 
         state = inst.get("State", "unknown")
-        state_map = {"Running": "running", "Stopped": "stopped", "Starting": "starting", "Stopping": "stopping"}
+        state_map = {
+            "Running": "running",
+            "Stopped": "stopped",
+            "Starting": "starting",
+            "Initializing": "starting",
+            "Stopping": "stopping",
+        }
         status = state_map.get(state, "unknown")
         self.gpu_status = status
         return status
@@ -867,6 +879,12 @@ class GPUPowerManager:
                                         trigger=msg_type,
                                         request_id=data.get("request_id"),
                                     )
+
+                                # 监听 GPU 任务活跃通知（run_server.py 有任务在处理）
+                                elif msg_type == "gpu.task.active":
+                                    self.has_pending_task = True
+                                    self.last_task_time = datetime.now()
+                                    print(f"[WS] ✓ GPU 有活跃任务: task_id={data.get('task_id','')}, task_type={data.get('task_type','')}")
 
                                 # 监听 GPU 状态查询请求
                                 elif msg_type == "gpu.status.query":

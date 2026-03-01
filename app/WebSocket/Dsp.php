@@ -388,6 +388,20 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             return;
         }
 
+        // ── GPU 任务活跃通知（worker 发来 → 转发给 gpu_monitor）─────────
+        if ($type === 'gpu.task.active') {
+            if (!$this->redis->sIsMember(self::KEY_WORKERS, (string)$fd)) {
+                return;
+            }
+            $this->_notifyGpuMonitors($server, [
+                'type' => 'gpu.task.active',
+                'task_id' => $data['task_id'] ?? '',
+                'task_type' => $data['task_type'] ?? '',
+                'ts' => $data['ts'] ?? time(),
+            ]);
+            return;
+        }
+
         // ── GPU 开机请求（PC端发起）──────────────────────────────────────
         if ($type === 'gpu.power.boot') {
             echo "[WS] 收到 GPU 开机请求: fd={$fd}\n";
@@ -417,12 +431,15 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
         // ── GPU 状态响应（gpu_monitor 返回 → 转发给请求方客户端）──────────
         if ($type === 'gpu.status.response' && $this->redis->sIsMember(self::KEY_GPU_MONITORS, (string)$fd)) {
             $requestId = $data['request_id'] ?? '';
-            $status = $data['status'] ?? 'unknown';
+            $status = strtolower((string)($data['status'] ?? 'unknown'));
             $state = (string)($data['State'] ?? $data['state'] ?? '');
 
             // 兼容云厂商状态字段：State=Initializing 视为启动中
             if ($state !== '' && strcasecmp($state, 'Initializing') === 0) {
                 $status = 'starting';
+            }
+            if ($status === 'online') {
+                $status = 'running';
             }
             echo "[WS] GPU 状态响应: status={$status}, request_id={$requestId}\n";
             // 广播给所有客户端（让所有在线客户端都知道当前状态）
