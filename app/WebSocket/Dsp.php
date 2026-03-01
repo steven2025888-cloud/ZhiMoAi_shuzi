@@ -362,21 +362,29 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             return;
         }
 
-        // ── 新协议兼容：电源在线消息（比如外部开机系统回调） ───────────
+        // ── 电源在线消息（worker 或 gpu_monitor 均可发送）───────────
         if ($type === 'gpu.power.online') {
-            if (!$this->redis->sIsMember(self::KEY_WORKERS, (string)$fd)) {
-                echo "[WS] gpu.power.online 忽略: fd={$fd} 不是 worker\n";
+            $isWorker = $this->redis->sIsMember(self::KEY_WORKERS, (string)$fd);
+            $isGpuMonitor = $this->redis->sIsMember(self::KEY_GPU_MONITORS, (string)$fd);
+            if (!$isWorker && !$isGpuMonitor) {
+                echo "[WS] gpu.power.online 忽略: fd={$fd} 不是 worker 或 gpu_monitor\n";
                 return;
             }
+
+            $from = $isWorker ? 'worker' : 'gpu_monitor';
+            echo "[WS] gpu.power.online 来自 {$from}: fd={$fd}\n";
 
             // 广播在线通知（老协议 + 新协议）
             $this->_broadcastGpuOnline($server, [
                 'status' => 'online',
-                'from'   => 'gpu.power.online',
+                'from'   => $from,
+                'request_id' => $data['request_id'] ?? '',
             ]);
 
-            // 兼容批量派发协议：把 pending 队列打包后推给 worker
-            $this->_flushPendingTasks($server, $fd);
+            // Worker 上线时，把 pending 队列打包后推给 worker
+            if ($isWorker) {
+                $this->_flushPendingTasks($server, $fd);
+            }
             return;
         }
 
@@ -393,6 +401,41 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             ]);
             return;
         }
+
+        // ── GPU 状态查询（PC端发起 → 转发给 gpu_monitor）─────────────────
+        if ($type === 'gpu.status.query') {
+            echo "[WS] 收到 GPU 状态查询: fd={$fd}\n";
+            $this->_notifyGpuMonitors($server, [
+                'type' => 'gpu.status.query',
+                'source' => 'client',
+                'sender_fd' => $fd,
+                'request_id' => $data['request_id'] ?? uniqid('sq_'),
+            ]);
+            return;
+        }
+
+        // ── GPU 状态响应（gpu_monitor 返回 → 转发给请求方客户端）──────────
+        if ($type === 'gpu.status.response' && $this->redis->sIsMember(self::KEY_GPU_MONITORS, (string)$fd)) {
+            $requestId = $data['request_id'] ?? '';
+            $status = $data['status'] ?? 'unknown';
+            $state = (string)($data['State'] ?? $data['state'] ?? '');
+
+            // 兼容云厂商状态字段：State=Initializing 视为启动中
+            if ($state !== '' && strcasecmp($state, 'Initializing') === 0) {
+                $status = 'starting';
+            }
+            echo "[WS] GPU 状态响应: status={$status}, request_id={$requestId}\n";
+            // 广播给所有客户端（让所有在线客户端都知道当前状态）
+            $this->_broadcastToClients($server, json_encode([
+                'type' => 'gpu.status.response',
+                'status' => $status,
+                'State' => $state,
+                'request_id' => $requestId,
+                'fresh' => $data['fresh'] ?? false,
+            ], JSON_UNESCAPED_UNICODE));
+            return;
+        }
+
 
         // ── Worker 返回提取视频文案结果 ───────────────────────────────
         if ($this->redis->sIsMember(self::KEY_WORKERS, (string)$fd) && $type === 'result') {
@@ -657,6 +700,27 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             }
         }
         echo "[WS] gpu.power.online(兼容gpu_online) 广播: {$notified} 个客户端\n";
+    }
+
+    /**
+     * 广播消息给所有在线客户端（PC + Mobile）
+     */
+    private function _broadcastToClients($server, string $msgJson): void
+    {
+        $clientFdSets = $this->redis->keys('dsp:client_fds:*');
+        $sent = 0;
+        foreach ($clientFdSets as $setKey) {
+            foreach ($this->redis->sMembers($setKey) as $fdStr) {
+                $targetFd = (int)$fdStr;
+                if ($targetFd > 0 && $server->isEstablished($targetFd)) {
+                    $server->push($targetFd, $msgJson);
+                    $sent++;
+                } else {
+                    $this->redis->sRem($setKey, $fdStr);
+                }
+            }
+        }
+        echo "[WS] broadcastToClients: sent={$sent}\n";
     }
 
     /**

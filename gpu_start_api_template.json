@@ -1,0 +1,27 @@
+{
+  "url": "https://api.compshare.cn/?Action=StartCompShareInstance",
+  "method": "POST",
+  "headers": {
+    "u-csrf-token": "4e6688d66214e4568ae9866b61dd2627",
+    "sec-ch-ua-platform": "\"Windows\"",
+    "referer": "https://console.compshare.cn/light-gpu/console/resources",
+    "accept-language": "zh-CN",
+    "sec-ch-ua": "\"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\"",
+    "sec-ch-ua-mobile": "?0",
+    "x-api-lang": "zh_CN",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "accept": "application/json, text/plain, */*",
+    "content-type": "application/x-www-form-urlencoded; charset=UTF-8"
+  },
+  "body": {
+    "ProjectId": "org-rvkvhf",
+    "UHostId": "uhost-1nge7ro7u8fk",
+    "Zone": "cn-wlcb-01",
+    "Region": "cn-wlcb",
+    "Action": "StartCompShareInstance",
+    "_user": "user_5417e4f67f8b19ec@console.compshare.cn",
+    "_timestamp": "1772401065353"
+  },
+  "captured_at": 1772401065,
+  "has_signature": false
+}

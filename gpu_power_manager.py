@@ -16,6 +16,8 @@ GPU 服务器自动开关机管理器
 import asyncio
 import json
 import os
+import time
+from urllib.parse import parse_qsl, urlencode
 from datetime import datetime
 import websockets
 from playwright.async_api import async_playwright
@@ -30,10 +32,14 @@ CONSOLE_URL = "https://console.compshare.cn/light-gpu/console/resources"
 BROWSER_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_browser_data")
 # 登录状态文件
 STORAGE_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_storage_state.json")
+START_API_TEMPLATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_start_api_template.json")
+STOP_API_TEMPLATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_stop_api_template.json")
 # 检查间隔 (秒)
-CHECK_INTERVAL = 60
+CHECK_INTERVAL = 10
 # 空闲超时 (秒) - 30分钟
 IDLE_TIMEOUT = 1800
+# 视口同步间隔（秒）：让页面内容跟随浏览器窗口变化
+VIEWPORT_SYNC_INTERVAL = 1
 
 
 class GPUPowerManager:
@@ -49,6 +55,19 @@ class GPUPowerManager:
         self.has_pending_task = False  # 是否有待处理任务
 
         self.check_task = None  # 定期检查任务
+        self.gpu_start_task = None  # 后台开机任务
+        self.gpu_op_lock = asyncio.Lock()  # 避免并发开/关机
+        self.viewport_sync_task = None  # 视口同步任务
+        self.start_api_template = None  # 兼容：旧模板文件
+        self.stop_api_template = None  # 兼容：旧模板文件
+
+        # ── 从 DescribeCompShareInstance 拦截到的动态参数 ──
+        self._api_params = {
+            "headers": {},       # 请求头 (含 u-csrf-token 等)
+            "base_body": {},     # 公共 body 参数 (ProjectId, _user 等)
+            "instance": {},      # 完整实例信息 (UHostId, Zone, Region, State ...)
+            "ready": False,      # 是否已拦截到有效参数
+        }
 
     # ============================================================
     #  浏览器
@@ -101,6 +120,8 @@ class GPUPowerManager:
 
         # 创建页面
         self.page = await self.context.new_page()
+        self._load_api_templates()
+        self._bind_network_listeners()
 
         # 导航到控制台页面
         print(f"[Browser] 正在打开控制台...")
@@ -146,6 +167,193 @@ class GPUPowerManager:
             except Exception as e:
                 print(f"[Browser] 更新登录状态失败: {e}")
 
+    def _load_api_templates(self):
+        """加载已保存的启动/关机 API 模板"""
+        for key, path, desc in (
+            ("start_api_template", START_API_TEMPLATE_FILE, "启动"),
+            ("stop_api_template", STOP_API_TEMPLATE_FILE, "关机"),
+        ):
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    setattr(self, key, json.load(f))
+                print(f"[API] 已加载{desc}模板: {path}")
+            except Exception as e:
+                print(f"[API] 加载{desc}模板失败: {e}")
+
+    def _save_api_template(self, template: dict | None, path: str, desc: str):
+        """保存 API 模板"""
+        if not template:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(template, f, ensure_ascii=False, indent=2)
+            print(f"[API] 已保存{desc}模板: {path}")
+        except Exception as e:
+            print(f"[API] 保存{desc}模板失败: {e}")
+
+    def _bind_network_listeners(self):
+        """监听网络请求/响应，从 DescribeCompShareInstance 拦截认证参数和 GPU 状态"""
+        if not self.page:
+            return
+
+        async def _on_request(request):
+            """拦截 DescribeCompShareInstance 请求，获取认证头和公共 body 参数"""
+            try:
+                url = request.url
+                post_data = request.post_data or ""
+                if "DescribeCompShareInstance" not in url and "DescribeCompShareInstance" not in post_data:
+                    return
+
+                headers = dict(request.headers or {})
+                body_pairs = parse_qsl(post_data, keep_blank_values=True)
+                body = {k: v for k, v in body_pairs}
+
+                # 保存认证头（u-csrf-token 是关键）
+                self._api_params["headers"] = {
+                    k: v for k, v in headers.items()
+                    if k.lower() not in ("content-length", "host", "cookie")
+                }
+                # 保存公共 body 参数（ProjectId, _user 等后续 Start/Stop 也需要）
+                self._api_params["base_body"] = {
+                    k: v for k, v in body.items()
+                    if k in ("ProjectId", "_user")
+                }
+                print(f"[API] ✓ 已拦截 DescribeCompShareInstance 请求参数")
+
+            except Exception as e:
+                print(f"[API] 拦截请求参数失败: {e}")
+
+        async def _on_response(response):
+            """拦截 DescribeCompShareInstance 响应，获取实例信息和 GPU 状态"""
+            try:
+                url = response.url
+                if "DescribeCompShareInstance" not in url:
+                    return
+
+                data = await response.json()
+                if data.get("RetCode") != 0:
+                    print(f"[API] DescribeCompShareInstance 返回错误: RetCode={data.get('RetCode')}")
+                    return
+
+                hosts = data.get("UHostSet", [])
+                if not hosts:
+                    print("[API] DescribeCompShareInstance 无实例")
+                    return
+
+                inst = hosts[0]
+                self._api_params["instance"] = inst
+                self._api_params["ready"] = True
+
+                state = inst.get("State", "unknown")
+                state_map = {"Running": "running", "Stopped": "stopped", "Starting": "starting", "Stopping": "stopping"}
+                self.gpu_status = state_map.get(state, "unknown")
+
+                print(f"[API] ✓ 已拦截实例信息: UHostId={inst.get('UHostId')}, State={state} → gpu_status={self.gpu_status}")
+
+            except Exception as e:
+                print(f"[API] 拦截响应失败: {e}")
+
+        self.page.on("request", lambda req: asyncio.create_task(_on_request(req)))
+        self.page.on("response", lambda resp: asyncio.create_task(_on_response(resp)))
+
+    async def _call_compshare_api(self, action: str, extra_body: dict | None = None) -> dict | None:
+        """通用 CompShare API 调用，使用从 DescribeCompShareInstance 拦截到的认证参数。
+        返回响应 JSON dict，失败返回 None。
+        """
+        if not self.context:
+            print(f"[API] 浏览器上下文未就绪，跳过 {action}")
+            return None
+
+        # 构造请求体
+        inst = self._api_params.get("instance") or {}
+        body = {
+            "Action": action,
+            "_timestamp": str(int(time.time() * 1000)),
+        }
+        # 公共参数（ProjectId, _user 来自拦截的请求 body）
+        body.update(self._api_params.get("base_body") or {})
+        # 实例参数（UHostId, Zone, Region 来自拦截的响应）
+        if inst.get("UHostId"):
+            body["UHostId"] = inst["UHostId"]
+        if inst.get("Zone"):
+            body["Zone"] = inst["Zone"]
+        if inst.get("Region"):
+            body["Region"] = inst["Region"]
+        # StopCompShareInstance 需要 BasicImageId
+        if action == "StopCompShareInstance" and inst.get("BasicImageId"):
+            body["BasicImageId"] = inst["BasicImageId"]
+        # 额外参数
+        if extra_body:
+            body.update(extra_body)
+
+        # 如果拦截参数未就绪，回退到旧模板文件
+        if not self._api_params.get("ready"):
+            tpl = self.start_api_template if "Start" in action else self.stop_api_template
+            if tpl and tpl.get("body"):
+                body = dict(tpl["body"])
+                body["Action"] = action
+                body["_timestamp"] = str(int(time.time() * 1000))
+                print(f"[API] 使用旧模板文件参数: {action}")
+
+        headers = dict(self._api_params.get("headers") or {})
+        # 回退：如果拦截的 headers 为空，从旧模板文件读
+        if not headers.get("u-csrf-token"):
+            tpl = self.start_api_template or self.stop_api_template
+            if tpl and tpl.get("headers"):
+                headers = {k: v for k, v in tpl["headers"].items()
+                           if k.lower() not in ("content-length", "host", "cookie")}
+
+        url = f"https://api.compshare.cn/?Action={action}"
+
+        try:
+            data = urlencode(body)
+            resp = await self.context.request.post(url, headers=headers, data=data)
+            text = await resp.text()
+            print(f"[API] {action} HTTP {resp.status}: {text[:300]}")
+
+            if resp.status >= 400:
+                return None
+            result = json.loads(text)
+            if result.get("RetCode") != 0:
+                print(f"[API] {action} 失败: RetCode={result.get('RetCode')}")
+                return None
+            return result
+        except Exception as e:
+            print(f"[API] {action} 异常: {e}")
+            return None
+
+    async def check_gpu_status_via_api(self) -> str:
+        """通过 DescribeCompShareInstance API 直接查询 GPU 状态（不刷新页面）"""
+        result = await self._call_compshare_api("DescribeCompShareInstance")
+        if not result:
+            return "unknown"
+        hosts = result.get("UHostSet", [])
+        if not hosts:
+            return "unknown"
+
+        inst = hosts[0]
+        # 顺便更新缓存的实例信息
+        self._api_params["instance"] = inst
+        self._api_params["ready"] = True
+
+        state = inst.get("State", "unknown")
+        state_map = {"Running": "running", "Stopped": "stopped", "Starting": "starting", "Stopping": "stopping"}
+        status = state_map.get(state, "unknown")
+        self.gpu_status = status
+        return status
+
+    async def _start_gpu_via_api(self) -> bool:
+        """通过 API 启动 GPU"""
+        result = await self._call_compshare_api("StartCompShareInstance")
+        return result is not None
+
+    async def _stop_gpu_via_api(self) -> bool:
+        """通过 API 关闭 GPU"""
+        result = await self._call_compshare_api("StopCompShareInstance")
+        return result is not None
+
     async def ensure_on_console_page(self):
         """确保在控制台页面上"""
         current = self.page.url
@@ -154,88 +362,224 @@ class GPUPowerManager:
             await self.page.goto(CONSOLE_URL, wait_until="networkidle")
             await asyncio.sleep(2)
 
+    async def viewport_sync_loop(self):
+        """将页面 viewport 与浏览器窗口大小保持同步"""
+        print("[Browser] 视口同步循环启动")
+        while True:
+            try:
+                await asyncio.sleep(VIEWPORT_SYNC_INTERVAL)
+                if not self.page:
+                    continue
+
+                size = await self.page.evaluate(
+                    """
+                    () => ({
+                        outerWidth: window.outerWidth || 0,
+                        outerHeight: window.outerHeight || 0,
+                        innerWidth: window.innerWidth || 0,
+                        innerHeight: window.innerHeight || 0
+                    })
+                    """
+                )
+
+                # 估算浏览器边框与工具栏占用
+                target_w = max(800, int(size["outerWidth"]) - 16)
+                target_h = max(600, int(size["outerHeight"]) - 96)
+
+                # inner 尺寸与目标差异较大时，主动同步 viewport
+                if abs(int(size["innerWidth"]) - target_w) > 8 or abs(int(size["innerHeight"]) - target_h) > 8:
+                    await self.page.set_viewport_size({"width": target_w, "height": target_h})
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                # 这里不刷错误，避免干扰主流程日志
+                pass
+
     # ============================================================
     #  GPU 状态检查和操作
     # ============================================================
 
     async def check_gpu_status(self) -> str:
-        """检查 GPU 状态"""
+        """检查 GPU 状态（优先 API，回退页面刷新）"""
         try:
-            # 刷新页面
+            status = await self.check_gpu_status_via_api()
+            if status != "unknown":
+                label = {"running": "运行中", "stopped": "已关机", "starting": "启动中", "stopping": "关闭中"}.get(status, status)
+                print(f"[GPU] 状态(API): {label}")
+                return status
+        except Exception as e:
+            print(f"[GPU] API 查询状态失败: {e}")
+
+        # API 失败时回退到页面刷新
+        try:
             await self.page.reload(wait_until="networkidle")
             await asyncio.sleep(2)
-
-            # 查找启动按钮
-            start_button = await self.page.query_selector(
-                "button.uc-fe-button:has-text('启动')"
-            )
-
-            if start_button and await start_button.is_visible():
-                self.gpu_status = "stopped"
-                print("[GPU] 状态: 已关机")
-                return "stopped"
-
-            # 如果没有启动按钮，说明正在运行
-            self.gpu_status = "running"
-            print("[GPU] 状态: 运行中")
-            return "running"
-
+            # 页面刷新会触发 DescribeCompShareInstance → 响应拦截器自动更新 gpu_status
+            status = self.gpu_status
+            label = {"running": "运行中", "stopped": "已关机", "starting": "启动中", "stopping": "关闭中"}.get(status, status)
+            print(f"[GPU] 状态(页面): {label}")
+            return status
         except Exception as e:
             print(f"[GPU] 检查状态失败: {e}")
             return "unknown"
 
+    async def _find_start_button(self):
+        """
+        在操作区精确定位“启动”按钮。
+        优先定位 data-urc-action_list-id=2 内可见按钮，避免命中隐藏模板节点。
+        """
+        selectors = [
+            "div[data-urc-action_list-id='2'] button.uc-fe-button:has-text('启动')",
+            "button.uc-fe-button:has-text('启动')",
+        ]
+        for selector in selectors:
+            try:
+                buttons = await self.page.query_selector_all(selector)
+                if not buttons:
+                    continue
+
+                visible_buttons = []
+                for btn in buttons:
+                    try:
+                        if await btn.is_visible():
+                            visible_buttons.append(btn)
+                    except Exception:
+                        continue
+
+                if not visible_buttons:
+                    continue
+
+                # 优先选择“可见且可启用”的按钮
+                for btn in visible_buttons:
+                    try:
+                        if await btn.is_enabled():
+                            return btn
+                    except Exception:
+                        continue
+
+                # 退化：返回第一个可见按钮（后续走 force/js click）
+                return visible_buttons[0]
+            except Exception:
+                continue
+        return None
+
     async def start_gpu(self) -> bool:
-        """启动 GPU"""
+        """启动 GPU（优先 API，回退页面点击）"""
         try:
             print("[GPU] 开始启动...")
 
-            # 确保在控制台页面
-            await self.ensure_on_console_page()
+            # 优先走 API 启动
+            api_started = await self._start_gpu_via_api()
+            if api_started:
+                print("[GPU] ✓ 已通过 API 发起启动，进入状态轮询...")
+            else:
+                print("[GPU] API 启动失败，回退到页面点击...")
 
-            # 刷新页面，确保状态最新
-            await self.page.reload(wait_until="networkidle")
-            await asyncio.sleep(3)
+            if not api_started:
+                # 查找启动按钮
+                print("[GPU] 查找启动按钮...")
+                start_button = await self._find_start_button()
 
-            # 查找启动按钮
-            print("[GPU] 查找启动按钮...")
-            start_button = await self.page.query_selector(
-                "button.uc-fe-button:has-text('启动')"
-            )
-
-            if not start_button:
-                print("[GPU] ✗ 未找到启动按钮，GPU 可能已经在运行")
-                return False
-
-            # 检查按钮是否可见
-            is_visible = await start_button.is_visible()
-            print(f"[GPU] 启动按钮可见: {is_visible}")
-
-            if not is_visible:
-                print("[GPU] ✗ 启动按钮不可见，GPU 可能已经在运行")
-                return False
-
-            # 检查按钮是否启用
-            is_enabled = await start_button.is_enabled()
-            print(f"[GPU] 启动按钮启用: {is_enabled}")
-
-            if not is_enabled:
-                print("[GPU] ⚠️  启动按钮被禁用，等待 5 秒后重试...")
-                await asyncio.sleep(5)
-                await self.page.reload(wait_until="networkidle")
-                await asyncio.sleep(3)
-
-                # 重新查找按钮
-                start_button = await self.page.query_selector(
-                    "button.uc-fe-button:has-text('启动')"
-                )
-                if not start_button or not await start_button.is_enabled():
-                    print("[GPU] ✗ 启动按钮仍然被禁用，可能需要手动操作")
+                if not start_button:
+                    print("[GPU] ✗ 未找到启动按钮，GPU 可能已经在运行")
                     return False
 
-            # 点击启动按钮
-            print("[GPU] 点击启动按钮...")
-            await start_button.click()
-            print("[GPU] ✓ 已点击启动按钮")
+                # 检查按钮是否可见
+                is_visible = await start_button.is_visible()
+                print(f"[GPU] 启动按钮可见: {is_visible}")
+
+                if not is_visible:
+                    print("[GPU] ✗ 启动按钮不可见，GPU 可能已经在运行")
+                    return False
+
+                # 检查按钮是否启用（有些页面会误报 disabled，后续仍尝试点击）
+                is_enabled = await start_button.is_enabled()
+                print(f"[GPU] 启动按钮启用: {is_enabled}")
+                if not is_enabled:
+                    print("[GPU] ⚠️  启动按钮显示为禁用，先等待其变为可用...")
+                    for _ in range(10):
+                        await asyncio.sleep(1)
+                        try:
+                            start_button = await self._find_start_button()
+                            if start_button and await start_button.is_enabled():
+                                is_enabled = True
+                                print("[GPU] ✓ 启动按钮已变为可用")
+                                break
+                        except Exception:
+                            pass
+                    if not is_enabled:
+                        print("[GPU] ⚠️  启动按钮仍显示禁用，继续尝试强制点击方案...")
+
+                # 点击启动按钮（普通点击 -> 强制点击 -> JS 点击）
+                print("[GPU] 点击启动按钮...")
+                clicked = False
+
+                try:
+                    await start_button.scroll_into_view_if_needed()
+                except Exception:
+                    pass
+
+                # 1) 普通点击
+                try:
+                    await start_button.click(timeout=5000)
+                    clicked = True
+                    print("[GPU] ✓ 普通点击成功")
+                except Exception as e:
+                    print(f"[GPU] 普通点击失败: {e}")
+
+                # 2) 强制点击
+                if not clicked:
+                    try:
+                        await start_button.click(force=True, timeout=5000)
+                        clicked = True
+                        print("[GPU] ✓ 强制点击成功")
+                    except Exception as e:
+                        print(f"[GPU] 强制点击失败: {e}")
+
+                # 3) JS 直接触发点击
+                if not clicked:
+                    try:
+                        js_clicked = await self.page.evaluate(
+                            """
+                            () => {
+                                const scope =
+                                  document.querySelector("div[data-urc-action_list-id='2']") || document;
+                                const buttons = Array.from(scope.querySelectorAll('button.uc-fe-button'));
+                                const target = buttons.find(btn =>
+                                  (btn.innerText || '').includes('启动') &&
+                                  btn.offsetParent !== null
+                                );
+                                if (!target) return false;
+                                target.click();
+                                return true;
+                            }
+                            """
+                        )
+                        if js_clicked:
+                            clicked = True
+                            print("[GPU] ✓ JS 点击成功")
+                    except Exception as e:
+                        print(f"[GPU] JS 点击失败: {e}")
+
+                if not clicked:
+                    print("[GPU] ✗ 启动按钮点击失败，可能页面有遮罩或状态异常")
+                    return False
+
+                # 有些页面点击“启动”后会弹确认框，这里自动确认
+                try:
+                    confirm_selector = (
+                        "button.uc-fe-button-styletype-primary:has-text('确定'), "
+                        "button.uc-fe-button-styletype-primary:has-text('确认'), "
+                        "button.uc-fe-button-styletype-primary:has-text('启动')"
+                    )
+                    confirm_btn = await self.page.query_selector(confirm_selector)
+                    if confirm_btn and await confirm_btn.is_visible():
+                        await confirm_btn.click()
+                        print("[GPU] ✓ 已点击启动确认按钮")
+                except Exception:
+                    pass
+
+                print("[GPU] ✓ 已点击启动按钮")
             self.gpu_status = "starting"
             await asyncio.sleep(5)
 
@@ -266,6 +610,20 @@ class GPUPowerManager:
 
             # 确保在控制台页面
             await self.ensure_on_console_page()
+
+            # 优先走 API 关机（使用监听抓到的真实签名请求）
+            api_stopped = await self._stop_gpu_via_api()
+            if api_stopped:
+                print("[GPU] 已通过 API 发起关机，进入状态轮询...")
+                self.gpu_status = "stopping"
+                for i in range(36):
+                    await asyncio.sleep(5)
+                    status = await self.check_gpu_status()
+                    if status == "stopped":
+                        print("[GPU] ✓ 关闭成功(API)")
+                        return True
+                    print(f"[GPU] 等待关机... ({(i + 1) * 5}s)")
+                print("[GPU] ⚠️  API 关机后状态确认超时，回退页面点击...")
 
             # 尝试查找并点击操作按钮（可能需要先打开菜单）
             try:
@@ -358,6 +716,105 @@ class GPUPowerManager:
     #  WebSocket 通信
     # ============================================================
 
+    async def _send_ws_message(self, payload: dict) -> bool:
+        """发送 WS 消息（失败不抛异常）"""
+        if not self.ws:
+            return False
+        try:
+            await self.ws.send(json.dumps(payload, ensure_ascii=False))
+            return True
+        except Exception as e:
+            print(f"[WS] 发送消息失败: {e}, payload={payload}")
+            return False
+
+    def _schedule_gpu_start(self, trigger: str, request_id: str | None = None):
+        """异步调度开机，避免阻塞 WS 消息循环"""
+        self.has_pending_task = True
+        self.last_task_time = datetime.now()
+
+        if self.gpu_start_task and not self.gpu_start_task.done():
+            print(f"[GPU] 开机任务已在进行中，忽略重复触发: trigger={trigger}")
+            return
+
+        self.gpu_start_task = asyncio.create_task(self._start_gpu_worker(trigger, request_id))
+
+    async def _start_gpu_worker(self, trigger: str, request_id: str | None = None):
+        """后台开机执行器（带锁，防重复开机）"""
+        async with self.gpu_op_lock:
+            try:
+                status = await self.check_gpu_status()
+                if status == "running":
+                    self.has_pending_task = False
+                    self.last_task_time = datetime.now()
+                    print(f"[GPU] 已在运行中，无需开机: trigger={trigger}")
+                    # 即使已在运行，也广播一次在线状态给所有客户端
+                    await self._broadcast_gpu_online(request_id=request_id)
+                    return
+
+                print(f"[GPU] 收到开机触发，开始开机: trigger={trigger}, request_id={request_id}")
+                success = await self.start_gpu()
+                if success:
+                    self.has_pending_task = False
+                    self.last_task_time = datetime.now()
+                    print("[GPU] 后台开机成功")
+                    # 广播 gpu.power.online 给所有客户端
+                    await self._broadcast_gpu_online(request_id=request_id)
+                else:
+                    print("[GPU] 后台开机失败")
+                    if request_id:
+                        await self._send_ws_message({
+                            "type": "gpu.power.boot.result",
+                            "request_id": request_id,
+                            "success": False,
+                            "status": "failed",
+                            "msg": "GPU 开机失败",
+                        })
+            except Exception as e:
+                print(f"[GPU] 后台开机异常: {e}")
+                if request_id:
+                    await self._send_ws_message({
+                        "type": "gpu.power.boot.result",
+                        "request_id": request_id,
+                        "success": False,
+                        "status": "error",
+                        "msg": f"GPU 开机异常: {e}",
+                    })
+
+    async def _broadcast_gpu_online(self, request_id: str | None = None):
+        """通过 WS 广播 GPU 已上线消息给所有客户端（由 Dsp.php 中继转发）"""
+        payload = {
+            "type": "gpu.power.online",
+            "status": "running",
+            "msg": "GPU 服务器已上线",
+            "source": "gpu_monitor",
+        }
+        if request_id:
+            payload["request_id"] = request_id
+        sent = await self._send_ws_message(payload)
+        if sent:
+            print("[WS] ✓ 已广播 gpu.power.online")
+        else:
+            print("[WS] ✗ 广播 gpu.power.online 失败（WS 未连接）")
+
+    async def _refresh_and_report_status(self, request_id: str):
+        """后台刷新 GPU 精确状态并通过 WS 上报"""
+        try:
+            status = await self.check_gpu_status_via_api()
+            if status != "unknown":
+                await self._send_ws_message({
+                    "type": "gpu.status.response",
+                    "status": status,
+                    "request_id": request_id,
+                    "source": "gpu_monitor",
+                    "fresh": True,
+                })
+        except Exception as e:
+            print(f"[WS] 刷新状态上报失败: {e}")
+
+    def _is_start_in_progress(self) -> bool:
+        """是否已有开机流程在执行"""
+        return bool(self.gpu_start_task and not self.gpu_start_task.done())
+
     async def ws_loop(self):
         """WebSocket 消息循环，自动重连"""
         while True:
@@ -365,8 +822,9 @@ class GPUPowerManager:
                 print(f"\n[WS] 连接: {WS_URL}")
                 async with websockets.connect(
                     WS_URL,
-                    ping_interval=30,
-                    ping_timeout=10,
+                    # 关闭 websockets 库内置 ping，避免与业务心跳冲突
+                    ping_interval=None,
+                    ping_timeout=None,
                     max_size=10 * 1024 * 1024,
                 ) as ws:
                     self.ws = ws
@@ -397,8 +855,7 @@ class GPUPowerManager:
                                 # 监听所有 GPU 任务类型
                                 elif msg_type in ["url", "chatglm_video", "gpu.job.submit", "gpu_task"]:
                                     # 收到任务，标记有待处理任务
-                                    self.has_pending_task = True
-                                    self.last_task_time = datetime.now()
+                                    self._schedule_gpu_start(trigger=msg_type)
                                     print(f"[WS] ✓✓✓ 检测到 GPU 任务: {msg_type} ✓✓✓")
                                     print(f"[WS] 任务详情: {data}")
                                     print(f"[WS] 已设置 has_pending_task=True, last_task_time={self.last_task_time}")
@@ -406,15 +863,25 @@ class GPUPowerManager:
                                 # 监听 GPU 开机请求
                                 elif msg_type == "gpu.power.boot":
                                     print(f"[WS] ✓✓✓ 收到 GPU 开机请求: {data} ✓✓✓")
-                                    # 立即尝试启动 GPU
-                                    success = await self.start_gpu()
-                                    if success:
-                                        print("[WS] ✓ GPU 开机成功")
-                                        # 重置任务标记
-                                        self.has_pending_task = False
-                                        self.last_task_time = datetime.now()
-                                    else:
-                                        print("[WS] ✗ GPU 开机失败")
+                                    self._schedule_gpu_start(
+                                        trigger=msg_type,
+                                        request_id=data.get("request_id"),
+                                    )
+
+                                # 监听 GPU 状态查询请求
+                                elif msg_type == "gpu.status.query":
+                                    print(f"[WS] 收到 GPU 状态查询: {data}")
+                                    # 快速返回缓存状态，同时异步刷新
+                                    cached = self.gpu_status
+                                    await self._send_ws_message({
+                                        "type": "gpu.status.response",
+                                        "status": cached,
+                                        "request_id": data.get("request_id", ""),
+                                        "source": "gpu_monitor",
+                                    })
+                                    # 后台刷新一次精确状态
+                                    asyncio.create_task(self._refresh_and_report_status(
+                                        data.get("request_id", "")))
 
                                 else:
                                     print(f"[WS] 其他消息类型: {msg_type}, 完整数据: {data}")
@@ -423,6 +890,10 @@ class GPUPowerManager:
                                 print(f"[WS] 无效 JSON: {raw}")
                     finally:
                         heartbeat.cancel()
+                        try:
+                            await heartbeat
+                        except asyncio.CancelledError:
+                            pass
                         self.ws = None
 
             except (
@@ -445,6 +916,8 @@ class GPUPowerManager:
             try:
                 await asyncio.sleep(25)
                 await ws.send(json.dumps({"type": "ping"}))
+            except asyncio.CancelledError:
+                break
             except Exception:
                 break
 
@@ -485,6 +958,9 @@ class GPUPowerManager:
             print(f"[Check] GPU={status}, 有任务={has_task}, 最后任务时间={self.last_task_time}, 空闲={idle_time_str}")
 
             if has_task and status == "stopped":
+                if self._is_start_in_progress():
+                    print("[Check] 开机流程进行中，跳过重复启动")
+                    return
                 # 有任务且 GPU 已关机，启动 GPU
                 print("[Check] ✓✓✓ 检测到 GPU 任务，准备启动 GPU ✓✓✓")
                 success = await self.start_gpu()
@@ -547,6 +1023,9 @@ class GPUPowerManager:
 
         await self.start_browser()
 
+        # 启动视口同步任务
+        self.viewport_sync_task = asyncio.create_task(self.viewport_sync_loop())
+
         # 同时跑: WS 收消息 + 定期检查
         await asyncio.gather(
             self.ws_loop(),
@@ -556,6 +1035,8 @@ class GPUPowerManager:
     async def cleanup(self):
         if self.check_task:
             self.check_task.cancel()
+        if self.viewport_sync_task:
+            self.viewport_sync_task.cancel()
         page = getattr(self, "page", None)
         if page:
             await page.close()

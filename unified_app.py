@@ -1873,63 +1873,114 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
     video_ext = os.path.splitext(video_path)[1] or ".mp4"
     audio_ext = os.path.splitext(audio_path)[1] or ".wav"
 
-    # ── 0) 健康检查（GPU离线时等待上线）──
-    # 0.1) 先快速检查 GPU 是否在线，离线才发 WS 开机请求
-    _gpu_online = False
-    try:
-        _hc = _req.get(f"{server_url}/api/heygem/health", headers=headers, timeout=5)
-        _hc.raise_for_status()
-        _hd = _hc.json()
-        if _hd.get("code") == 0 and _hd.get("initialized"):
-            _gpu_online = True
-    except Exception:
-        pass
+    # ── 0) 通过 WebSocket 查询 GPU 状态，在线直接提交，离线立即开机 ──
+    api_ws_url = os.getenv("API_SERVER_URL", "https://api.zhimengai.xyz").strip().rstrip("/")
+    api_ws_url = api_ws_url.replace("https://", "wss://").replace("http://", "ws://") + "/dsp"
 
-    if not _gpu_online and _WS_OK:
-        # GPU 离线，通过 API 服务器的 WebSocket 通知 gpu_power_manager 开机
-        api_ws_url = os.getenv("API_SERVER_URL", "https://api.zhimengai.xyz").strip().rstrip("/")
-        api_ws_url = api_ws_url.replace("https://", "wss://").replace("http://", "ws://") + "/dsp"
+    _gpu_ws_status = {"status": "unknown", "online_event": threading.Event()}
+    _boot_request_id = str(uuid.uuid4())
+
+    def _ws_query_and_boot():
+        """通过 WS 查询 GPU 状态，离线则立即发送开机请求，等待 gpu.power.online"""
+        if not _WS_OK:
+            safe_print("[WS] websockets 模块不可用，跳过 WS 查询")
+            return
         import websockets as _ws_lib
 
-        async def _try_wake_gpu_via_ws():
+        async def _run():
             try:
                 async with _ws_lib.connect(api_ws_url, open_timeout=5, close_timeout=3) as ws:
+                    # 注册
                     await ws.send(json.dumps({
                         "type": "register",
                         "key": api_secret or "gradio_client",
                         "device_type": "pc"
                     }))
+                    # 查询 GPU 状态
                     await ws.send(json.dumps({
-                        "type": "gpu.power.boot",
-                        "request_id": str(uuid.uuid4()),
-                        "source": "gradio",
-                        "msg": "PC端请求启动GPU服务器"
+                        "type": "gpu.status.query",
+                        "request_id": _boot_request_id,
                     }))
-                    safe_print(f"[WS] 已发送 GPU 开机请求 → {api_ws_url}")
+                    safe_print(f"[WS] 已发送 GPU 状态查询")
+
+                    # 等待响应（最多等 120 秒，期间也监听 gpu.power.online）
+                    _boot_sent = False
+                    _deadline = asyncio.get_event_loop().time() + 120
+                    while asyncio.get_event_loop().time() < _deadline:
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=3)
+                            data = json.loads(raw)
+                            msg_type = data.get("type", "")
+
+                            if msg_type == "gpu.status.response":
+                                st = data.get("status", "unknown")
+                                safe_print(f"[WS] GPU 状态: {st}")
+                                _gpu_ws_status["status"] = st
+                                if st == "running":
+                                    _gpu_ws_status["online_event"].set()
+                                    return
+                                elif st in ("stopped", "unknown") and not _boot_sent:
+                                    # GPU 离线，立即发送开机请求
+                                    await ws.send(json.dumps({
+                                        "type": "gpu.power.boot",
+                                        "request_id": _boot_request_id,
+                                        "source": "gradio",
+                                        "msg": "PC端请求启动GPU服务器"
+                                    }))
+                                    _boot_sent = True
+                                    safe_print("[WS] GPU 离线，已发送开机请求")
+
+                            elif msg_type in ("gpu.power.online", "gpu_online"):
+                                safe_print("[WS] ✓ 收到 GPU 上线通知!")
+                                _gpu_ws_status["status"] = "running"
+                                _gpu_ws_status["online_event"].set()
+                                return
+
+                            elif msg_type == "gpu.power.boot.result":
+                                if data.get("success"):
+                                    safe_print("[WS] ✓ GPU 开机成功")
+                                    _gpu_ws_status["status"] = "running"
+                                    _gpu_ws_status["online_event"].set()
+                                    return
+                                else:
+                                    safe_print(f"[WS] GPU 开机结果: {data.get('msg', '')}")
+
+                        except asyncio.TimeoutError:
+                            # 没收到消息，继续等
+                            if not _boot_sent:
+                                break  # 没发过 boot 且超时，退出让 health check 接管
+                            continue
+                        except Exception:
+                            continue
+
             except Exception as e:
-                safe_print(f"[WS] 发送开机请求失败: {e}")
+                safe_print(f"[WS] GPU 查询/开机异常: {e}")
 
-        def _wake_gpu():
-            try:
-                asyncio.run(_try_wake_gpu_via_ws())
-            except Exception as e:
-                safe_print(f"[WS] GPU唤醒异常: {e}")
+        try:
+            asyncio.run(_run())
+        except Exception as e:
+            safe_print(f"[WS] 运行异常: {e}")
 
-        threading.Thread(target=_wake_gpu, daemon=True).start()
+    # 在后台线程中执行 WS 查询和开机
+    _ws_thread = threading.Thread(target=_ws_query_and_boot, daemon=True)
+    _ws_thread.start()
 
-    # 0.2) 健康检查循环（等待 GPU 上线）
-    health_check_interval = 5  # 每5秒检查一次
+    # 同时进行 HTTP 健康检查循环（WS 开机成功后 health check 自然通过）
+    health_check_interval = 3  # 每3秒检查一次（加快轮询）
     health_check_timeout = 1800  # 最多等待30分钟
     health_start_time = time.time()
     gpu_was_offline = False
 
     while True:
+        # 如果 WS 已经确认 GPU 在线，先快速验证一下 health 再继续
+        if _gpu_ws_status["online_event"].is_set():
+            safe_print("[HEYGEM-ONLINE] WS 报告 GPU 已上线，验证 health...")
+
         try:
             resp = _req.get(f"{server_url}/api/heygem/health", headers=headers, timeout=10)
             resp.raise_for_status()
             hdata = resp.json()
             if hdata.get("code") != 0 or not hdata.get("initialized"):
-                # 服务器在线但未初始化，继续等待
                 elapsed = int(time.time() - health_start_time)
                 progress(0.01, desc=f"GPU 服务器初始化中... ({elapsed}s)")
                 if detail_cb:
@@ -1938,22 +1989,18 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                 time.sleep(health_check_interval)
                 continue
 
-            # 健康检查成功
             safe_print(f"[HEYGEM-ONLINE] 服务器健康: {hdata}")
             if gpu_was_offline:
                 safe_print(f"[HEYGEM-ONLINE] GPU 服务器已上线，继续处理任务")
             break
 
         except _req.exceptions.RequestException as e:
-            # GPU 服务器离线，等待上线
             error_msg = str(e)
             elapsed = int(time.time() - health_start_time)
 
-            # 检查是否超时
             if elapsed > health_check_timeout:
                 raise gr.Error(f"GPU 服务器等待超时 ({elapsed}s)，请检查服务器状态或联系管理员")
 
-            # 显示等待进度
             if "Connection" in error_msg or "timeout" in error_msg.lower() or "Max retries" in error_msg:
                 gpu_was_offline = True
                 wait_minutes = elapsed // 60
@@ -1966,7 +2013,6 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                 time.sleep(health_check_interval)
                 continue
             else:
-                # 其他类型的错误，直接报错
                 raise gr.Error(f"无法连接 HeyGem 服务器 ({server_url}): {e}")
 
     # ── 1) 计算本地文件 hash ──
