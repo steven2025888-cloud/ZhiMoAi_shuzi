@@ -14,6 +14,7 @@ import time
 import logging
 from datetime import datetime
 import traceback
+import ctypes
 
 # 获取正确的BASE_DIR（支持PyInstaller打包）
 if getattr(sys, 'frozen', False):
@@ -66,6 +67,59 @@ def log_warning(msg):
         logger.warning(msg)
     else:
         print(f"[WARNING] {msg}")
+
+
+def _find_zhimoai_windows():
+    """用纯 ctypes 枚举所有标题含 '织梦AI' 或 '专业版' 的可见窗口"""
+    u32 = ctypes.windll.user32
+    results = []
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_size_t, ctypes.POINTER(ctypes.c_int))
+
+    def _cb(hwnd, _lp):
+        try:
+            length = u32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            u32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value
+            if '织梦AI' in title or '专业版' in title:
+                results.append(hwnd)
+        except Exception:
+            pass
+        return True
+
+    u32.EnumWindows(WNDENUMPROC(_cb), 0)
+    return results
+
+
+def check_single_instance():
+    """检查是否已有 app_backend 窗口在运行"""
+    try:
+        existing = _find_zhimoai_windows()
+        if existing:
+            log_info(f"检测到已有窗口 (hwnd={existing[0]})，激活并退出")
+            bring_to_front(existing[0])
+            return False
+        return True
+    except Exception as e:
+        log_warning(f"单实例检查失败: {e}")
+        return True
+
+
+def bring_to_front(hwnd):
+    """用纯 ctypes 将窗口恢复并置顶"""
+    try:
+        u32 = ctypes.windll.user32
+        SW_RESTORE = 9
+        # 如果窗口最小化或隐藏，先恢复
+        u32.ShowWindow(hwnd, SW_RESTORE)
+        # 置顶
+        u32.SetForegroundWindow(hwnd)
+        log_info(f"已激活窗口 hwnd={hwnd}")
+    except Exception as e:
+        log_warning(f"激活窗口失败: {e}")
 
 
 def clean_logs():
@@ -194,6 +248,10 @@ def start_app():
 
 if __name__ == "__main__":
     try:
+        # 检查单实例
+        if not check_single_instance():
+            sys.exit(0)
+        
         success = start_app()
         sys.exit(0 if success else 1)
     except Exception as e:

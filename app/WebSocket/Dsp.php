@@ -8,6 +8,7 @@ use Hyperf\Contract\OnCloseInterface;
 use Hyperf\Contract\OnMessageInterface;
 use Hyperf\Contract\OnOpenInterface;
 use Hyperf\Redis\Redis;
+use Swoole\Timer;
 
 /**
  * WebSocket 中转 (Redis 存储，跨实例共享)
@@ -59,9 +60,10 @@ use Hyperf\Redis\Redis;
  */
 class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
 {
-    private const KEY_WORKERS    = 'dsp:workers';   // set(fd)
-    private const KEY_FD_TO_KEY  = 'dsp:fdToKey';   // hash(fd => key)
-    private const KEY_FD_TO_ROLE = 'dsp:fdToRole';  // hash(fd => 'pc'|'mobile'|'worker')
+    private const KEY_WORKERS      = 'dsp:workers';       // set(fd)
+    private const KEY_GPU_MONITORS = 'dsp:gpu_monitors';  // set(fd) GPU 电源监控器
+    private const KEY_FD_TO_KEY    = 'dsp:fdToKey';       // hash(fd => key)
+    private const KEY_FD_TO_ROLE   = 'dsp:fdToRole';      // hash(fd => 'pc'|'mobile'|'worker'|'gpu_monitor')
 
     // 每个 license_key 的积压任务队列前缀（List，元素为完整 JSON 字符串）
     private const KEY_PENDING_PFX    = 'dsp:pending_tasks:';
@@ -71,7 +73,14 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
     // GPU 上线后批量下发条数上限
     private const FLUSH_BATCH  = 50;
 
+    // 任务状态跟踪（防止重复提交）
+    private const KEY_TASK_STATUS_PFX = 'dsp:task_status:';  // hash(key => {task_type, request_id, status, start_time})
+    private const TASK_TIMEOUT = 600;  // 任务超时时间（秒）- 10分钟
+
     public function __construct(private Redis $redis) {}
+
+    // 静态变量，确保定时器只创建一次
+    private static bool $timerStarted = false;
 
     // ─────────────────────────── 事件 ────────────────────────────────
 
@@ -80,6 +89,20 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
         $fd = $request->fd;
         echo "[WS] 新连接 fd={$fd} pid=" . getmypid() . "\n";
         $server->push($fd, json_encode(['type' => 'connected', 'fd' => $fd]));
+
+        // 首次连接时启动定时器（只启动一次）
+        if (!self::$timerStarted) {
+            self::$timerStarted = true;
+            echo "[WS] 启动 GPU Monitor 通知检查定时器 (每2秒)\n";
+
+            Timer::tick(2000, function () use ($server) {
+                try {
+                    $this->_checkAndSendGpuMonitorNotifications($server);
+                } catch (\Throwable $e) {
+                    echo "[WS] GPU Monitor 通知检查失败: {$e->getMessage()}\n";
+                }
+            });
+        }
     }
 
     public function onMessage($server, $frame): void
@@ -87,6 +110,9 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
         $fd  = $frame->fd;
         $raw = $frame->data;
         echo "[WS] fd={$fd} 消息: " . mb_substr($raw, 0, 200) . "\n";
+
+        // 检查并发送待处理的 GPU Monitor 通知
+        $this->_checkAndSendGpuMonitorNotifications($server);
 
         $data = json_decode($raw, true);
         if (!is_array($data)) {
@@ -126,6 +152,15 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             return;
         }
 
+        // ── 注册 GPU 电源监控器 ──────────────────────────────────────
+        if ($type === 'register' && ($data['role'] ?? '') === 'gpu_monitor') {
+            $this->redis->sAdd(self::KEY_GPU_MONITORS, (string)$fd);
+            $this->redis->hSet(self::KEY_FD_TO_ROLE, (string)$fd, 'gpu_monitor');
+            $server->push($fd, json_encode(['type' => 'registered', 'role' => 'gpu_monitor']));
+            echo "[WS] GPU Monitor 注册: fd={$fd}\n";
+            return;
+        }
+
         // ── 注册客户端 (PC 或 Mobile) ─────────────────────────────────
         if ($type === 'register' && ($data['key'] ?? '') !== '') {
             $key        = $data['key'];
@@ -150,6 +185,8 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
         if ($senderKey !== '' && $type === 'url') {
             $msg  = json_encode(['type' => 'url', 'url' => $data['url'] ?? '', 'key' => $senderKey]);
             $sent = $this->_dispatchToWorker($server, $msg, $senderKey);
+            // 同时通知 GPU 监控器有任务
+            $this->_notifyGpuMonitors($server, ['type' => 'url', 'key' => $senderKey]);
             if ($sent === 0) {
                 $this->_enqueuePending($senderKey, $msg);
                 $server->push($fd, json_encode([
@@ -182,6 +219,8 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
                 'sender_fd'  => $fd,
             ]);
             $sent = $this->_dispatchToWorker($server, $msg, $senderKey);
+            // 同时通知 GPU 监控器有任务
+            $this->_notifyGpuMonitors($server, ['type' => 'chatglm_video', 'key' => $senderKey]);
             if ($sent === 0) {
                 $this->_enqueuePending($senderKey, $msg);
                 $reply = [
@@ -211,6 +250,29 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
         if ($senderKey !== '' && ($type === 'gpu_task' || $type === 'gpu.job.submit')) {
             $requestId = $data['request_id'] ?? uniqid('gt_');
             $taskType  = $data['task_type'] ?? '';
+
+            // 检查是否有进行中的任务（防止重复提交）
+            $checkResult = $this->_checkTaskStatus($senderKey, $taskType);
+
+            if (!$checkResult['can_submit']) {
+                // 不能提交，返回错误
+                $server->push($fd, json_encode([
+                    'type'       => 'error',
+                    'request_id' => $requestId,
+                    'task_type'  => $taskType,
+                    'msg'        => $checkResult['reason'],
+                    'old_request_id' => $checkResult['old_request_id'],
+                ], JSON_UNESCAPED_UNICODE));
+                echo "[WS] gpu.job.submit 拒绝: key={$senderKey} task_type={$taskType} reason={$checkResult['reason']}\n";
+                return;
+            }
+
+            // 如果是替换队列中的任务，先取消旧任务
+            if ($checkResult['reason'] === 'replace_queued' && $checkResult['old_request_id'] !== '') {
+                $this->_cancelQueuedTask($senderKey, $checkResult['old_request_id']);
+                echo "[WS] 替换队列任务: key={$senderKey} old={$checkResult['old_request_id']} new={$requestId}\n";
+            }
+
             $msg = json_encode([
                 'type'       => 'gpu.job.submit',
                 'task_type'  => $taskType,
@@ -221,8 +283,14 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             ], JSON_UNESCAPED_UNICODE);
 
             $sent = $this->_dispatchToWorker($server, $msg, $senderKey);
+            // 同时通知 GPU 监控器有任务
+            $this->_notifyGpuMonitors($server, ['type' => 'gpu.job.submit', 'task_type' => $taskType, 'key' => $senderKey]);
+
             if ($sent === 0) {
+                // GPU 离线，任务入队
                 $this->_enqueuePending($senderKey, $msg);
+                // 设置任务状态为 queued
+                $this->_setTaskStatus($senderKey, $taskType, $requestId, 'queued');
                 $server->push($fd, json_encode([
                     'type'       => 'gpu.power.offline',
                     'version'    => '1.0',
@@ -239,6 +307,9 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
                     ],
                 ], JSON_UNESCAPED_UNICODE));
             } else {
+                // GPU 在线，任务已提交
+                // 设置任务状态为 processing
+                $this->_setTaskStatus($senderKey, $taskType, $requestId, 'processing');
                 $server->push($fd, json_encode([
                     'type'       => 'ack',
                     'request_id' => $requestId,
@@ -260,9 +331,10 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             $requestId = $data['request_id'] ?? '';
             $senderFd  = (int)($data['sender_fd'] ?? 0);
             $isError   = $data['error'] ?? false;
+            $taskType  = $data['task_type'] ?? '';
             $payload   = [
                 'type'       => 'gpu.job.result',
-                'task_type'  => $data['task_type'] ?? '',
+                'task_type'  => $taskType,
                 'request_id' => $requestId,
             ];
             if ($isError) {
@@ -279,8 +351,14 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             $legacyPayload['type'] = 'gpu_task_result';
             $this->_replyToClient($server, $key, $senderFd, json_encode($legacyPayload, JSON_UNESCAPED_UNICODE));
 
+            // 清除任务状态（任务已完成）
+            if ($key !== '' && $taskType !== '') {
+                $this->_clearTaskStatus($key, $taskType);
+                echo "[WS] 清除任务状态: key={$key} task_type={$taskType}\n";
+            }
+
             $tag = $isError ? '错误' : '成功';
-            echo "[WS] gpu.job.result {$tag}: key={$key} task_type={$payload['task_type']} request_id={$requestId}\n";
+            echo "[WS] gpu.job.result {$tag}: key={$key} task_type={$taskType} request_id={$requestId}\n";
             return;
         }
 
@@ -298,41 +376,23 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             ]);
 
             // 兼容批量派发协议：把 pending 队列打包后推给 worker
-            $jobs = [];
-            $keys = $this->redis->keys(self::KEY_PENDING_PFX . '*');
-            foreach ($keys as $queueKey) {
-                $batch = 0;
-                while ($batch < self::FLUSH_BATCH) {
-                    $msgJson = $this->redis->lPop($queueKey);
-                    if ($msgJson === null || $msgJson === false) break;
-                    $jobData = json_decode((string)$msgJson, true);
-                    if (is_array($jobData)) {
-                        $jobs[] = $jobData;
-                    }
-                    $batch++;
-                }
-            }
-
-            if (!empty($jobs) && $server->isEstablished($fd)) {
-                $dispatchMsg = json_encode([
-                    'type'       => 'gpu.job.dispatch.batch',
-                    'version'    => '1.0',
-                    'source'     => 'api',
-                    'target'     => 'gpu',
-                    'ts'         => time(),
-                    'request_id' => uniqid('batch_'),
-                    'trace_id'   => uniqid('trace_'),
-                    'data'       => [
-                        'batch_id' => uniqid('batch_'),
-                        'jobs'     => $jobs,
-                    ],
-                ], JSON_UNESCAPED_UNICODE);
-                $server->push($fd, $dispatchMsg);
-                echo "[WS] gpu.job.dispatch.batch 推送: jobs=" . count($jobs) . " worker_fd={$fd}\n";
-            }
+            $this->_flushPendingTasks($server, $fd);
             return;
         }
 
+        // ── GPU 开机请求（PC端发起）──────────────────────────────────────
+        if ($type === 'gpu.power.boot') {
+            echo "[WS] 收到 GPU 开机请求: fd={$fd}\n";
+            // 转发给所有 GPU 监控器
+            $this->_notifyGpuMonitors($server, [
+                'type' => 'gpu.power.boot',
+                'source' => 'client',
+                'fd' => $fd,
+                'request_id' => $data['request_id'] ?? uniqid('boot_'),
+                'msg' => $data['msg'] ?? '请求启动GPU',
+            ]);
+            return;
+        }
 
         // ── Worker 返回提取视频文案结果 ───────────────────────────────
         if ($this->redis->sIsMember(self::KEY_WORKERS, (string)$fd) && $type === 'result') {
@@ -471,12 +531,13 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
     public function onClose($server, int $fd, int $reactorId): void
     {
         $this->redis->sRem(self::KEY_WORKERS, (string)$fd);
+        $this->redis->sRem(self::KEY_GPU_MONITORS, (string)$fd);
 
         $key  = (string)($this->redis->hGet(self::KEY_FD_TO_KEY, (string)$fd) ?: '');
         $role = (string)($this->redis->hGet(self::KEY_FD_TO_ROLE, (string)$fd) ?: '');
         if ($key !== '') {
             $this->redis->sRem("dsp:client_fds:{$key}", (string)$fd);
-            if ($role !== '' && $role !== 'worker') {
+            if ($role !== '' && $role !== 'worker' && $role !== 'gpu_monitor') {
                 $currentFd = (string)($this->redis->hGet("dsp:device_fd:{$key}", $role) ?: '');
                 if ($currentFd === (string)$fd) {
                     $this->redis->hDel("dsp:device_fd:{$key}", $role);
@@ -619,5 +680,190 @@ class Dsp implements OnMessageInterface, OnOpenInterface, OnCloseInterface
             }
         }
         echo "[WS] replyToClient 广播: key={$key} sent={$sent}\n";
+    }
+
+    /**
+     * 通知所有 GPU 监控器有新任务
+     */
+    private function _notifyGpuMonitors($server, array $data): void
+    {
+        $monitors = $this->redis->sMembers(self::KEY_GPU_MONITORS);
+        $sent = 0;
+        $msg = json_encode($data, JSON_UNESCAPED_UNICODE);
+        foreach ($monitors as $fdStr) {
+            $fd = (int)$fdStr;
+            if ($fd > 0 && $server->isEstablished($fd)) {
+                $server->push($fd, $msg);
+                $sent++;
+            } else {
+                $this->redis->sRem(self::KEY_GPU_MONITORS, $fdStr);
+            }
+        }
+        if ($sent > 0) {
+            echo "[WS] 通知 GPU Monitor: type={$data['type']} sent={$sent}\n";
+        }
+    }
+
+    /**
+     * 检查任务状态（防止重复提交）
+     *
+     * @return array ['can_submit' => bool, 'reason' => string, 'old_request_id' => string]
+     */
+    private function _checkTaskStatus(string $key, string $taskType): array
+    {
+        $statusKey = self::KEY_TASK_STATUS_PFX . $key;
+        $taskData = $this->redis->hGet($statusKey, $taskType);
+
+        if (!$taskData) {
+            // 没有进行中的任务，可以提交
+            return ['can_submit' => true, 'reason' => '', 'old_request_id' => ''];
+        }
+
+        $task = json_decode($taskData, true);
+        $startTime = $task['start_time'] ?? 0;
+        $status = $task['status'] ?? 'unknown';
+        $requestId = $task['request_id'] ?? '';
+        $currentTime = time();
+        $elapsed = $currentTime - $startTime;
+
+        // 检查任务是否超时（10分钟）
+        if ($elapsed > self::TASK_TIMEOUT) {
+            // 任务超时，视为失败，可以重新提交
+            echo "[WS] 任务超时: key={$key} task_type={$taskType} elapsed={$elapsed}s\n";
+            $this->redis->hDel($statusKey, $taskType);
+            return ['can_submit' => true, 'reason' => 'timeout', 'old_request_id' => $requestId];
+        }
+
+        // 有进行中的任务
+        if ($status === 'processing') {
+            // GPU 正在处理，不能提交
+            return [
+                'can_submit' => false,
+                'reason' => "任务处理中，请等待完成（已用时 {$elapsed}秒）",
+                'old_request_id' => $requestId
+            ];
+        } elseif ($status === 'queued') {
+            // 任务在队列中（GPU 离线），可以取消旧任务
+            return [
+                'can_submit' => true,
+                'reason' => 'replace_queued',
+                'old_request_id' => $requestId
+            ];
+        }
+
+        return ['can_submit' => true, 'reason' => '', 'old_request_id' => ''];
+    }
+
+    /**
+     * 设置任务状态
+     */
+    private function _setTaskStatus(string $key, string $taskType, string $requestId, string $status): void
+    {
+        $statusKey = self::KEY_TASK_STATUS_PFX . $key;
+        $taskData = json_encode([
+            'task_type' => $taskType,
+            'request_id' => $requestId,
+            'status' => $status,  // 'queued' | 'processing' | 'completed' | 'failed'
+            'start_time' => time(),
+        ], JSON_UNESCAPED_UNICODE);
+
+        $this->redis->hSet($statusKey, $taskType, $taskData);
+        // 设置过期时间（1小时）
+        $this->redis->expire($statusKey, 3600);
+    }
+
+    /**
+     * 清除任务状态
+     */
+    private function _clearTaskStatus(string $key, string $taskType): void
+    {
+        $statusKey = self::KEY_TASK_STATUS_PFX . $key;
+        $this->redis->hDel($statusKey, $taskType);
+    }
+
+    /**
+     * 取消队列中的旧任务
+     */
+    private function _cancelQueuedTask(string $key, string $oldRequestId): void
+    {
+        $queueKey = self::KEY_PENDING_PFX . $key;
+        $tasks = $this->redis->lRange($queueKey, 0, -1);
+
+        foreach ($tasks as $index => $taskJson) {
+            $task = json_decode($taskJson, true);
+            if (isset($task['request_id']) && $task['request_id'] === $oldRequestId) {
+                // 找到旧任务，删除
+                $this->redis->lRem($queueKey, $taskJson, 1);
+                echo "[WS] 取消队列中的旧任务: key={$key} request_id={$oldRequestId}\n";
+                break;
+            }
+        }
+    }
+
+    /**
+     * 检查并发送待处理的 GPU Monitor 通知
+     *
+     * 用于从 Redis 队列中获取 HTTP Controller 发送的通知并转发给 GPU Monitor
+     */
+    private function _checkAndSendGpuMonitorNotifications($server): void
+    {
+        $notifyKey = 'dsp:gpu_monitor_notify';
+
+        $queueLen = (int)$this->redis->lLen($notifyKey);
+        if ($queueLen <= 0) {
+            return;
+        }
+
+        // 先筛出可用 monitor；若当前无可用连接，不弹出队列，避免消息丢失
+        $aliveMonitors = [];
+        foreach ($this->redis->sMembers(self::KEY_GPU_MONITORS) as $fdStr) {
+            $fd = (int)$fdStr;
+            if ($fd > 0 && $server->isEstablished($fd)) {
+                $aliveMonitors[] = $fd;
+            } else {
+                $this->redis->sRem(self::KEY_GPU_MONITORS, (string)$fdStr);
+            }
+        }
+
+        if (empty($aliveMonitors)) {
+            echo "[WS] GPU Monitor 通知待发送={$queueLen}，但当前无在线 monitor，保留队列\n";
+            return;
+        }
+
+        $messages = [];
+        for ($i = 0; $i < 10; $i++) {
+            $msg = $this->redis->lPop($notifyKey);
+            if ($msg === null || $msg === false) {
+                break;
+            }
+            $messages[] = (string)$msg;
+        }
+
+        if (empty($messages)) {
+            return;
+        }
+
+        $sent = 0;
+        foreach ($messages as $msg) {
+            $delivered = 0;
+            foreach ($aliveMonitors as $fd) {
+                if ($server->isEstablished($fd)) {
+                    $server->push($fd, $msg);
+                    $sent++;
+                    $delivered++;
+                } else {
+                    $this->redis->sRem(self::KEY_GPU_MONITORS, (string)$fd);
+                }
+            }
+
+            // 全部 monitor 在发送阶段失效时，把消息放回队列头，等待下次重试
+            if ($delivered === 0) {
+                $this->redis->lPush($notifyKey, $msg);
+            }
+        }
+
+        if ($sent > 0) {
+            echo "[WS] GPU Monitor 通知发送完成: messages=" . count($messages) . ", sent={$sent}\n";
+        }
     }
 }

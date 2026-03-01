@@ -8,7 +8,25 @@
 #   4. 主线程：销毁 tkinter → 调用 webview.start()
 
 import os, sys, time, socket, threading, subprocess, signal, traceback
+import ctypes
 import json
+
+# ── 单实例保护（mutex 在进程存活期间持有）──
+_APP_MUTEX = None
+def _ensure_single_instance():
+    global _APP_MUTEX
+    if sys.platform != "win32":
+        return True
+    _APP_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, True, "Global\\ZhiMoAI_AppBackend_SingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        ctypes.windll.kernel32.CloseHandle(_APP_MUTEX)
+        _APP_MUTEX = None
+        return False
+    return True
+
+if not _ensure_single_instance():
+    sys.exit(0)
+
 try:
     import urllib.request
     import urllib.error
@@ -1447,6 +1465,26 @@ def run_splash(root, status_var):
 #  主入口
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    def _try_activate_existing_instance(retries: int = 30, delay_s: float = 0.2) -> bool:
+        """尝试激活已运行实例，避免重复启动多个窗口。"""
+        for _ in range(max(1, retries)):
+            s = None
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.8)
+                s.connect(('127.0.0.1', 17871))
+                s.sendall(b'ACTIVATE')
+                return True
+            except Exception:
+                time.sleep(delay_s)
+            finally:
+                try:
+                    if s:
+                        s.close()
+                except Exception:
+                    pass
+        return False
+
     # ── 单实例检查 ─────────────────────────────────────────
     _lock_socket = None
     try:
@@ -1457,25 +1495,15 @@ if __name__ == "__main__":
             pass
         _lock_socket.bind(('127.0.0.1', 17870))
         print("[LOCK] 单实例锁已获取")
-    except OSError as e:
-        print("[LOCK] 程序已在运行，激活现有窗口...")
-        ok_activate = False
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1.0)
-            s.connect(('127.0.0.1', 17871))
-            s.send(b'ACTIVATE')
-            s.close()
-            ok_activate = True
-        except Exception:
-            ok_activate = False
-
-        if ok_activate:
+    except OSError:
+        print("[LOCK] 程序已在运行，尝试激活现有窗口...")
+        if _try_activate_existing_instance():
+            print("[LOCK] 已激活现有窗口，当前进程退出")
             sys.exit(0)
 
-        # 激活失败：可能是 TIME_WAIT/残留端口占用 或旧进程异常退出。
-        # 为避免双击无反应，这里继续启动。
-        print(f"[LOCK] 激活失败，继续启动: {e}")
+        # 激活失败时直接退出，避免继续创建新实例导致多窗口堆积
+        print("[LOCK] 未能激活现有窗口，为避免重复实例，当前进程退出")
+        sys.exit(0)
 
     # ── 检查更新 ─────────────────────────────────────────
     if ENV_CONFIG.get('CHECK_UPDATE', True):

@@ -94,10 +94,14 @@ class LicenseController
 
         $this->log($key, $machine, 1, null, $request);
 
+        // 获取 LIPVOICE_SIGN 环境变量
+        $lipvoiceSign = env('LIPVOICE_SIGN', '');
+
         return $response->json([
             'code'=>0,
             'msg'=>'登录成功',
-            'expire_time'=>$card->end_time
+            'expire_time'=>$card->end_time,
+            'lipvoice_sign'=>$lipvoiceSign
         ]);
     }
 

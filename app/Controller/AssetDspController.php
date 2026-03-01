@@ -41,6 +41,7 @@ class AssetDspController
      * GET /api/asset/list?asset_type=voice
      * （兼容 /api/dsp/asset/list）
      * 代理到 GPU 服务器的 /api/asset/list
+     * GPU 离线时返回缓存的列表
      */
     public function list(): array
     {
@@ -59,11 +60,30 @@ class AssetDspController
             }
 
             $result = $this->_httpGet($url);
-            if ($result === null) {
-                return ApiResponse::fail('GPU服务器未上线，请稍后重试');
+
+            if ($result !== null) {
+                // GPU 在线，缓存结果
+                $cacheKey = "asset_list:{$licenseKey}:{$assetType}";
+                $this->redis->setex($cacheKey, 3600, json_encode($result)); // 缓存1小时
+                return $result;
             }
 
-            return $result;
+            // GPU 离线，尝试返回缓存
+            $cacheKey = "asset_list:{$licenseKey}:{$assetType}";
+            $cached = $this->redis->get($cacheKey);
+            if ($cached) {
+                $data = json_decode($cached, true);
+                if (is_array($data)) {
+                    // 添加提示信息
+                    if (isset($data['data']) && is_array($data['data'])) {
+                        $data['msg'] = 'GPU服务器未上线，显示缓存数据';
+                        $data['cached'] = true;
+                    }
+                    return $data;
+                }
+            }
+
+            return ApiResponse::fail('GPU服务器未上线，且无缓存数据');
         } catch (\Throwable $e) {
             return ApiResponse::fail($e->getMessage());
         }

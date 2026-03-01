@@ -8,6 +8,7 @@ use App\Support\ApiResponse;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\Redis\Redis;
+use Hyperf\WebSocketServer\Sender;
 
 /**
  * HeyGem 视频合成任务控制器
@@ -24,6 +25,9 @@ class HeyGemTaskController
 
     #[Inject]
     protected Redis $redis;
+
+    #[Inject]
+    protected Sender $sender;
 
     /**
      * POST /api/heygem/task/submit
@@ -58,42 +62,38 @@ class HeyGemTaskController
             // 生成任务 ID
             $taskId = uniqid('heygem_');
             $requestId = $taskId;
+            $payload = [
+                'audio_hash' => $audioHash,
+                'audio_ext'  => $audioExt,
+                'video_hash' => $videoHash,
+                'video_ext'  => $videoExt,
+                'task_id'    => $taskId,
+            ];
 
             // 检查 GPU 是否在线
             $workers = $this->redis->sMembers('dsp:workers');
             $gpuOnline = !empty($workers);
 
             if ($gpuOnline) {
-                // GPU 在线：通过 WebSocket 立即提交
-                $this->_submitToGpu($licenseKey, $requestId, [
-                    'audio_hash' => $audioHash,
-                    'audio_ext'  => $audioExt,
-                    'video_hash' => $videoHash,
-                    'video_ext'  => $videoExt,
-                    'task_id'    => $taskId,
-                ]);
-
-                return ApiResponse::ok([
-                    'task_id' => $taskId,
-                    'status'  => 'submitted',
-                    'msg'     => '任务已提交到 GPU 服务器',
-                ], '已提交');
-            } else {
-                // GPU 离线：入队
-                $this->_enqueueTask($licenseKey, $requestId, [
-                    'audio_hash' => $audioHash,
-                    'audio_ext'  => $audioExt,
-                    'video_hash' => $videoHash,
-                    'video_ext'  => $videoExt,
-                    'task_id'    => $taskId,
-                ]);
-
-                return ApiResponse::ok([
-                    'task_id' => $taskId,
-                    'status'  => 'queued',
-                    'msg'     => 'GPU 服务器未上线，任务已排队，服务器启动后自动执行（约2分钟）',
-                ], '已排队');
+                $sent = $this->_dispatchToWorkers($licenseKey, $requestId, $payload);
+                if ($sent > 0) {
+                    $this->_saveTaskStatus($taskId, $requestId, 'processing');
+                    return ApiResponse::ok([
+                        'task_id' => $taskId,
+                        'status'  => 'submitted',
+                        'msg'     => '任务已提交到 GPU 服务器',
+                    ], '已提交');
+                }
             }
+
+            // GPU 离线或发送失败：入队并通知 GPU Manager 开机
+            $this->_enqueueTask($licenseKey, $requestId, $payload);
+
+            return ApiResponse::ok([
+                'task_id' => $taskId,
+                'status'  => 'queued',
+                'msg'     => 'GPU 服务器未上线，任务已排队，服务器启动后自动执行（约2分钟）',
+            ], '已排队');
 
         } catch (\Throwable $e) {
             return ApiResponse::fail($e->getMessage());
@@ -133,33 +133,35 @@ class HeyGemTaskController
 
     // ─────────────────────── 私有方法 ────────────────────────────────
 
-    /**
-     * 通过 WebSocket 提交任务给 GPU
-     */
-    private function _submitToGpu(string $licenseKey, string $requestId, array $payload): void
+    private function _dispatchToWorkers(string $licenseKey, string $requestId, array $payload): int
     {
         $msg = json_encode([
             'type'       => 'gpu.job.submit',
             'task_type'  => 'heygem_submit',
             'request_id' => $requestId,
             'key'        => $licenseKey,
-            'sender_fd'  => 0, // HTTP 触发，无 WS fd
+            'sender_fd'  => 0,
             'payload'    => $payload,
         ], JSON_UNESCAPED_UNICODE);
 
-        // 获取在线的 worker
         $workers = $this->redis->sMembers('dsp:workers');
+        $sent = 0;
 
-        foreach ($workers as $workerFd) {
-            // 这里需要通过 Swoole Server 发送消息
-            // 由于我们在 HTTP 上下文中，无法直接访问 WebSocket Server
-            // 所以我们将消息存入 Redis，由 WebSocket 网关定时取出发送
-            // 或者直接入队，让 GPU 上线后批量处理
-
-            // 临时方案：直接入队
-            $this->_enqueueTask($licenseKey, $requestId, $payload);
-            break;
+        foreach ($workers as $fdStr) {
+            $fd = (int)$fdStr;
+            if ($fd <= 0) {
+                continue;
+            }
+            try {
+                $this->sender->push($fd, $msg);
+                $sent++;
+            } catch (\Throwable $e) {
+                // 清理失效 fd，避免后续误判“在线”
+                $this->redis->sRem('dsp:workers', (string)$fdStr);
+            }
         }
+
+        return $sent;
     }
 
     /**
@@ -183,15 +185,45 @@ class HeyGemTaskController
         }
         $this->redis->rPush($queueKey, $msg);
 
-        // 保存任务状态
-        $statusKey = "heygem:task:status:{$payload['task_id']}";
+        $this->_saveTaskStatus((string)$payload['task_id'], $requestId, 'queued');
+
+        // 通知 GPU Monitor 有新任务（触发自动开机）
+        $this->_notifyGpuMonitors([
+            'type' => 'gpu.job.submit',
+            'task_type' => 'heygem_submit',
+            'key' => $licenseKey,
+            'request_id' => $requestId,
+        ]);
+
+        echo "[HeyGemTask] 任务入队: key={$licenseKey} task_id={$payload['task_id']} request_id={$requestId}\n";
+    }
+
+    /**
+     * 通知 GPU 监控器有新任务
+     */
+    private function _notifyGpuMonitors(array $data): void
+    {
+        $msg = json_encode($data, JSON_UNESCAPED_UNICODE);
+
+        // 将通知消息存入 Redis，由 WebSocket 服务器发送
+        // 因为 HTTP Controller 无法直接访问 WebSocket Server
+        $notifyKey = 'dsp:gpu_monitor_notify';
+        $this->redis->rPush($notifyKey, $msg);
+
+        $monitorCount = (int)$this->redis->sCard('dsp:gpu_monitors');
+        $queueLen = $this->redis->lLen($notifyKey);
+        echo "[HeyGemTask] 已写入 GPU Monitor 通知队列: monitors={$monitorCount}, queue_len={$queueLen}\n";
+        echo "[HeyGemTask] 通知内容: {$msg}\n";
+    }
+
+    private function _saveTaskStatus(string $taskId, string $requestId, string $status): void
+    {
+        $statusKey = "heygem:task:status:{$taskId}";
         $this->redis->setex($statusKey, 86400, json_encode([
-            'task_id'    => $payload['task_id'],
-            'status'     => 'queued',
+            'task_id'    => $taskId,
+            'status'     => $status,
             'request_id' => $requestId,
             'created_at' => time(),
         ]));
-
-        echo "[HeyGemTask] 任务入队: key={$licenseKey} task_id={$payload['task_id']} request_id={$requestId}\n";
     }
 }

@@ -1,9 +1,23 @@
 # -*- coding: utf-8 -*-
-import os, sys, time, subprocess, traceback, shutil, re, json, queue as _queue, threading
+import os
+import sys
+import time
+import hashlib
+import json
+import traceback
+import uuid
+import subprocess
+import threading
+import queue as _queue
+import shutil
+import requests as _req
+import gradio as gr
 import asyncio
-import base64
 import ctypes
-import ctypes.wintypes
+import base64
+from datetime import datetime
+from typing import Optional, Tuple, List, Dict, Any
+from pathlib import Path
 
 # ── 加载 .env 配置 ──
 def load_env_file():
@@ -1860,6 +1874,50 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
     audio_ext = os.path.splitext(audio_path)[1] or ".wav"
 
     # ── 0) 健康检查（GPU离线时等待上线）──
+    # 0.1) 先快速检查 GPU 是否在线，离线才发 WS 开机请求
+    _gpu_online = False
+    try:
+        _hc = _req.get(f"{server_url}/api/heygem/health", headers=headers, timeout=5)
+        _hc.raise_for_status()
+        _hd = _hc.json()
+        if _hd.get("code") == 0 and _hd.get("initialized"):
+            _gpu_online = True
+    except Exception:
+        pass
+
+    if not _gpu_online and _WS_OK:
+        # GPU 离线，通过 API 服务器的 WebSocket 通知 gpu_power_manager 开机
+        api_ws_url = os.getenv("API_SERVER_URL", "https://api.zhimengai.xyz").strip().rstrip("/")
+        api_ws_url = api_ws_url.replace("https://", "wss://").replace("http://", "ws://") + "/dsp"
+        import websockets as _ws_lib
+
+        async def _try_wake_gpu_via_ws():
+            try:
+                async with _ws_lib.connect(api_ws_url, open_timeout=5, close_timeout=3) as ws:
+                    await ws.send(json.dumps({
+                        "type": "register",
+                        "key": api_secret or "gradio_client",
+                        "device_type": "pc"
+                    }))
+                    await ws.send(json.dumps({
+                        "type": "gpu.power.boot",
+                        "request_id": str(uuid.uuid4()),
+                        "source": "gradio",
+                        "msg": "PC端请求启动GPU服务器"
+                    }))
+                    safe_print(f"[WS] 已发送 GPU 开机请求 → {api_ws_url}")
+            except Exception as e:
+                safe_print(f"[WS] 发送开机请求失败: {e}")
+
+        def _wake_gpu():
+            try:
+                asyncio.run(_try_wake_gpu_via_ws())
+            except Exception as e:
+                safe_print(f"[WS] GPU唤醒异常: {e}")
+
+        threading.Thread(target=_wake_gpu, daemon=True).start()
+
+    # 0.2) 健康检查循环（等待 GPU 上线）
     health_check_interval = 5  # 每5秒检查一次
     health_check_timeout = 1800  # 最多等待30分钟
     health_start_time = time.time()
@@ -5844,13 +5902,13 @@ def build_ui():
                           progress=gr.Progress()):
             """合成视频并自动保存工作台状态"""
             # 开始时禁用按钮，防止重复点击
-            yield gr.update(), gr.update(), gr.update(), gr.update(interactive=False)
+            yield gr.update(), gr.update(), gr.update(), gr.update(), gr.update(interactive=False)
 
             try:
                 final_result = None
                 for result in ls_wrap(avatar_sel, aud_for_ls, inp_txt, quality_name=quality_name,
                                      heygem_mode_val=heygem_mode_val, progress=progress):
-                    yield result + (gr.update(), gr.update(interactive=False))
+                    yield result + (gr.update(), gr.update(), gr.update(interactive=False))
                     final_result = result
             
                 if final_result:

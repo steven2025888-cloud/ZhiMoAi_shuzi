@@ -48,7 +48,7 @@ except _req.exceptions.RequestException as e:
     if "Connection" in error_msg or "timeout" in error_msg.lower() or "Max retries" in error_msg:
         raise gr.Error(
             "⏳ GPU 服务器未上线，任务已排队\n\n"
-            "服务器启动中，请等待约 2 分钟后重试\n"
+            "服务启动中，请等待约 2 分钟后重试\n"
             "或稍后在「历史记录」中查看结果\n\n"
             f"提示：如需立即处理，请联系管理员启动 GPU 服务器"
         )

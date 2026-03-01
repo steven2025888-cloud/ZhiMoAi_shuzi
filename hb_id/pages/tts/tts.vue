@@ -235,7 +235,8 @@ async function startSynthesize() {
     const voiceUrl = createRes.data?.voiceUrl
 
     if (voiceUrl) {
-      resultUrl.value = ttsDownloadUrl(voiceUrl)
+      // 直接使用原始URL，不通过代理
+      resultUrl.value = voiceUrl
       resultTaskId.value = taskId
       resultTempAudioPath.value = ''
       uni.setStorageSync('tts_last_result_url', resultUrl.value)
@@ -260,7 +261,8 @@ async function startSynthesize() {
         const d = resultRes.data
         if (d.voiceUrl || d.voice_url) {
           const url = d.voiceUrl || d.voice_url
-          resultUrl.value = ttsDownloadUrl(url)
+          // 直接使用原始URL，不通过代理
+          resultUrl.value = url
           resultTaskId.value = taskId
           resultTempAudioPath.value = ''
           uni.setStorageSync('tts_last_result_url', resultUrl.value)

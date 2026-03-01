@@ -3,7 +3,7 @@
  * PHP服务器：登录 / TTS
  * 合成服务器(run_server.py)：资产管理 / 视频合成 / 视频编辑
  */
-import { getLicenseKey, getMachineCode, getServerUrl, getSynthUrl, getSynthSecret } from './storage.js'
+import { getLicenseKey, getMachineCode, getServerUrl, getSynthUrl, getSynthSecret, getLipvoiceSign } from './storage.js'
 
 // ── PHP 服务器请求 ──
 function request(path, options = {}) {
@@ -44,6 +44,16 @@ function request(path, options = {}) {
 export function downloadFileWithAuth(url, timeout = 60000) {
   const licenseKey = getLicenseKey()
   const machineCode = getMachineCode()
+  const lipvoiceSign = getLipvoiceSign()
+
+  // 如果没有sign，使用代理下载
+  if (!lipvoiceSign && url.includes('lipvoice.cn')) {
+    console.log('[下载] 没有sign，使用代理下载')
+    const baseUrl = getServerUrl().replace(/\/+$/, '')
+    url = `${baseUrl}/api/dsp/voice/tts/download?voice_url=${encodeURIComponent(url)}`
+  } else if (lipvoiceSign) {
+    console.log('[下载] 使用sign直接下载:', url)
+  }
 
   return new Promise((resolve, reject) => {
     uni.downloadFile({
@@ -53,6 +63,7 @@ export function downloadFileWithAuth(url, timeout = 60000) {
         'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
         'X-Machine-Code': machineCode,
         'X-Device-Type': 'mobile',
+        'sign': lipvoiceSign,
       },
       success: (res) => {
         if (res.statusCode === 200 && res.tempFilePath) resolve(res)
@@ -192,12 +203,13 @@ export function ttsHistoryDetail(id) {
 }
 
 // ── 资产管理 ──
-// uploadAsset：直连 GPU 合成服务器（文件上传，需要直连性能）
+// uploadAsset：通过 API 端上传（GPU 离线时自动排队）
 export function uploadAsset(filePath, assetType, name) {
-  const baseUrl = getSynthUrl()
-  if (!baseUrl) return Promise.reject(new Error('合成服务器未配置'))
-  const secret = getSynthSecret()
   const licenseKey = getLicenseKey()
+  const machineCode = getMachineCode()
+
+  // 使用 API 端接口，而不是直接连接 GPU
+  const baseUrl = getServerUrl().replace(/\/+$/, '')
 
   return new Promise((resolve, reject) => {
     uni.uploadFile({
@@ -205,15 +217,19 @@ export function uploadAsset(filePath, assetType, name) {
       filePath,
       name: 'file',
       formData: {
-        license_key: licenseKey,
         asset_type: assetType,
         name: name,
       },
-      header: secret ? { 'Authorization': `Bearer ${secret}` } : {},
+      header: {
+        'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
+        'X-Machine-Code': machineCode,
+        'X-Device-Type': 'mobile',
+      },
       timeout: 600000,
       success(res) {
         if (res.statusCode === 200) {
-          resolve(typeof res.data === 'string' ? JSON.parse(res.data) : res.data)
+          const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+          resolve(data)
         } else {
           reject(new Error(`Upload HTTP ${res.statusCode}`))
         }

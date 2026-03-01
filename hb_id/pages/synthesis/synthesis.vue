@@ -393,7 +393,14 @@ async function startSynthesis() {
       audioE = upRes.data.file_ext
     }
 
-    if (!audioH) throw new Error('无有效音频')
+    if (!audioH) {
+      console.error('音频检查失败:', {
+        localAudioPath: localAudioPath.value,
+        ttsAudioUrl: ttsAudioUrl.value,
+        hasAudio: hasAudio.value
+      })
+      throw new Error('无有效音频，请先上传音频或从语音合成页面选择音频')
+    }
 
     progressMsg.value = '提交合成...'
     progressPct.value = 25

@@ -9,6 +9,7 @@ const KEYS = {
   SERVER_URL: 'zm_server_url',
   SYNTH_URL: 'zm_synth_url',
   SYNTH_SECRET: 'zm_synth_secret',
+  LIPVOICE_SIGN: 'zm_lipvoice_sign',
 }
 
 // 生成手机端唯一设备码
@@ -37,6 +38,9 @@ export function saveLicense(data) {
   if (data.synthesis_api_secret !== undefined) {
     uni.setStorageSync(KEYS.SYNTH_SECRET, data.synthesis_api_secret || '')
   }
+  if (data.lipvoice_sign !== undefined) {
+    uni.setStorageSync(KEYS.LIPVOICE_SIGN, data.lipvoice_sign || '')
+  }
 }
 
 export function getLicenseKey() {
@@ -61,6 +65,7 @@ export function logout() {
   uni.removeStorageSync(KEYS.ONLINE_ENABLED)
   uni.removeStorageSync(KEYS.SYNTH_URL)
   uni.removeStorageSync(KEYS.SYNTH_SECRET)
+  uni.removeStorageSync(KEYS.LIPVOICE_SIGN)
 }
 
 export function getServerUrl() {
@@ -77,4 +82,8 @@ export function getSynthUrl() {
 
 export function getSynthSecret() {
   return uni.getStorageSync(KEYS.SYNTH_SECRET) || ''
+}
+
+export function getLipvoiceSign() {
+  return uni.getStorageSync(KEYS.LIPVOICE_SIGN) || 'KVcC3FvZunYE4KimHhqkUxE4GxyV3Rqm'
 }

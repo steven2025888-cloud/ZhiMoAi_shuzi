@@ -94,11 +94,13 @@ Router::addGroup('/api/dsp', function () {
 Router::addGroup('/api/asset', function () {
     Router::get('/list', [\App\Controller\AssetDspController::class, 'list']);
     Router::post('/delete', [\App\Controller\AssetDspController::class, 'delete']);
+    Router::post('/upload', [\App\Controller\AssetUploadController::class, 'upload']);
 }, ['middleware' => [App\Middleware\LicenseCardAuthDspMiddleware::class]]);
 
 Router::addGroup('/api/dsp/asset', function () {
     Router::get('/list', [\App\Controller\AssetDspController::class, 'list']);
     Router::post('/delete', [\App\Controller\AssetDspController::class, 'delete']);
+    Router::post('/upload', [\App\Controller\AssetUploadController::class, 'upload']);
 }, ['middleware' => [App\Middleware\LicenseCardAuthDspMiddleware::class]]);
 
 Router::addGroup('/api/dsp/voice', function () {

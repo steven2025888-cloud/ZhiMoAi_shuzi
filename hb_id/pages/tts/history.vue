@@ -201,7 +201,8 @@ async function playRecord(record) {
     return
   }
 
-  const url = ttsDownloadUrl(voiceUrl)
+  // 直接使用原始URL，不通过代理
+  const url = voiceUrl
 
   stopAndDestroyAudio()
   playing.value = true
@@ -242,7 +243,8 @@ function downloadRecord(record) {
     return
   }
 
-  const url = ttsDownloadUrl(voiceUrl)
+  // 直接使用原始URL，不通过代理
+  const url = voiceUrl
 
   uni.showLoading({ title: '下载中...' })
 

@@ -7,7 +7,12 @@
       "Bash(if [ -d runtime ])",
       "Bash(then echo \"runtime 目录存在\")",
       "Bash(else echo \"runtime 目录不存在\")",
-      "Bash(fi:*)"
+      "Bash(fi:*)",
+      "Bash(python:*)",
+      "Bash(php:*)",
+      "Bash(ssh:*)",
+      "Bash(dir d:\\\\ZhiMoAi_shuzi:*)",
+      "Bash(powershell.exe:*)"
     ]
   }
 }
