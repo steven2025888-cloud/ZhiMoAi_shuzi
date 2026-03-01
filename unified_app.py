@@ -5892,60 +5892,60 @@ def build_ui():
                                       '<style>@keyframes zdai-spin{to{transform:rotate(360deg)}}</style></div>',
                                 visible=True), gr.update(), gr.update(), gr.update(interactive=False)
 
-                        is_online = ("在线" in str(pip_mode_val))
-                        pip_result = ""
-                        if is_online:
-                            if pip_prompt_val and pip_prompt_val.strip():
-                                prompts_list = [_pip_force_chinese_person(p.strip()) for p in pip_prompt_val.strip().split('\n') if p.strip()]
-                                if not prompts_list:
-                                    prompts_list = [_pip_force_chinese_person(pip_prompt_val.strip())]
+                            is_online = ("在线" in str(pip_mode_val))
+                            pip_result = ""
+                            if is_online:
+                                if pip_prompt_val and pip_prompt_val.strip():
+                                    prompts_list = [_pip_force_chinese_person(p.strip()) for p in pip_prompt_val.strip().split('\n') if p.strip()]
+                                    if not prompts_list:
+                                        prompts_list = [_pip_force_chinese_person(pip_prompt_val.strip())]
 
-                                # 使用 TextExtractor 连接生成画中画
-                                extractor = get_text_extractor()
-                                if len(prompts_list) == 1:
-                                    # 单个提示词 - 暂不支持合成
-                                    pip_result = _pip_ws.generate_pip_via_extractor(
-                                        prompts_list[0],
-                                        extractor,
+                                    # 使用 TextExtractor 连接生成画中画
+                                    extractor = get_text_extractor()
+                                    if len(prompts_list) == 1:
+                                        # 单个提示词 - 暂不支持合成
+                                        pip_result = _pip_ws.generate_pip_via_extractor(
+                                            prompts_list[0],
+                                            extractor,
+                                            progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
+                                        )
+                                    else:
+                                        # 多个提示词，批量生成并合成
+                                        pip_result = _pip_ws.generate_and_compose_pips(
+                                            str(video_path),
+                                            prompts_list,
+                                            extractor,
+                                            clip_duration=5.0,
+                                            progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
+                                        )
+                                else:
+                                    safe_print("[PIP] 在线模式但无提示词，跳过画中画")
+                            else:
+                                local_paths = []
+                                if isinstance(pip_local_val, list):
+                                    for f in pip_local_val:
+                                        p = f.name if hasattr(f, 'name') else str(f)
+                                        if p and os.path.exists(p):
+                                            local_paths.append(p)
+                                elif pip_local_val:
+                                    p = pip_local_val.name if hasattr(pip_local_val, 'name') else str(pip_local_val)
+                                    if p and os.path.exists(p):
+                                        local_paths.append(p)
+                                if local_paths:
+                                    pip_result = _pip.apply_pip_local(
+                                        str(video_path), local_paths,
+                                        interval=float(pip_interval_val),
+                                        clip_duration=float(pip_clip_dur_val),
                                         progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
                                     )
                                 else:
-                                    # 多个提示词，批量生成并合成
-                                    pip_result = _pip_ws.generate_and_compose_pips(
-                                        str(video_path),
-                                        prompts_list,
-                                        extractor,
-                                        clip_duration=5.0,
-                                        progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
-                                    )
-                            else:
-                                safe_print("[PIP] 在线模式但无提示词，跳过画中画")
-                        else:
-                            local_paths = []
-                            if isinstance(pip_local_val, list):
-                                for f in pip_local_val:
-                                    p = f.name if hasattr(f, 'name') else str(f)
-                                    if p and os.path.exists(p):
-                                        local_paths.append(p)
-                            elif pip_local_val:
-                                p = pip_local_val.name if hasattr(pip_local_val, 'name') else str(pip_local_val)
-                                if p and os.path.exists(p):
-                                    local_paths.append(p)
-                            if local_paths:
-                                pip_result = _pip.apply_pip_local(
-                                    str(video_path), local_paths,
-                                    interval=float(pip_interval_val),
-                                    clip_duration=float(pip_clip_dur_val),
-                                    progress_cb=lambda pct, msg: safe_print(f"[PIP] {pct:.0%} {msg}")
-                                )
-                            else:
-                                safe_print("[PIP] 本地模式但无有效素材，跳过画中画")
+                                    safe_print("[PIP] 本地模式但无有效素材，跳过画中画")
 
-                        if pip_result and os.path.exists(pip_result):
-                            safe_print(f"[PIP] 画中画处理完成: {pip_result}")
-                            video_path = pip_result
-                        else:
-                            safe_print("[PIP] 画中画处理未产出结果")
+                            if pip_result and os.path.exists(pip_result):
+                                safe_print(f"[PIP] 画中画处理完成: {pip_result}")
+                                video_path = pip_result
+                            else:
+                                safe_print("[PIP] 画中画处理未产出结果")
                     except Exception as e:
                         safe_print(f"[PIP] 画中画处理失败（不影响视频输出）: {e}")
                         traceback.print_exc()
@@ -5977,11 +5977,10 @@ def build_ui():
                 # 注意：第一个值需要是视频路径，Gradio 会自动处理
                 yield video_path, ls_detail, hint_msg, dropdown_update, gr.update(interactive=True)
             except Exception as e:
-                # 发生错误时也要重新启用按钮
-                raise
-            finally:
-                # 确保按钮总是被重新启用
-                pass
+                # 异常时也要重新启用按钮（否则会卡死）
+                err_hint = _hint_html("error", f"合成失败：{e}")
+                yield gr.update(), gr.update(), gr.update(value=err_hint, visible=True), gr.update(), gr.update(interactive=True)
+                return
         
         ls_btn.click(
             video_and_save,
