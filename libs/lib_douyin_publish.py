@@ -13,6 +13,9 @@ import zipfile
 from typing import Callable, List, Optional, Tuple
 
 import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
@@ -177,7 +180,14 @@ class DouyinPublisher:
         """获取 ChromeDriver 路径"""
         driver_name = "chromedriver.exe" if platform.system() == "Windows" else "chromedriver"
 
-        # 优先检查 chromedriver 文件夹
+        # 优先检查项目根目录的 chromedriver 文件夹（libs 的上级目录）
+        project_root = os.path.dirname(self.base_dir)
+        root_driver_path = os.path.join(project_root, "chromedriver", driver_name)
+        if os.path.exists(root_driver_path):
+            print(f"[ChromeDriver] 使用项目根目录驱动: {root_driver_path}")
+            return root_driver_path
+
+        # 检查 libs/chromedriver 文件夹
         driver_folder_path = os.path.join(self.base_dir, "chromedriver", driver_name)
         if os.path.exists(driver_folder_path):
             print(f"[ChromeDriver] 使用打包驱动: {driver_folder_path}")
