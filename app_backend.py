@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# app_backend.py — 由 启动应用.vbs 通过 pythonw.exe 调用
+# app_backend.py — 由 launcher.exe 通过 python.exe 调用
 #
 # 架构：
 #   1. 立即显示 tkinter 启动画面
@@ -10,6 +10,53 @@
 import os, sys, time, socket, threading, subprocess, signal, traceback
 import ctypes
 import json
+
+# ── 全局崩溃处理器（必须在所有其他代码之前设置）──
+# 确保任何未捕获的异常都写入 logs/crash.log，不会被静默吞掉
+def _install_crash_handler():
+    _base = os.path.dirname(os.path.abspath(__file__))
+    _log_dir = os.path.join(_base, "logs")
+    os.makedirs(_log_dir, exist_ok=True)
+    _crash_log = os.path.join(_log_dir, "crash.log")
+
+    def _handler(exc_type, exc_value, exc_tb):
+        try:
+            with open(_crash_log, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"CRASH at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Python: {sys.executable}\n")
+                f.write(f"Script: {__file__}\n")
+                f.write(f"CWD: {os.getcwd()}\n")
+                f.write(f"sys.path: {sys.path[:5]}\n")
+                f.write(f"{'='*60}\n")
+                traceback.print_exception(exc_type, exc_value, exc_tb, file=f)
+                f.write("\n")
+                f.flush()
+        except Exception:
+            pass
+        # 同时输出到 stderr（会被 launcher 捕获到 backend_startup.log）
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _handler
+
+_install_crash_handler()
+
+# ── 启动诊断（输出到 stdout → launcher 会捕获到 backend_startup.log）──
+# 注意：pythonw.exe 下 sys.stdout 是 None，需要安全处理
+def _safe_print(msg):
+    try:
+        if sys.stdout:
+            print(msg)
+            sys.stdout.flush()
+    except Exception:
+        pass
+
+_safe_print(f"[BOOT] app_backend 启动中...")
+_safe_print(f"[BOOT] Python: {sys.executable}")
+_safe_print(f"[BOOT] 版本: {sys.version}")
+_safe_print(f"[BOOT] 脚本: {__file__}")
+_safe_print(f"[BOOT] CWD: {os.getcwd()}")
+_safe_print(f"[BOOT] BASE_DIR: {os.path.dirname(os.path.abspath(__file__))}")
 
 # ── 单实例保护（mutex 在进程存活期间持有）──
 _APP_MUTEX = None
@@ -100,7 +147,7 @@ def _read_all_config():
                     cfg[k.strip()] = v.strip()
         except Exception:
             pass
-    # 2) .env（开发覆盖，优先级更高）
+    # 2) .env（开发覆盖，优先级更高；打包后不存在则跳过）
     env_file = os.path.join(BASE_DIR, '.env')
     if os.path.exists(env_file):
         try:
@@ -116,22 +163,12 @@ def _read_all_config():
     return cfg
 
 
-# 从配置文件读取版本信息
-def _load_version_from_env():
-    """从 config.dat / .env 读取版本号和 build 号"""
-    version = "2.0.0"  # 默认版本号（打包时可修改此值）
-    build = 200
-    try:
-        cfg = _read_all_config()
-        if 'APP_VERSION_NUMBER' in cfg:
-            version = cfg['APP_VERSION_NUMBER']
-        if 'APP_BUILD' in cfg:
-            build = int(cfg['APP_BUILD'])
-    except Exception as e:
-        print(f"[WARNING] 读取版本信息失败: {e}")
-    return version, build
-
-CURRENT_VERSION, CURRENT_BUILD = _load_version_from_env()
+# 从统一接口读取版本信息
+try:
+    from libs.app_version import get_app_version
+    CURRENT_VERSION, CURRENT_BUILD = get_app_version(BASE_DIR)
+except Exception as _e:
+    CURRENT_VERSION, CURRENT_BUILD = ("2.3.9", 239)
 UPDATE_CHECK_URL = "https://api.zhimengai.xyz/api/update/Dspcheck"
 
 os.environ['PYTHONNOUSERSITE'] = '1'
@@ -683,6 +720,14 @@ del "%~f0"
         cancel_flag["cancel"] = True
         later_btn.configure(state="disabled")
     
+    def _safe_close_dialog():
+        """安全关闭更新对话框"""
+        try:
+            dialog.quit()
+            dialog.destroy()
+        except Exception:
+            pass
+    
     def on_later():
         if not is_force:
             result["action"] = "later"
@@ -693,6 +738,11 @@ del "%~f0"
         result["action"] = "exit"
         cancel_flag["cancel"] = True
         _safe_close_dialog()
+        # 确保退出（防止 mainloop 未正确结束）
+        try:
+            os._exit(0)
+        except Exception:
+            pass
     
     # 下载按钮
     download_btn = tk.Button(
@@ -1264,10 +1314,23 @@ def cleanup():
 # ══════════════════════════════════════════════════════════════
 def start_gradio():
     global gradio_process
-    python_path = os.path.join(INDEXTTS_DIR, "installer_files", "env", "python.exe")
+    
+    # 搜索 Python 解释器（与 launcher.py 保持一致的搜索路径）
+    python_candidates = [
+        os.path.join(INDEXTTS_DIR, "installer_files", "env", "Scripts", "python.exe"),
+        os.path.join(INDEXTTS_DIR, "installer_files", "env", "python.exe"),
+        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
+        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
+    ]
+    python_path = None
+    for p in python_candidates:
+        if os.path.exists(p):
+            python_path = p
+            print(f"[GRADIO] 找到 Python: {p}")
+            break
     
     # 优先查找.py文件（开发模式），如果不存在则查找.pyc（打包模式）
-    candidates = [
+    script_candidates = [
         # 开发模式 - .py文件
         os.path.join(BASE_DIR, "app_ui_optimized_with_agreement_file.py"),
         os.path.join(BASE_DIR, "unified_app.py"),
@@ -1275,10 +1338,15 @@ def start_gradio():
         os.path.join(BASE_DIR, "app_ui_optimized_with_agreement_file.pyc"),
         os.path.join(BASE_DIR, "unified_app.pyc"),
     ]
-    script_path = next((p for p in candidates if os.path.exists(p)), None)
+    script_path = next((p for p in script_candidates if os.path.exists(p)), None)
     
-    if not os.path.exists(python_path):
-        _notify_error("Python 解释器未找到", f"路径不存在：\n{python_path}"); return
+    if not python_path:
+        tried = "\n".join(f"  - {p}" for p in python_candidates)
+        _notify_error("Python 解释器未找到",
+                      f"在以下路径均未找到 python.exe：\n{tried}\n\n"
+                      f"BASE_DIR: {BASE_DIR}\n"
+                      f"请确保 _internal_tts 文件夹已正确安装。")
+        return
     if not script_path:
         _notify_error("主程序未找到", "未找到可启动的主程序文件（unified_app.py / .pyc）"); return
 
@@ -1488,6 +1556,10 @@ def run_splash(root, status_var):
 #  主入口
 # ══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    print("[MAIN] 进入主入口")
+    if sys.stdout:
+        sys.stdout.flush()
+
     def _try_activate_existing_instance(retries: int = 30, delay_s: float = 0.2) -> bool:
         """尝试激活已运行实例，避免重复启动多个窗口。"""
         for _ in range(max(1, retries)):
@@ -1509,6 +1581,9 @@ if __name__ == "__main__":
         return False
 
     # ── 单实例检查 ─────────────────────────────────────────
+    print("[MAIN] 开始单实例检查...")
+    if sys.stdout:
+        sys.stdout.flush()
     _lock_socket = None
     try:
         _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1529,6 +1604,9 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # ── 检查更新 ─────────────────────────────────────────
+    print("[MAIN] 单实例检查通过")
+    if sys.stdout:
+        sys.stdout.flush()
     if ENV_CONFIG.get('CHECK_UPDATE', True):
         print("[UPDATE] 检查更新...")
         has_update, update_info, error_msg = check_for_updates()
@@ -1558,7 +1636,9 @@ if __name__ == "__main__":
 
     # ── 先进行激活验证（在启动任何服务之前）─────────────────
     print("[LICENSE] 开始激活验证...")
-    
+    if sys.stdout:
+        sys.stdout.flush()
+
     # 立即启动服务（双击就启动，不等登录）
     print("[LICENSE] 立即启动后台服务...")
     signal.signal(signal.SIGINT, lambda s, f: cleanup())
@@ -1579,7 +1659,30 @@ if __name__ == "__main__":
         try:
             import tkinter as tk
             from tkinter import ttk
-            from PIL import Image, ImageTk, ImageDraw
+            try:
+                from PIL import Image, ImageTk, ImageDraw
+            except ImportError as _pil_err:
+                # PIL 损坏/缺失 → 自动修复
+                print(f"[LICENSE] PIL 不可用({_pil_err})，尝试自动修复...")
+                _fix_py = os.path.join(
+                    INDEXTTS_DIR, "installer_files", "env", "Scripts", "python.exe"
+                )
+                if not os.path.exists(_fix_py):
+                    _fix_py = os.path.join(
+                        INDEXTTS_DIR, "installer_files", "env", "python.exe"
+                    )
+                try:
+                    subprocess.run(
+                        [_fix_py, "-m", "pip", "install", "--force-reinstall",
+                         "Pillow>=10.0,<11.0", "--quiet"],
+                        timeout=120,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    )
+                    from PIL import Image, ImageTk, ImageDraw
+                    print("[LICENSE] PIL 自动修复成功")
+                except Exception as _fix_err:
+                    print(f"[LICENSE] PIL 自动修复失败: {_fix_err}")
+                    raise _pil_err
             
             machine_code = lic.get_machine_code()
             result = {"passed": False}
@@ -2185,6 +2288,10 @@ if __name__ == "__main__":
     if _gradio_url is None:
         _gradio_url = 'http://127.0.0.1:7870'
 
+    print(f"[MAIN] 准备启动 WebView, gradio_url={_gradio_url}")
+    if sys.stdout:
+        sys.stdout.flush()
+
     try:
         import webview
     except ImportError:
@@ -2272,83 +2379,82 @@ if __name__ == "__main__":
 
         threading.Thread(target=_set_icon_later, daemon=True).start()
 
-        # 拦截 X 按钮 - 改进：无论页面是否加载成功都能弹出确认对话框，并添加强制退出机制
+        # 拦截 X 按钮 — 改进：防止白屏/错误时关不掉
+        _close_attempts = [0, 0.0]  # [计数, 上次时间]
+
         def on_closing():
+            now = time.time()
+            _close_attempts[0] += 1
+            # 连续快速点击 X（3秒内点2次）→ 强制退出，不弹窗
+            if _close_attempts[0] >= 2 and (now - _close_attempts[1]) < 3.0:
+                print("[EXIT] 连续关闭，强制退出")
+                try: cleanup()
+                except Exception: os._exit(0)
+                return
+            _close_attempts[1] = now
+
             def _force_exit():
-                """强制退出，无论任何状态"""
                 try:
                     print("[EXIT] 强制退出程序...")
                     cleanup()
                 except Exception:
-                    print("[EXIT] cleanup失败，直接终止")
                     try:
-                        # 强制杀死所有相关进程
                         if gradio_process and gradio_process.pid:
                             kill_process_tree(gradio_process.pid)
                     except Exception:
                         pass
                     os._exit(0)
-            
+
             def _show_confirm():
-                exit_timer = None
                 try:
-                    # 先尝试通过 JS 显示自定义对话框
-                    window.evaluate_js("window._zm && window._zm.show()")
-                except Exception:
-                    # JS 注入失败（页面未加载或出错），使用系统对话框
-                    try:
-                        import tkinter as tk
-                        from tkinter import messagebox
-                        
-                        # 创建隐藏的根窗口
-                        root = tk.Tk()
-                        root.withdraw()
-                        root.attributes('-topmost', True)
-                        
-                        # 设置10秒超时强制退出（防止对话框卡住）
-                        def timeout_exit():
-                            try:
-                                root.destroy()
-                            except Exception:
-                                pass
-                            print("[EXIT] 对话框超时，强制退出")
-                            _force_exit()
-                        
-                        exit_timer = root.after(10000, timeout_exit)
-                        
-                        # 显示确认对话框
-                        result = messagebox.askyesnocancel(
-                            "关闭程序",
-                            "选择操作：\n\n"
-                            "「是」- 最小化到通知区域（后台运行）\n"
-                            "「否」- 退出程序\n"
-                            "「取消」- 返回",
-                            icon='question'
-                        )
-                        
-                        # 取消超时定时器
-                        if exit_timer:
-                            root.after_cancel(exit_timer)
-                        
-                        root.destroy()
-                        
-                        if result is True:  # 是 - 最小化
-                            try:
-                                hwnd = _get_main_hwnd()
-                                if hwnd:
-                                    import ctypes
-                                    ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
-                            except Exception:
-                                pass
-                        elif result is False:  # 否 - 退出
-                            _force_exit()
-                        # None - 取消，什么都不做
-                        
-                    except Exception as e:
-                        print(f"[CLOSE] 对话框异常: {e}")
-                        # 最后的保底：直接强制退出
+                    import tkinter as tk
+                    from tkinter import messagebox
+
+                    root = tk.Tk()
+                    root.withdraw()
+                    root.attributes('-topmost', True)
+
+                    # 10秒超时强制退出
+                    def timeout_exit():
+                        try: root.destroy()
+                        except Exception: pass
+                        print("[EXIT] 对话框超时，强制退出")
                         _force_exit()
-            
+
+                    exit_timer = root.after(10000, timeout_exit)
+
+                    result = messagebox.askyesnocancel(
+                        "关闭程序",
+                        "选择操作：\n\n"
+                        "「是」- 最小化到通知区域（后台运行）\n"
+                        "「否」- 退出程序\n"
+                        "「取消」- 返回\n\n"
+                        "提示：快速连按两次 X 可强制退出",
+                        icon='question'
+                    )
+
+                    if exit_timer:
+                        root.after_cancel(exit_timer)
+                    root.destroy()
+
+                    if result is True:  # 是 - 最小化
+                        try:
+                            hwnd = _get_main_hwnd()
+                            if hwnd:
+                                import ctypes
+                                ctypes.windll.user32.ShowWindow(hwnd, 0)
+                        except Exception:
+                            pass
+                    elif result is False:  # 否 - 退出
+                        _force_exit()
+                    else:
+                        # 取消 — 重置计数
+                        _close_attempts[0] = 0
+
+                except Exception as e:
+                    print(f"[CLOSE] 对话框异常: {e}")
+                    _force_exit()
+
             threading.Thread(target=_show_confirm, daemon=True).start()
             return False
 

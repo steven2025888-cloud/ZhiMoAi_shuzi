@@ -693,29 +693,64 @@
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
     })();
 
-    /* ── 16. 字幕高级设置弹窗：点击外部区域（暗色遮罩）关闭 ── */
+    /* ── 16. 字幕高级设置弹窗：JS 控制显示/隐藏（替代 Gradio visible，兼容所有打包版本） ── */
     (function() {
+        function openSubModal() {
+            var m = document.getElementById('sub-settings-modal');
+            if (m) m.classList.add('zdai-open');
+        }
+        function closeSubModal() {
+            var m = document.getElementById('sub-settings-modal');
+            if (m) m.classList.remove('zdai-open');
+        }
+        function isSubModalOpen() {
+            var m = document.getElementById('sub-settings-modal');
+            return m && m.classList.contains('zdai-open');
+        }
+        // 暴露全局函数
+        window.__zdai_sub_modal_open = openSubModal;
+        window.__zdai_sub_modal_close = closeSubModal;
+
+        // 打开按钮（.sub-settings-btn）
         document.addEventListener('click', function(e) {
+            if (e.target.closest && e.target.closest('.sub-settings-btn')) {
+                setTimeout(openSubModal, 60);
+            }
+        });
+
+        // 取消/确定按钮（.sub-modal-close-btn）
+        document.addEventListener('click', function(e) {
+            if (e.target.closest && e.target.closest('.sub-modal-close-btn')) {
+                closeSubModal();
+            }
+        });
+
+        // 点击遮罩外部关闭
+        document.addEventListener('click', function(e) {
+            if (!isSubModalOpen()) return;
             var modal = document.getElementById('sub-settings-modal');
             if (!modal) return;
-            // 只处理可见状态的弹窗
-            var cs = window.getComputedStyle(modal);
-            if (cs.display === 'none' || cs.visibility === 'hidden') return;
-            if (modal.offsetWidth === 0 && modal.offsetHeight === 0) return;
-            // 检查点击的是否是打开按钮（避免打开后立即关闭）
+            // 忽略打开按钮的点击
             if (e.target.closest && e.target.closest('.sub-settings-btn')) return;
-            // #sub-settings-modal 是全屏遮罩，其第一个子 div 是白色内容面板
-            // 需要检查点击是否落在内容面板之外（即暗色遮罩区域）
+            // 检查点击是否在白色内容面板之外
             var panel = modal.querySelector(':scope > div');
             if (!panel) return;
             var rect = panel.getBoundingClientRect();
             var x = e.clientX, y = e.clientY;
             if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return;
-            // 点击在内容面板外部（暗色遮罩上），触发取消按钮关闭弹窗
+            // 点击在遮罩上，触发取消按钮（同时关闭弹窗和执行 Gradio 回调）
             var cancelWrapper = modal.querySelector('.sub-modal-close-btn');
             if (cancelWrapper) {
                 var btn = cancelWrapper.querySelector('button') || cancelWrapper;
                 btn.click();
+            }
+            closeSubModal();
+        });
+
+        // ESC 键关闭
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && isSubModalOpen()) {
+                closeSubModal();
             }
         });
     })();

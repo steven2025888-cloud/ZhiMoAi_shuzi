@@ -101,6 +101,10 @@ Source: "{#SourceRoot}\libs\lib_xiaohongshu_publish.pyc"; DestDir: "{app}\libs";
 Source: "{#SourceRoot}\libs\lib_meta_store.pyc";       DestDir: "{app}\libs"; Flags: ignoreversion
 Source: "{#SourceRoot}\libs\lib_pip.pyc";              DestDir: "{app}\libs"; Flags: ignoreversion
 Source: "{#SourceRoot}\libs\lib_pip_websocket.pyc";    DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\voice_api.pyc";             DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_publish_base.pyc";      DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_kuaishou_publish.pyc";  DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\veo_video.pyc";             DestDir: "{app}\libs"; Flags: ignoreversion
 
 ; 注意：不打包任何.py源文件，只打包.pyc加密文件
 
@@ -109,7 +113,7 @@ Source: "{#SourceRoot}\ui\ui_init.js";     DestDir: "{app}\ui"; Flags: ignorever
 Source: "{#SourceRoot}\ui\ui_style.css";   DestDir: "{app}\ui"; Flags: ignoreversion
 
 ; ── 配置文件 ──
-Source: "{#SourceRoot}\.env";           DestDir: "{app}"; Flags: ignoreversion
+; .env 文件不打包（包含敏感信息，程序会自动创建）
 Source: "{#SourceRoot}\.license";       DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 Source: "{#SourceRoot}\pip.ini";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
@@ -122,11 +126,21 @@ Source: "{#SourceRoot}\ZhiMoAI_Launcher.exe"; DestDir: "{app}"; Flags: ignorever
 Source: "{#SourceRoot}\启动应用.bat";        DestDir: "{app}"; Flags: ignoreversion
 
 ; ── 工具脚本 ──
+Source: "{#SourceRoot}\repair_env.bat";      DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\安装依赖.bat";       DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\安装抖音发布依赖.bat"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\打包检查清单.bat";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
-; ── 文档 ──
+; -- libs extras --
+Source: "{#SourceRoot}\libs\__init__.py";                 DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\libs\app_version.pyc";             DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\libs\app_version.py";              DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\libs\.license";                    DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
+
+; -- tools / debug --
+Source: "{#SourceRoot}\debug_start.bat";   DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+; -- docs --
 Source: "{#SourceRoot}\README.txt";                 DestDir: "{app}"; Flags: ignoreversion isreadme skipifsourcedoesntexist
 Source: "{#SourceRoot}\客户使用手册.txt";             DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\Whisper使用说明.txt";          DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist

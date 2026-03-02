@@ -19,17 +19,22 @@ PYTHON_FILES = [
 
 # 需要编译的libs目录下的文件
 LIBS_FILES = [
+    "app_version.py",
+    "voice_api.py",
     "lib_avatar.py",
     "lib_voice.py",
     "lib_subtitle.py",
     "lib_license.py",
+    "lib_meta_store.py",
+    "lib_publish_base.py",
     "lib_douyin_publish.py",
     "lib_bilibili_publish.py",
     "lib_shipinhao_publish.py",
     "lib_xiaohongshu_publish.py",
-    "lib_meta_store.py",
+    "lib_kuaishou_publish.py",
     "lib_pip.py",
     "lib_pip_websocket.py",
+    "veo_video.py",
 ]
 
 
@@ -73,15 +78,35 @@ def compile_to_pyc():
     """编译Python文件为.pyc（不删除原文件）"""
     print("编译Python文件为字节码...")
 
-    # 使用项目内的Python环境编译
-    python_exe = os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe")
+    # 尝试多个可能的Python环境路径（与launcher.py保持一致）
+    python_paths = [
+        os.path.join(BASE_DIR, "_internal_app", "installer_files", "env", "Scripts", "python.exe"),
+        os.path.join(BASE_DIR, "_internal_app", "installer_files", "env", "python.exe"),
+        os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
+        os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
+        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
+        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
+    ]
 
-    if not os.path.exists(python_exe):
-        print(f"  [警告] 未找到项目Python环境: {python_exe}")
+    python_exe = None
+    for path in python_paths:
+        if os.path.exists(path):
+            python_exe = path
+            print(f"  [使用] {python_exe}")
+            break
+
+    if not python_exe:
+        print(f"  [警告] 未找到项目Python环境")
         print(f"  [提示] 将使用系统Python编译")
         python_exe = "python"
-    else:
-        print(f"  [使用] {python_exe}")
+
+    # 显示Python版本
+    try:
+        result = subprocess.run([python_exe, "--version"], capture_output=True, text=True)
+        version = result.stdout.strip() or result.stderr.strip()
+        print(f"  [版本] {version}")
+    except Exception:
+        pass
 
     success_count = 0
     fail_count = 0

@@ -228,6 +228,12 @@ OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
 WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# BASE_DIR 已就绪，重新读取一次版本信息（允许 .env 开发覆盖）
+try:
+    APP_VERSION, APP_BUILD = get_app_version(BASE_DIR)
+except Exception:
+    pass
+
 MUSIC_DATABASE_FILE = os.path.join(BASE_DIR, "data", "music_database.json")
 BGM_CACHE_DIR = os.path.join(BASE_DIR, "bgm_cache")  # 独立的BGM缓存目录
 os.makedirs(BGM_CACHE_DIR, exist_ok=True)
@@ -365,26 +371,12 @@ def _dual_progress_html(stage: str, total_pct: int, step_label: str, step_pct: i
     )
 
 
-# 从配置文件读取版本信息
-def _load_version_from_env():
-    """从 config.dat / .env 读取版本号和 build 号"""
-    version = "2.0.0"  # 默认版本号（打包时可修改此值）
-    build = 200
-    try:
-        cfg = _read_config_lines(_CONFIG_FILE)
-        # .env 开发覆盖
-        env_path = os.path.join(BASE_DIR, '.env')
-        dev_cfg = _read_config_lines(env_path)
-        cfg.update(dev_cfg)
-        if 'APP_VERSION_NUMBER' in cfg:
-            version = cfg['APP_VERSION_NUMBER']
-        if 'APP_BUILD' in cfg:
-            build = int(cfg['APP_BUILD'])
-    except Exception as e:
-        print(f"[WARNING] 读取版本信息失败: {e}")
-    return version, build
-
-APP_VERSION, APP_BUILD = _load_version_from_env()
+# 从统一接口读取版本信息（注意：BASE_DIR 在后面才赋值，这里先给安全默认值）
+try:
+    from app_version import get_app_version
+    APP_VERSION, APP_BUILD = get_app_version(None)
+except Exception as _e:
+    APP_VERSION, APP_BUILD = ("2.3.9", 239)
 
 
 _heygem_warmup_started = False
@@ -1837,8 +1829,6 @@ def run_heygem(video_path, audio_path, progress=gr.Progress(), detail_cb=None,
             prog = max(prog, 0.95)
             step_label = "保存文件"
             step_pct = 100
-
-        # 输出双进度条卡片
         if detail_cb:
             try:
                 el = int(time.time() - t0)
@@ -1848,6 +1838,8 @@ def run_heygem(video_path, audio_path, progress=gr.Progress(), detail_cb=None,
 
         # 推进 Gradio progress bar
         try:
+            from libs.app_version import get_app_version
+            APP_VERSION, APP_BUILD = get_app_version()
             prog = min(0.96, prog + 0.002)
             progress(prog, desc=f"{stage}... {int(stage_pct)}%")
         except Exception:
@@ -3094,7 +3086,9 @@ def build_ui():
                                     elem_classes="sub-settings-btn")
 
                             # ── 字幕高级设置弹窗（独立于字幕面板）──
-                            with gr.Group(visible=False, elem_id="sub-settings-modal") as sub_settings_modal:
+                            # visible=True 确保 DOM 始终存在；CSS display:none!important 默认隐藏；
+                            # JS .zdai-open 类控制显示（彻底绕开 Gradio visible 在不同版本的差异）
+                            with gr.Group(visible=True, elem_id="sub-settings-modal") as sub_settings_modal:
                                 gr.HTML(
                                     '<div style="text-align:center;margin-bottom:16px;">'
                                     '<div style="width:44px;height:44px;border-radius:12px;'
@@ -3234,7 +3228,7 @@ def build_ui():
                             bgm_audio_preview = gr.Audio(label="试听BGM", interactive=False, visible=False)
                             bgm_hint = gr.HTML(value="")
                             bgm_path_hidden = gr.Textbox(visible=False, value="")
-                            bgm_state = gr.State(value={"path": "", "title": ""})
+                            bgm_state = gr.State(value=None)
                             bgm_video = gr.Video(label="🎬 带BGM视频", height=280, interactive=False)
 
                         # 步骤6：发布平台（下方）
@@ -4468,10 +4462,11 @@ def build_ui():
                     return "", "", False, _hint_html("error", "AI优化失败，未返回内容")
 
         # ── 字幕高级设置弹窗 ──
+        # JS .sub-settings-btn 点击事件已在 ui_init.js 中通过 zdai-open 类控制弹窗显示
         sub_settings_open_btn.click(
-            lambda txt: (gr.update(visible=True), gr.update(value=txt or "")),
+            lambda txt: gr.update(value=txt or ""),
             inputs=[input_text],
-            outputs=[sub_settings_modal, sub_text_modal])
+            outputs=[sub_text_modal])
         
         def _close_sub_settings_and_save(sub_text_modal_val,
                                          inp_txt, prmt_aud, voice_sel, audio_mode_val, direct_aud,
@@ -4500,7 +4495,8 @@ def build_ui():
             except Exception as e:
                 save_hint = _hint_html("error", f"保存失败: {e}")
                 dropdown_update = gr.update()
-            return gr.update(visible=False), gr.update(value=inp_txt or ""), save_hint, dropdown_update
+            # JS .sub-modal-close-btn 点击事件已在 ui_init.js 中通过移除 zdai-open 类关闭弹窗
+            return gr.update(value=inp_txt or ""), save_hint, dropdown_update
         
         sub_settings_close_btn.click(
             _close_sub_settings_and_save,
@@ -4514,11 +4510,12 @@ def build_ui():
                     sub_kw_enable, sub_hi_scale, sub_kw_text,
                     sub_title_text, sub_title_text2,
                     douyin_title, douyin_topics],
-            outputs=[sub_settings_modal, sub_text,
+            outputs=[sub_text,
                     workspace_record_hint, workspace_record_dropdown])
+        # JS .sub-modal-close-btn 点击事件已在 ui_init.js 中通过移除 zdai-open 类关闭弹窗
         sub_settings_cancel_btn.click(
-            lambda: gr.update(visible=False),
-            outputs=[sub_settings_modal])
+            lambda: None,
+            outputs=[])
         
         # ── AI优化字幕按钮（根据是否已AI改写，执行不同范围优化，并保存到工作台）──
         def _split_title_lines(title_text):
@@ -5726,7 +5723,7 @@ def build_ui():
             state_path = ""
             state_title = ""
             if isinstance(bgm_state_val, dict):
-                state_path = (bgm_state_val.get("path") or "").strip()
+                state_path = (bgm_state_val.get("bgm_path") or "").strip()
                 state_title = (bgm_state_val.get("title") or "").strip()
 
             # 优先复用 State 中的已选音乐（避免重复点击时换歌）
@@ -5765,7 +5762,7 @@ def build_ui():
             if selected_label:
                 hint = _hint_html("ok", f"已自动选择并合成BGM：{selected_label}")
             shown = (selected_label or (current_selected_val or "")).strip()
-            new_state = {"path": bgm_path_val, "title": shown}
+            new_state = {"bgm_path": bgm_path_val, "title": shown}
 
             # 保存工作台状态
             try:
@@ -5803,7 +5800,7 @@ def build_ui():
             cur_path = ""
             cur_title = ""
             if isinstance(bgm_state_val, dict):
-                cur_path = (bgm_state_val.get("path") or "").strip()
+                cur_path = (bgm_state_val.get("bgm_path") or "").strip()
                 cur_title = (bgm_state_val.get("title") or "").strip()
 
             # 尽量避免重复选到同一首
@@ -5815,7 +5812,7 @@ def build_ui():
                         continue
                     if shown and cur_title and shown.strip() == cur_title.strip():
                         continue
-                    new_state = {"path": local_path, "title": shown}
+                    new_state = {"bgm_path": local_path, "title": shown}
                     return (
                         gr.update(value=shown),
                         gr.update(value=local_path),
@@ -5846,7 +5843,7 @@ def build_ui():
             
             try:
                 shutil.copy2(custom_audio_path, cache_path)
-                new_state = {"path": cache_path, "title": f"自定义：{filename}"}
+                new_state = {"bgm_path": cache_path, "title": f"自定义：{filename}"}
                 return (
                     gr.update(value=f"自定义：{filename}"),
                     gr.update(value=cache_path),

@@ -78,13 +78,17 @@ def _find_zhimoai_windows():
 
     def _cb(hwnd, _lp):
         try:
+            # 只匹配可见窗口
+            if not u32.IsWindowVisible(hwnd):
+                return True
             length = u32.GetWindowTextLengthW(hwnd)
             if length <= 0:
                 return True
             buf = ctypes.create_unicode_buffer(length + 1)
             u32.GetWindowTextW(hwnd, buf, length + 1)
             title = buf.value
-            if '织梦AI' in title or '专业版' in title:
+            # 必须包含 '织梦AI' 才匹配（避免误匹配其他含 '专业版' 的程序）
+            if '织梦AI' in title:
                 results.append(hwnd)
         except Exception:
             pass
@@ -95,14 +99,29 @@ def _find_zhimoai_windows():
 
 
 def check_single_instance():
-    """检查是否已有 app_backend 窗口在运行"""
+    """检查是否已有 app_backend 在运行（通过端口 17870 检测，与 app_backend 的 socket 锁一致）"""
+    import socket as _sock
     try:
-        existing = _find_zhimoai_windows()
-        if existing:
-            log_info(f"检测到已有窗口 (hwnd={existing[0]})，激活并退出")
-            bring_to_front(existing[0])
-            return False
+        # 尝试绑定 app_backend 使用的单实例端口
+        s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        s.bind(('127.0.0.1', 17870))
+        s.close()
+        # 绑定成功 → 没有其他实例在运行
         return True
+    except OSError:
+        # 端口已被占用 → app_backend 正在运行
+        log_info("检测到 app_backend 已在运行（端口 17870 已占用）")
+        # 尝试激活已有窗口
+        try:
+            existing = _find_zhimoai_windows()
+            if existing:
+                log_info(f"找到织梦AI窗口 (hwnd={existing[0]})，激活")
+                bring_to_front(existing[0])
+            else:
+                log_info("未找到织梦AI窗口，可能正在启动中")
+        except Exception:
+            pass
+        return False
     except Exception as e:
         log_warning(f"单实例检查失败: {e}")
         return True
@@ -136,9 +155,10 @@ def clean_logs():
         
         # 尝试多个可能的Python路径
         python_paths = [
+            os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
+            os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
-            "python.exe"
         ]
         
         python_exe = None
@@ -164,6 +184,11 @@ def start_app():
         log_info(f"启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         log_info(f"工作目录: {BASE_DIR}")
         log_info("=" * 80)
+
+        debug_flag = os.path.join(BASE_DIR, "debug_console.flag")
+        debug_console = os.path.exists(debug_flag)
+        if debug_console:
+            log_warning(f"[DEBUG] 已启用调试控制台模式: {debug_flag}")
         
         # 1. 清理日志
         log_info("[1/3] 清理超大日志文件...")
@@ -172,22 +197,17 @@ def start_app():
         # 2. 检查环境
         log_info("[2/3] 检查运行环境...")
         
-        # 尝试多个可能的Python路径
+        # 尝试多个可能的Python路径（与 app_backend.py start_gradio() 保持一致）
         python_paths = [
             os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
+            os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
-            "python.exe"  # 系统Python
         ]
         
         python_exe = None
         for path in python_paths:
-            if os.path.isabs(path):
-                exists = os.path.exists(path)
-            else:
-                exists = True  # 系统Python，假设存在
-            
-            if exists:
+            if os.path.exists(path):
                 python_exe = path
                 log_info(f"  找到Python: {path}")
                 break
@@ -199,7 +219,19 @@ def start_app():
             log_error("尝试的路径:")
             for path in python_paths:
                 log_error(f"  - {path}")
-            log_error("请确保已正确安装引擎文件")
+            log_error(f"BASE_DIR: {BASE_DIR}")
+            log_error("请确保 _internal_tts 文件夹已正确安装")
+            # 弹窗通知用户
+            try:
+                tried = "\n".join(python_paths)
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    f"Python 解释器未找到！\n\n已检查路径：\n{tried}\n\n安装目录：{BASE_DIR}\n\n请确保 _internal_tts 文件夹已正确安装。",
+                    "织梦AI - 启动失败",
+                    0x10
+                )
+            except Exception:
+                pass
             return False
         
         # 检查主程序（支持.py和.pyc）
@@ -220,56 +252,112 @@ def start_app():
         log_info(f"Python: {python_exe}")
         log_info(f"主程序: {app_backend}")
         
-        # 使用 pythonw.exe 无窗口启动
-        pythonw_exe = python_exe.replace("python.exe", "pythonw.exe")
-        if not os.path.exists(pythonw_exe):
-            pythonw_exe = python_exe
-            log_info(f"  使用python.exe (pythonw.exe不存在)")
-        else:
-            log_info(f"  使用pythonw.exe")
-        
         # 将子进程输出重定向到日志文件（便于排查打包后无窗口的问题）
         backend_log = os.path.join(LOG_DIR, "backend_startup.log")
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        
-        log_f = open(backend_log, "w", encoding="utf-8", errors="replace")
-        process = subprocess.Popen(
-            [pythonw_exe, "-u", app_backend],
-            cwd=BASE_DIR,
-            stdout=log_f,
-            stderr=log_f,
-            creationflags=flags
-        )
-        
+        crash_log = os.path.join(LOG_DIR, "crash.log")
+
+        # debug_console 模式：不使用 pythonw，不隐藏窗口，不重定向 stdout/stderr（直接在控制台显示）
+        if debug_console:
+            # launcher 自身是 --noconsole 构建的，因此这里强制创建新控制台窗口
+            flags = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+            process = subprocess.Popen(
+                [python_exe, "-u", app_backend],
+                cwd=BASE_DIR,
+                creationflags=flags,
+            )
+        else:
+            # ── 关键修复：使用 python.exe + CREATE_NO_WINDOW ──
+            # 不再使用 pythonw.exe！
+            # pythonw.exe 会静默吞掉所有错误（import失败、模块缺失等完全无输出）
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            log_info(f"  使用python.exe + CREATE_NO_WINDOW (隐藏窗口)")
+
+            log_f = open(backend_log, "w", encoding="utf-8", errors="replace")
+            process = subprocess.Popen(
+                [python_exe, "-u", app_backend],
+                cwd=BASE_DIR,
+                stdout=log_f,
+                stderr=log_f,
+                creationflags=flags
+            )
+
         log_info(f"应用已启动 (PID: {process.pid})")
         log_info(f"子进程日志: {backend_log}")
-        
-        # 短暂等待检测早期崩溃（如 import 失败、.env 缺失等）
-        time.sleep(3)
-        rc = process.poll()
+        log_info(f"崩溃日志: {crash_log}")
+
+        # ── 多轮轮询检测早期崩溃 ──
+        # 重型应用可能需要几秒才完成 import，总共等 10 秒
+        max_wait = 10
+        poll_interval = 1
+        elapsed = 0
+        rc = None
+        while elapsed < max_wait:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+            rc = process.poll()
+            if rc is not None:
+                break
+            log_info(f"  进程存活检查 {elapsed}/{max_wait}s ... PID {process.pid} 运行中")
+
         if rc is not None:
-            log_f.close()
-            # 子进程已退出，读取日志显示错误
+            # 子进程已退出 → 启动失败
             try:
-                with open(backend_log, "r", encoding="utf-8", errors="replace") as f:
-                    err_content = f.read()[-2000:]
+                if not debug_console:
+                    log_f.close()
             except Exception:
-                err_content = "(无法读取子进程日志)"
-            log_error(f"app_backend 启动后立即退出! 退出码={rc}")
-            log_error(f"错误日志:\n{err_content}")
+                pass
+
+            # 收集所有可用的错误信息
+            err_parts = []
+
+            # 1) 读取 backend_startup.log（stdout/stderr 输出）
+            try:
+                if debug_console:
+                    err_parts.append("(调试控制台模式下，请查看控制台输出)")
+                else:
+                    with open(backend_log, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read().strip()
+                    if content:
+                        err_parts.append(f"[子进程输出]\n{content[-2000:]}")
+                    else:
+                        err_parts.append("[子进程输出] (空 — 进程未产生任何输出)")
+            except Exception:
+                err_parts.append("[子进程输出] (无法读取)")
+
+            # 2) 读取 crash.log（app_backend 内部崩溃处理器写入）
+            try:
+                if os.path.exists(crash_log):
+                    with open(crash_log, "r", encoding="utf-8", errors="replace") as f:
+                        crash_content = f.read().strip()
+                    if crash_content:
+                        err_parts.append(f"[崩溃日志]\n{crash_content[-2000:]}")
+            except Exception:
+                pass
+
+            err_content = "\n\n".join(err_parts) if err_parts else "(无法获取任何错误信息)"
+
+            log_error(f"app_backend 启动后退出! 退出码={rc}, 存活时间<{elapsed}s")
+            log_error(f"错误详情:\n{err_content}")
+
             # 弹窗提示用户
             try:
+                # 截取关键信息用于弹窗（弹窗不能太长）
+                popup_msg = (
+                    f"应用启动失败 (退出码: {rc})\n\n"
+                    f"{err_content[:800]}\n\n"
+                    f"完整日志:\n"
+                    f"  {backend_log}\n"
+                    f"  {crash_log}\n"
+                    f"  {LOG_FILE}"
+                )
                 ctypes.windll.user32.MessageBoxW(
-                    0,
-                    f"应用启动失败 (退出码: {rc})\n\n{err_content[:500]}\n\n详细日志: {backend_log}",
-                    "织梦AI - 启动失败",
-                    0x10  # MB_ICONERROR
+                    0, popup_msg, "织梦AI - 启动失败", 0x10
                 )
             except Exception:
                 pass
             return False
-        
-        log_info("应用进程运行正常")
+
+        log_info(f"应用进程运行正常 (PID: {process.pid}, 已存活>{max_wait}s)")
         log_info("=" * 80)
         return True
         

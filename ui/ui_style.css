@@ -266,12 +266,18 @@ input[type=color]:hover{
   padding:2px 8px;border-radius:20px;}
 
 /* ── 字幕高级设置弹窗 ── */
+/* 默认隐藏：display:none!important 确保不会被 Gradio 的任何隐藏机制绕过 */
+/* 显示时由 JS 添加 .zdai-open 类，display:flex!important 覆盖 */
 #sub-settings-modal{
+  display:none!important;
   position:fixed!important;top:0!important;left:0!important;
   width:100vw!important;height:100vh!important;z-index:9990!important;
-  display:flex!important;align-items:center!important;justify-content:center!important;
+  align-items:center!important;justify-content:center!important;
   background:rgba(15,23,42,.55)!important;backdrop-filter:blur(12px)!important;
   padding:0!important;margin:0!important;border:none!important;border-radius:0!important;box-shadow:none!important;
+}
+#sub-settings-modal.zdai-open{
+  display:flex!important;
 }
 #sub-settings-modal>div{
   background:#ffffff!important;border-radius:18px!important;
@@ -572,7 +578,7 @@ input[type=color]:hover{
 #clear-confirm-overlay{
   position:fixed!important;top:0!important;left:0!important;
   width:100vw!important;height:100vh!important;z-index:9990!important;
-  display:flex!important;align-items:center!important;justify-content:center!important;
+  display:flex;align-items:center!important;justify-content:center!important;
   background:rgba(15,23,42,.75)!important;backdrop-filter:blur(8px)!important;
   padding:0!important;margin:0!important;border:none!important;border-radius:0!important;box-shadow:none!important;
 }
@@ -1090,7 +1096,11 @@ div.svelte-1nguped,
 #component-213,
 #component-232,
 #component-229,
+#component-246,
 #component-251,
+#component-277,
+#component-294,
+
 #sub-video-panel {
   background: #fff!important;
   border-radius: 12px!important;

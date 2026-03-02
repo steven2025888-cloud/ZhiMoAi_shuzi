@@ -1,118 +1,134 @@
 @echo off
-chcp 65001 >nul
 
-:: 切换到项目根目录（本脚本在 build_scripts\ 子目录下）
+:: Switch to project root (this script is in build_scripts\)
 pushd "%~dp0.."
 
 echo ============================================================
-echo 织梦AI - 自动化打包系统
+echo   ZhiMoAI - Build Package
 echo ============================================================
 echo.
-echo 此脚本将执行以下操作：
-echo   1. 清理临时目录
-echo   2. 编译Python代码为.pyc字节码
-echo   3. 构建启动器（如需要）
-echo   4. 生成安装包
-echo   5. 清理临时.pyc文件
+
+set "ENV_DIR=_internal_app\installer_files\env"
+echo   Package type: ONLINE
+echo   Python env: %ENV_DIR%
 echo.
 
+echo [1/7] Verify Python environment exists...
+set "PY="
+if exist "%ENV_DIR%\Scripts\python.exe" set "PY=%ENV_DIR%\Scripts\python.exe"
+if "%PY%"=="" if exist "%ENV_DIR%\python.exe" set "PY=%ENV_DIR%\python.exe"
+
+if "%PY%"=="" (
+    echo   [ERROR] Python env not found at %ENV_DIR%
+    echo   Run build_scripts\setup_app_env.bat first!
+    pause
+    exit /b 1
+)
+echo   [OK] %PY%
 echo.
-echo [1/6] 清理临时目录...
+
+echo [2/7] Verify Python env native extensions...
+"%PY%" build_scripts\verify_env.py
+if errorlevel 1 (
+    echo.
+    echo   Python env is broken! Run setup_app_env.bat to fix.
+    pause
+    exit /b 1
+)
+echo.
+
+echo [3/7] Clean temp directories...
 if exist "avatars" rmdir /s /q "avatars" 2>nul & mkdir "avatars"
 if exist "voices" rmdir /s /q "voices" 2>nul & mkdir "voices"
 if exist "unified_outputs" rmdir /s /q "unified_outputs" 2>nul & mkdir "unified_outputs"
-echo   ✓ 临时目录已清理
-
+echo   [OK]
 echo.
-echo [2/6] 编译Python代码为.pyc字节码...
+
+echo [4/7] Compile Python to .pyc bytecode...
 python build_scripts\build_pyc_for_package.py
 if errorlevel 1 (
-    echo   ✗ 错误：Python编译失败
+    echo   [ERROR] Python compile failed
+    pause
     exit /b 1
 )
-echo   ✓ Python代码编译完成
-
+echo   [OK]
 echo.
-echo [3/6] 检查启动器...
+
+echo [5/7] Check launcher exe...
 if not exist "ZhiMoAI_Launcher.exe" (
-    echo   启动器不存在，开始构建...
+    echo   Launcher not found, building...
     call build_scripts\build_launcher.bat
     if errorlevel 1 (
-        echo   ✗ 错误：启动器构建失败
+        echo   [ERROR] Launcher build failed
         python build_scripts\build_pyc_for_package.py --clean
+        pause
         exit /b 1
     )
-    echo   ✓ 启动器构建完成
+    echo   [OK] Built
 ) else (
-    echo   ✓ 启动器已存在
+    echo   [OK] Exists
 )
-
 echo.
-echo [4/6] 验证.pyc文件...
+
+echo [6/7] Verify .pyc files...
 set MISSING=0
-if not exist "app_backend.pyc" set MISSING=1
-if not exist "unified_app.pyc" set MISSING=1
-if not exist "libs\lib_avatar.pyc" set MISSING=1
-if not exist "libs\lib_voice.pyc" set MISSING=1
-if not exist "libs\lib_subtitle.pyc" set MISSING=1
-if not exist "libs\lib_license.pyc" set MISSING=1
-if not exist "libs\lib_douyin_publish.pyc" set MISSING=1
-if not exist "libs\lib_meta_store.pyc" set MISSING=1
-if not exist "libs\lib_pip.pyc" set MISSING=1
-if not exist "libs\lib_pip_websocket.pyc" set MISSING=1
+if not exist "app_backend.pyc" ( echo   [MISSING] app_backend.pyc & set MISSING=1 )
+if not exist "unified_app.pyc" ( echo   [MISSING] unified_app.pyc & set MISSING=1 )
+if not exist "libs\app_version.pyc" ( echo   [MISSING] libs\app_version.pyc & set MISSING=1 )
+if not exist "libs\voice_api.pyc" ( echo   [MISSING] libs\voice_api.pyc & set MISSING=1 )
+if not exist "libs\lib_avatar.pyc" ( echo   [MISSING] libs\lib_avatar.pyc & set MISSING=1 )
+if not exist "libs\lib_voice.pyc" ( echo   [MISSING] libs\lib_voice.pyc & set MISSING=1 )
+if not exist "libs\lib_subtitle.pyc" ( echo   [MISSING] libs\lib_subtitle.pyc & set MISSING=1 )
+if not exist "libs\lib_license.pyc" ( echo   [MISSING] libs\lib_license.pyc & set MISSING=1 )
+if not exist "libs\lib_meta_store.pyc" ( echo   [MISSING] libs\lib_meta_store.pyc & set MISSING=1 )
+if not exist "libs\lib_publish_base.pyc" ( echo   [MISSING] libs\lib_publish_base.pyc & set MISSING=1 )
+if not exist "libs\lib_douyin_publish.pyc" ( echo   [MISSING] libs\lib_douyin_publish.pyc & set MISSING=1 )
+if not exist "libs\lib_bilibili_publish.pyc" ( echo   [MISSING] libs\lib_bilibili_publish.pyc & set MISSING=1 )
+if not exist "libs\lib_shipinhao_publish.pyc" ( echo   [MISSING] libs\lib_shipinhao_publish.pyc & set MISSING=1 )
+if not exist "libs\lib_xiaohongshu_publish.pyc" ( echo   [MISSING] libs\lib_xiaohongshu_publish.pyc & set MISSING=1 )
+if not exist "libs\lib_kuaishou_publish.pyc" ( echo   [MISSING] libs\lib_kuaishou_publish.pyc & set MISSING=1 )
+if not exist "libs\lib_pip.pyc" ( echo   [MISSING] libs\lib_pip.pyc & set MISSING=1 )
+if not exist "libs\lib_pip_websocket.pyc" ( echo   [MISSING] libs\lib_pip_websocket.pyc & set MISSING=1 )
+if not exist "libs\veo_video.pyc" ( echo   [MISSING] libs\veo_video.pyc & set MISSING=1 )
 
 if %MISSING%==1 (
-    echo   ✗ 错误：部分.pyc文件缺失
-    dir *.pyc /b 2>nul
-    dir libs\*.pyc /b 2>nul
+    echo   [ERROR] Some .pyc files missing
+    pause
     exit /b 1
 )
-echo   ✓ 所有.pyc文件已就绪
-
+echo   [OK]
 echo.
-echo [5/6] 生成安装包...
+
+echo [7/7] Build installer (Inno Setup)...
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if exist %ISCC% (
-    echo   正在编译安装包，请稍候...
+    echo   Compiling installer...
     %ISCC% build_scripts\setup_zhimengai.iss
     if errorlevel 1 (
-        echo   ✗ 错误：Inno Setup编译失败
+        echo   [ERROR] Inno Setup compile failed
         python build_scripts\build_pyc_for_package.py --clean
+        pause
         exit /b 1
     )
-    echo   ✓ 安装包生成完成
+    echo   [OK]
 ) else (
-    echo   ✗ 错误：未找到Inno Setup
-    echo   请安装Inno Setup 6到默认路径
+    echo   [ERROR] Inno Setup not found at default path
     python build_scripts\build_pyc_for_package.py --clean
+    pause
     exit /b 1
 )
 
 echo.
-echo [6/6] 清理临时.pyc文件...
+echo Cleaning temp .pyc files...
 python build_scripts\build_pyc_for_package.py --clean
-echo   ✓ 临时文件已清理
+echo.
 
-echo.
 echo ============================================================
-echo ✓ 打包成功！
+echo   BUILD SUCCESS!
 echo ============================================================
 echo.
-echo 安装包位置：dist\ZhiMoAI_v2.0_Setup.exe
-if exist "dist\ZhiMoAI_v2.0_Setup.exe" (
-    for %%F in ("dist\ZhiMoAI_v2.0_Setup.exe") do echo 文件大小：%%~zF 字节 ^(约 %%~zF / 1048576 MB^)
-)
+echo   Check dist\ for output file
 echo.
-echo 重要提示：
-echo   ✓ 安装包只包含.pyc加密文件，不包含.py源文件
-echo   ✓ 原始.py文件未被修改，可以继续开发
-echo   ✓ 临时.pyc文件已清理
-echo.
-echo 验证安装包：
-echo   1. 安装到测试目录（如D:\ZhiMoAI）
-echo   2. 运行 build_scripts\验证安装包内容.bat 检查
-echo   3. 确认只有.pyc文件，没有.py文件
-echo.
-echo ============================================================
+pause
 
 popd

@@ -45,13 +45,14 @@ fonts/
 
 后端api hyperf/
 HeyGem GPU后端/
-
 _internal_app/
 _internal_tts/
+_internal_tts2/
+
+.env
 
 # 日志文件
 logs/
 *.log
 
 # 开发环境配置（生产环境使用 %LOCALAPPDATA%\ZhiMoAI\config.dat）
-.env

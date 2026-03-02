@@ -28,7 +28,20 @@
       "Bash(\"_internal_tts\\\\installer_files\\\\env\\\\python.exe\":*)",
       "Bash(\"_internal_app\\\\installer_files\\\\env\\\\Scripts\\\\python.exe\":*)",
       "Bash(dir:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(cp:*)",
+      "Bash(\"C:\\\\Program Files \\(x86\\)\\\\Inno Setup 6\\\\ISCC.exe\":*)",
+      "Bash(rm:*)",
+      "Bash(\"D:/ZhiMoAI/_internal_tts/installer_files/env/Scripts/python.exe\":*)",
+      "Bash(\"D:/ZhiMoAi_shuzi/_internal_tts/installer_files/env/python.exe\":*)",
+      "Bash(\"D:/ZhiMoAi_shuzi/_internal_app/installer_files/env/Scripts/python.exe\":*)",
+      "Bash(_internal_app/installer_files/env/Scripts/python.exe:*)",
+      "Bash(_internal_tts/installer_files/env/Scripts/python.exe:*)",
+      "Bash(ls:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr -i \"python\")",
+      "Bash(taskkill:*)",
+      "Bash(build_scripts/build_package.bat:*)"
     ]
   }
 }
