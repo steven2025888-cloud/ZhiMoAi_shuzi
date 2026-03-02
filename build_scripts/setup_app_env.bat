@@ -65,7 +65,7 @@ echo   --- UI (webview + tray + image) ---
 if errorlevel 1 goto :install_failed
 
 echo   --- Media (opencv + audio + plotting + ffmpeg) ---
-"%PY%" -m pip install opencv-python numpy pydub matplotlib kiwisolver imageio-ffmpeg %PIP_INDEX%
+"%PY%" -m pip install opencv-python numpy pydub matplotlib kiwisolver imageio-ffmpeg soundfile %PIP_INDEX%
 if errorlevel 1 goto :install_failed
 
 echo   --- Crypto + Network ---

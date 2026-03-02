@@ -1,0 +1,431 @@
+/**
+ * z-swipe-action 滑动菜单 WXS 处理模块
+ * @author zhimo-ui
+ * @description 处理滑动手势，控制菜单展开收起
+ */
+
+// ============ 配置常量 ============
+var SWIPE_THRESHOLD = 10  // 判定为滑动的最小距离
+var dragging = false      // PC端拖拽状态
+
+// ============ 环境检测 ============
+var isWeb = typeof window === 'object'
+
+/**
+ * 检测是否为桌面端
+ */
+function checkDesktop() {
+  if (typeof navigator === 'undefined') return false
+  var ua = navigator.userAgent || ''
+  var mobileKeywords = ['Android', 'iPhone', 'iPad', 'iPod', 'Windows Phone', 'Mobile']
+  for (var i = 0; i < mobileKeywords.length; i++) {
+    if (ua.indexOf(mobileKeywords[i]) !== -1) return false
+  }
+  return true
+}
+
+var isDesktop = isWeb && checkDesktop()
+
+// ============ 工具函数 ============
+
+/**
+ * 获取触摸点坐标
+ */
+function getPoint(evt) {
+  if (isDesktop) {
+    return { x: evt.clientX, y: evt.clientY }
+  }
+  var touch = evt.touches && evt.touches[0]
+  return touch ? { x: touch.clientX, y: touch.clientY } : { x: 0, y: 0 }
+}
+
+/**
+ * 计算滑动方向
+ */
+function calcDirection(dx, dy) {
+  var absX = Math.abs(dx)
+  var absY = Math.abs(dy)
+  if (absX > absY && absX > SWIPE_THRESHOLD) return 'h'  // 水平
+  if (absY > absX && absY > SWIPE_THRESHOLD) return 'v'  // 垂直
+  return ''
+}
+
+/**
+ * 限制数值范围
+ */
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val))
+}
+
+/**
+ * 应用位移样式
+ */
+function applyTranslate(instance, px) {
+  instance.requestAnimationFrame(function() {
+    instance.setStyle({
+      'transform': 'translateX(' + px + 'px)',
+      '-webkit-transform': 'translateX(' + px + 'px)'
+    })
+  })
+}
+
+// ============ 核心逻辑 ============
+
+/**
+ * 测量按钮区域宽度
+ */
+function measureButtons(instance, owner) {
+  var data = instance.getState()
+  data.rightW = 0
+  data.leftW = 0
+
+  // 获取当前元素
+  var el = instance.$el
+
+  // H5 环境
+  if (isWeb) {
+    if (el) {
+      // 方法1：使用 querySelector
+      if (el.querySelector) {
+        var rightEl = el.querySelector('.z-swipe__buttons--right')
+        if (rightEl) {
+          data.rightW = rightEl.offsetWidth || 0
+        }
+
+        var leftEl = el.querySelector('.z-swipe__buttons--left')
+        if (leftEl) {
+          data.leftW = leftEl.offsetWidth || 0
+        }
+      }
+      // 方法2：遍历子元素
+      else if (el.children) {
+        for (var i = 0; i < el.children.length; i++) {
+          var child = el.children[i]
+          var cls = child.className || ''
+          if (cls.indexOf('z-swipe__buttons--right') !== -1) {
+            data.rightW = child.offsetWidth || 0
+          }
+          if (cls.indexOf('z-swipe__buttons--left') !== -1) {
+            data.leftW = child.offsetWidth || 0
+          }
+        }
+      }
+    }
+    return
+  }
+
+  // 小程序环境：使用 selectComponent
+  var rightBtns = owner.selectComponent('.z-swipe__buttons--right')
+  var leftBtns = owner.selectComponent('.z-swipe__buttons--left')
+
+  if (rightBtns && rightBtns.getBoundingClientRect) {
+    var rect = rightBtns.getBoundingClientRect()
+    data.rightW = rect ? (rect.width || 0) : 0
+  }
+
+  if (leftBtns && leftBtns.getBoundingClientRect) {
+    var rect2 = leftBtns.getBoundingClientRect()
+    data.leftW = rect2 ? (rect2.width || 0) : 0
+  }
+}
+
+/**
+ * 切换菜单状态
+ * @param {string|boolean} side - 'left'/'right'/true/false
+ */
+function toggleMenu(side, instance, owner) {
+  var data = instance.getState()
+  var prevSide = data.openSide || false
+  var targetX = 0
+
+  // 兼容布尔值（true 表示打开右侧）
+  if (side === true) {
+    side = 'right'
+  }
+
+  if (side === 'right' && data.rightW > 0) {
+    targetX = -data.rightW
+  } else if (side === 'left' && data.leftW > 0) {
+    targetX = data.leftW
+  } else {
+    side = false
+  }
+
+  data.openSide = side
+  data.posX = targetX
+
+  // 状态变化时通知逻辑层
+  if (prevSide !== side) {
+    owner.callMethod('onStateChange', {
+      isOpen: !!side,
+      direction: side || ''
+    })
+  }
+
+  // 添加动画类并移动
+  instance.requestAnimationFrame(function() {
+    instance.addClass('z-swipe__ani')
+    applyTranslate(instance, targetX)
+  })
+}
+
+/**
+ * 处理滑动结束
+ */
+function finishSwipe(instance, owner) {
+  var data = instance.getState()
+  var threshold = data.swipeThreshold || 30
+  var currentX = data.posX || 0
+  var wasOpen = data.openSide || false
+  var dx = data.moveX || 0
+
+  // 点击关闭
+  if (dx === 0 && data.tapClose) {
+    toggleMenu(false, instance, owner)
+    return
+  }
+
+  var nextSide = false
+
+  // 只有右侧按钮的情况（兼容旧版）
+  if (data.rightW > 0 && data.leftW === 0) {
+    if (!wasOpen) {
+      // 从关闭状态：左滑超过阈值则打开
+      if (-currentX > threshold) {
+        nextSide = 'right'
+      }
+    } else {
+      // 从打开状态：如果还剩余超过阈值的距离，则保持打开
+      // currentX 范围: -rightW（完全打开）到 0（完全关闭）
+      // -currentX 表示已展开的距离
+      if (-currentX > threshold) {
+        nextSide = 'right'
+      }
+    }
+  }
+  // 只有左侧按钮的情况
+  else if (data.leftW > 0 && data.rightW === 0) {
+    if (!wasOpen) {
+      if (currentX > threshold) {
+        nextSide = 'left'
+      }
+    } else {
+      if (currentX > threshold) {
+        nextSide = 'left'
+      }
+    }
+  }
+  // 双向按钮的情况
+  else if (data.rightW > 0 && data.leftW > 0) {
+    if (!wasOpen) {
+      if (-currentX > threshold) {
+        nextSide = 'right'
+      } else if (currentX > threshold) {
+        nextSide = 'left'
+      }
+    } else {
+      if (wasOpen === 'right') {
+        if (-currentX > threshold) {
+          nextSide = 'right'
+        }
+      } else if (wasOpen === 'left') {
+        if (currentX > threshold) {
+          nextSide = 'left'
+        }
+      }
+    }
+  }
+
+  toggleMenu(nextSide, instance, owner)
+}
+
+/**
+ * 实时移动内容
+ */
+function moveContent(px, instance) {
+  var data = instance.getState()
+  var minX = -(data.rightW || 0)
+  var maxX = data.leftW || 0
+
+  data.posX = clamp(px, minX, maxX)
+  applyTranslate(instance, data.posX)
+}
+
+// ============ 事件处理器 ============
+
+/**
+ * 触摸开始
+ */
+function touchstart(evt, owner) {
+  var ins = evt.instance
+  var data = ins.getState()
+
+  // 方向锁/辅助字段（避免误写 state 导致运行异常）
+  data.lockDir = ''
+
+  if (data.locked) return
+
+  measureButtons(ins, owner)
+
+  // 移除动画类
+  ins.requestAnimationFrame(function() {
+    ins.removeClass('z-swipe__ani')
+    owner.callMethod('onTouchStart')
+  })
+
+  // 记录起始状态
+  var pt = getPoint(evt)
+  data.startX = pt.x
+  data.startY = pt.y
+  data.moveX = 0
+  data.moveY = 0
+  data.dir = ''
+  data.baseX = data.posX || 0
+}
+
+/**
+ * 触摸移动
+ */
+function touchmove(evt, owner) {
+  var ins = evt.instance
+  var data = ins.getState()
+
+  if (data.locked) return
+
+  var pt = getPoint(evt)
+  data.moveX = pt.x - data.startX
+  data.moveY = pt.y - data.startY
+
+  // 判断方向
+  if (!data.dir) {
+    data.dir = calcDirection(data.moveX, data.moveY)
+  }
+
+  // 在关闭状态下，检查滑动方向是否有对应的按钮
+  if ((data.baseX || 0) === 0) {
+    // 向左滑动但没有右侧按钮，禁止滑动
+    if (data.moveX < 0 && (data.rightW || 0) === 0) {
+      data.dir = ''
+      return
+    }
+    // 向右滑动但没有左侧按钮，禁止滑动
+    if (data.moveX > 0 && (data.leftW || 0) === 0) {
+      data.dir = ''
+      return
+    }
+  }
+
+  // 非水平滑动忽略
+  if (data.dir !== 'h') return
+
+  // 阻止默认行为（检查 cancelable 避免警告）
+  if (evt.cancelable && evt.preventDefault) {
+    evt.preventDefault()
+  }
+
+  // 移动内容
+  moveContent(data.baseX + data.moveX, ins)
+}
+
+/**
+ * 触摸结束
+ */
+function touchend(evt, owner) {
+  var ins = evt.instance
+  var data = ins.getState()
+
+  if (data.locked) return
+
+  finishSwipe(ins, owner)
+}
+
+// ============ 鼠标事件（PC端）============
+
+function mousedown(evt, owner) {
+  if (!isDesktop) return
+  touchstart(evt, owner)
+  dragging = true
+}
+
+function mousemove(evt, owner) {
+  if (!isDesktop || !dragging) return
+  touchmove(evt, owner)
+}
+
+function mouseup(evt, owner) {
+  if (!isDesktop) return
+  touchend(evt, owner)
+  dragging = false
+}
+
+function mouseleave(evt, owner) {
+  if (!isDesktop) return
+  dragging = false
+}
+
+// ============ 属性监听器 ============
+
+/**
+ * show 属性变化
+ */
+function showChange(val, oldVal, owner, ins) {
+  var data = ins.getState()
+  measureButtons(ins, owner)
+
+  if (val && val !== 'none') {
+    // 打开右侧菜单
+    toggleMenu('right', ins, owner)
+  } else if (data.posX) {
+    // 关闭菜单
+    toggleMenu(false, ins, owner)
+  }
+
+  // 重置状态
+  data.dir = ''
+  data.moveX = 0
+  data.moveY = 0
+}
+
+/**
+ * disabled 属性变化
+ */
+function disabledChange(val, oldVal, owner, ins) {
+  ins.getState().locked = !!val
+}
+
+/**
+ * threshold 属性变化
+ */
+function thresholdChange(val, oldVal, owner, ins) {
+  ins.getState().swipeThreshold = val || 30
+}
+
+/**
+ * clickClose 属性变化
+ */
+function clickCloseChange(val, oldVal, owner, ins) {
+  ins.getState().tapClose = val !== false
+}
+
+/**
+ * hasLeft 属性变化
+ */
+function hasLeftChange(val, oldVal, owner, ins) {
+  ins.getState().hasLeftBtns = !!val
+}
+
+// ============ 导出 ============
+module.exports = {
+  touchstart: touchstart,
+  touchmove: touchmove,
+  touchend: touchend,
+  mousedown: mousedown,
+  mousemove: mousemove,
+  mouseup: mouseup,
+  mouseleave: mouseleave,
+  showChange: showChange,
+  disabledChange: disabledChange,
+  thresholdChange: thresholdChange,
+  clickCloseChange: clickCloseChange,
+  hasLeftChange: hasLeftChange
+}

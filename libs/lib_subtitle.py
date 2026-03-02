@@ -64,6 +64,21 @@ _CANDIDATE_FFPROBE = [
     os.path.join(PROJECT_DIR, "ffmpeg", "ffprobe.exe"),
 ]
 
+# imageio_ffmpeg 自带 ffmpeg 二进制，作为兜底
+try:
+    import imageio_ffmpeg as _ioff
+    _io_ffmpeg_path = _ioff.get_ffmpeg_exe()
+    if _io_ffmpeg_path and os.path.exists(_io_ffmpeg_path):
+        _CANDIDATE_FFMPEG.append(_io_ffmpeg_path)
+        # ffprobe 可能在同目录下
+        _io_ffprobe = os.path.join(os.path.dirname(_io_ffmpeg_path), "ffprobe.exe")
+        if not os.path.exists(_io_ffprobe):
+            _io_ffprobe = os.path.join(os.path.dirname(_io_ffmpeg_path), "ffprobe")
+        if os.path.exists(_io_ffprobe):
+            _CANDIDATE_FFPROBE.append(_io_ffprobe)
+except Exception:
+    pass
+
 for _p in _CANDIDATE_FFMPEG:
     if os.path.exists(_p):
         _FFMPEG = _p
@@ -75,6 +90,12 @@ for _p in _CANDIDATE_FFPROBE:
     if os.path.exists(_p):
         _FFPROBE = _p
         break
+if not _FFPROBE:
+    # ffprobe 可能在 ffmpeg 同目录
+    if _FFMPEG and os.path.exists(_FFMPEG):
+        _maybe_probe = os.path.join(os.path.dirname(_FFMPEG), "ffprobe" + (".exe" if sys.platform == "win32" else ""))
+        if os.path.exists(_maybe_probe):
+            _FFPROBE = _maybe_probe
 if not _FFPROBE:
     _FFPROBE = shutil.which("ffprobe") or "ffprobe"
 

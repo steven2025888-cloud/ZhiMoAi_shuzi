@@ -1,0 +1,586 @@
+/* ========== zhimo-ui padding utils (rpx) ========== */
+
+/* 全方向 p- */
+.z-p-0{padding:0rpx;}
+.z-p-4{padding:4rpx;}
+.z-p-8{padding:8rpx;}
+.z-p-12{padding:12rpx;}
+.z-p-16{padding:16rpx;}
+.z-p-20{padding:20rpx;}
+.z-p-24{padding:24rpx;}
+.z-p-32{padding:32rpx;}
+.z-p-40{padding:40rpx;}
+.z-p-48{padding:48rpx;}
+.z-p-64{padding:64rpx;}
+
+/* 水平 px- */
+.z-px-0{padding-left:0rpx;padding-right:0rpx;}
+.z-px-4{padding-left:4rpx;padding-right:4rpx;}
+.z-px-8{padding-left:8rpx;padding-right:8rpx;}
+.z-px-12{padding-left:12rpx;padding-right:12rpx;}
+.z-px-16{padding-left:16rpx;padding-right:16rpx;}
+.z-px-20{padding-left:20rpx;padding-right:20rpx;}
+.z-px-24{padding-left:24rpx;padding-right:24rpx;}
+.z-px-32{padding-left:32rpx;padding-right:32rpx;}
+.z-px-40{padding-left:40rpx;padding-right:40rpx;}
+.z-px-48{padding-left:48rpx;padding-right:48rpx;}
+.z-px-64{padding-left:64rpx;padding-right:64rpx;}
+
+/* 垂直 py- */
+.z-py-0{padding-top:0rpx;padding-bottom:0rpx;}
+.z-py-4{padding-top:4rpx;padding-bottom:4rpx;}
+.z-py-8{padding-top:8rpx;padding-bottom:8rpx;}
+.z-py-12{padding-top:12rpx;padding-bottom:12rpx;}
+.z-py-16{padding-top:16rpx;padding-bottom:16rpx;}
+.z-py-20{padding-top:20rpx;padding-bottom:20rpx;}
+.z-py-24{padding-top:24rpx;padding-bottom:24rpx;}
+.z-py-32{padding-top:32rpx;padding-bottom:32rpx;}
+.z-py-40{padding-top:40rpx;padding-bottom:40rpx;}
+.z-py-48{padding-top:48rpx;padding-bottom:48rpx;}
+.z-py-64{padding-top:64rpx;padding-bottom:64rpx;}
+
+/* 单方向 pt/pr/pb/pl */
+.z-pt-0{padding-top:0rpx;}
+.z-pt-4{padding-top:4rpx;}
+.z-pt-8{padding-top:8rpx;}
+.z-pt-12{padding-top:12rpx;}
+.z-pt-16{padding-top:16rpx;}
+.z-pt-20{padding-top:20rpx;}
+.z-pt-24{padding-top:24rpx;}
+.z-pt-32{padding-top:32rpx;}
+.z-pt-40{padding-top:40rpx;}
+.z-pt-48{padding-top:48rpx;}
+.z-pt-64{padding-top:64rpx;}
+
+.z-pr-0{padding-right:0rpx;}
+.z-pr-4{padding-right:4rpx;}
+.z-pr-8{padding-right:8rpx;}
+.z-pr-12{padding-right:12rpx;}
+.z-pr-16{padding-right:16rpx;}
+.z-pr-20{padding-right:20rpx;}
+.z-pr-24{padding-right:24rpx;}
+.z-pr-32{padding-right:32rpx;}
+.z-pr-40{padding-right:40rpx;}
+.z-pr-48{padding-right:48rpx;}
+.z-pr-64{padding-right:64rpx;}
+
+.z-pb-0{padding-bottom:0rpx;}
+.z-pb-4{padding-bottom:4rpx;}
+.z-pb-8{padding-bottom:8rpx;}
+.z-pb-12{padding-bottom:12rpx;}
+.z-pb-16{padding-bottom:16rpx;}
+.z-pb-20{padding-bottom:20rpx;}
+.z-pb-24{padding-bottom:24rpx;}
+.z-pb-32{padding-bottom:32rpx;}
+.z-pb-40{padding-bottom:40rpx;}
+.z-pb-48{padding-bottom:48rpx;}
+.z-pb-64{padding-bottom:64rpx;}
+
+.z-pl-0{padding-left:0rpx;}
+.z-pl-4{padding-left:4rpx;}
+.z-pl-8{padding-left:8rpx;}
+.z-pl-12{padding-left:12rpx;}
+.z-pl-16{padding-left:16rpx;}
+.z-pl-20{padding-left:20rpx;}
+.z-pl-24{padding-left:24rpx;}
+.z-pl-32{padding-left:32rpx;}
+.z-pl-40{padding-left:40rpx;}
+.z-pl-48{padding-left:48rpx;}
+.z-pl-64{padding-left:64rpx;}
+
+/* ========== zhimo-ui margin utils (rpx) ========== */
+
+/* 全方向 m- */
+.z-m-0{margin:0rpx;}
+.z-m-4{margin:4rpx;}
+.z-m-8{margin:8rpx;}
+.z-m-12{margin:12rpx;}
+.z-m-16{margin:16rpx;}
+.z-m-20{margin:20rpx;}
+.z-m-24{margin:24rpx;}
+.z-m-32{margin:32rpx;}
+.z-m-40{margin:40rpx;}
+.z-m-48{margin:48rpx;}
+.z-m-64{margin:64rpx;}
+
+/* 水平 mx- */
+.z-mx-0{margin-left:0rpx;margin-right:0rpx;}
+.z-mx-4{margin-left:4rpx;margin-right:4rpx;}
+.z-mx-8{margin-left:8rpx;margin-right:8rpx;}
+.z-mx-12{margin-left:12rpx;margin-right:12rpx;}
+.z-mx-16{margin-left:16rpx;margin-right:16rpx;}
+.z-mx-20{margin-left:20rpx;margin-right:20rpx;}
+.z-mx-24{margin-left:24rpx;margin-right:24rpx;}
+.z-mx-32{margin-left:32rpx;margin-right:32rpx;}
+.z-mx-40{margin-left:40rpx;margin-right:40rpx;}
+.z-mx-48{margin-left:48rpx;margin-right:48rpx;}
+.z-mx-64{margin-left:64rpx;margin-right:64rpx;}
+
+/* 垂直 my- */
+.z-my-0{margin-top:0rpx;margin-bottom:0rpx;}
+.z-my-4{margin-top:4rpx;margin-bottom:4rpx;}
+.z-my-8{margin-top:8rpx;margin-bottom:8rpx;}
+.z-my-12{margin-top:12rpx;margin-bottom:12rpx;}
+.z-my-16{margin-top:16rpx;margin-bottom:16rpx;}
+.z-my-20{margin-top:20rpx;margin-bottom:20rpx;}
+.z-my-24{margin-top:24rpx;margin-bottom:24rpx;}
+.z-my-32{margin-top:32rpx;margin-bottom:32rpx;}
+.z-my-40{margin-top:40rpx;margin-bottom:40rpx;}
+.z-my-48{margin-top:48rpx;margin-bottom:48rpx;}
+.z-my-64{margin-top:64rpx;margin-bottom:64rpx;}
+
+/* 上 mt- */
+.z-mt-0{margin-top:0rpx;}
+.z-mt-4{margin-top:4rpx;}
+.z-mt-8{margin-top:8rpx;}
+.z-mt-12{margin-top:12rpx;}
+.z-mt-16{margin-top:16rpx;}
+.z-mt-20{margin-top:20rpx;}
+.z-mt-24{margin-top:24rpx;}
+.z-mt-32{margin-top:32rpx;}
+.z-mt-40{margin-top:40rpx;}
+.z-mt-48{margin-top:48rpx;}
+.z-mt-64{margin-top:64rpx;}
+
+/* 右 mr- */
+.z-mr-0{margin-right:0rpx;}
+.z-mr-4{margin-right:4rpx;}
+.z-mr-8{margin-right:8rpx;}
+.z-mr-12{margin-right:12rpx;}
+.z-mr-16{margin-right:16rpx;}
+.z-mr-20{margin-right:20rpx;}
+.z-mr-24{margin-right:24rpx;}
+.z-mr-32{margin-right:32rpx;}
+.z-mr-40{margin-right:40rpx;}
+.z-mr-48{margin-right:48rpx;}
+.z-mr-64{margin-right:64rpx;}
+
+/* 下 mb- */
+.z-mb-0{margin-bottom:0rpx;}
+.z-mb-4{margin-bottom:4rpx;}
+.z-mb-8{margin-bottom:8rpx;}
+.z-mb-12{margin-bottom:12rpx;}
+.z-mb-16{margin-bottom:16rpx;}
+.z-mb-20{margin-bottom:20rpx;}
+.z-mb-24{margin-bottom:24rpx;}
+.z-mb-32{margin-bottom:32rpx;}
+.z-mb-40{margin-bottom:40rpx;}
+.z-mb-48{margin-bottom:48rpx;}
+.z-mb-64{margin-bottom:64rpx;}
+
+/* 左 ml- */
+.z-ml-0{margin-left:0rpx;}
+.z-ml-4{margin-left:4rpx;}
+.z-ml-8{margin-left:8rpx;}
+.z-ml-12{margin-left:12rpx;}
+.z-ml-16{margin-left:16rpx;}
+.z-ml-20{margin-left:20rpx;}
+.z-ml-24{margin-left:24rpx;}
+.z-ml-32{margin-left:32rpx;}
+.z-ml-40{margin-left:40rpx;}
+.z-ml-48{margin-left:48rpx;}
+.z-ml-64{margin-left:64rpx;}
+
+/* auto 常用 */
+.z-m-auto{margin:auto;}
+.z-mx-auto{margin-left:auto;margin-right:auto;}
+.z-my-auto{margin-top:auto;margin-bottom:auto;}
+.z-ml-auto{margin-left:auto;}
+.z-mr-auto{margin-right:auto;}
+.z-mt-auto{margin-top:auto;}
+.z-mb-auto{margin-bottom:auto;}
+
+
+/* ========== zhimo-ui common utils (rpx) ========== */
+/* 说明：
+   - 统一使用 .z- 前缀，避免和业务样式冲突
+   - 默认单位使用 rpx（小程序/uni-app 友好）
+*/
+
+/* ---------- 基础变量 ---------- */
+$z-space: (0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64);
+$z-radius: (0, 4, 8, 12, 16, 20, 24, 32);
+$z-zindex: (0, 1, 10, 20, 30, 40, 50, 100, 999);
+
+/* ---------- Display ---------- */
+.z-block{display:block;}
+.z-inline{display:inline;}
+.z-inline-block{display:inline-block;}
+.z-flex{display:flex;}
+.z-inline-flex{display:inline-flex;}
+.z-hidden{display:none!important;}
+
+/* ---------- Flex direction / wrap ---------- */
+.z-flex-row{flex-direction:row;}
+.z-flex-row-reverse{flex-direction:row-reverse;}
+.z-flex-col{flex-direction:column;}
+.z-flex-col-reverse{flex-direction:column-reverse;}
+.z-flex-wrap{flex-wrap:wrap;}
+.z-flex-nowrap{flex-wrap:nowrap;}
+.z-flex-wrap-reverse{flex-wrap:wrap-reverse;}
+
+/* ---------- Flex align / justify ---------- */
+.z-items-start{align-items:flex-start;}
+.z-items-center{align-items:center;}
+.z-items-end{align-items:flex-end;}
+.z-items-stretch{align-items:stretch;}
+.z-items-baseline{align-items:baseline;}
+
+.z-justify-start{justify-content:flex-start;}
+.z-justify-center{justify-content:center;}
+.z-justify-end{justify-content:flex-end;}
+.z-justify-between{justify-content:space-between;}
+.z-justify-around{justify-content:space-around;}
+.z-justify-evenly{justify-content:space-evenly;}
+
+.z-content-start{align-content:flex-start;}
+.z-content-center{align-content:center;}
+.z-content-end{align-content:flex-end;}
+.z-content-between{align-content:space-between;}
+.z-content-around{align-content:space-around;}
+.z-content-stretch{align-content:stretch;}
+
+.z-self-auto{align-self:auto;}
+.z-self-start{align-self:flex-start;}
+.z-self-center{align-self:center;}
+.z-self-end{align-self:flex-end;}
+.z-self-stretch{align-self:stretch;}
+.z-self-baseline{align-self:baseline;}
+
+/* ---------- Flex grow / shrink / basis ---------- */
+.z-flex-1{flex:1 1 0%;}
+.z-flex-auto{flex:1 1 auto;}
+.z-flex-none{flex:none;}
+.z-grow{flex-grow:1;}
+.z-grow-0{flex-grow:0;}
+.z-shrink{flex-shrink:1;}
+.z-shrink-0{flex-shrink:0;}
+
+/* ---------- Gap (rpx) ---------- */
+@each $v in $z-space {
+  .z-gap-#{$v}{gap:#{$v}rpx;}
+  .z-gapx-#{$v}{column-gap:#{$v}rpx;}
+  .z-gapy-#{$v}{row-gap:#{$v}rpx;}
+}
+
+/* ---------- Margin utils (rpx) ---------- */
+@each $v in $z-space {
+  .z-m-#{$v}{margin:#{$v}rpx;}
+  .z-mx-#{$v}{margin-left:#{$v}rpx;margin-right:#{$v}rpx;}
+  .z-my-#{$v}{margin-top:#{$v}rpx;margin-bottom:#{$v}rpx;}
+  .z-mt-#{$v}{margin-top:#{$v}rpx;}
+  .z-mr-#{$v}{margin-right:#{$v}rpx;}
+  .z-mb-#{$v}{margin-bottom:#{$v}rpx;}
+  .z-ml-#{$v}{margin-left:#{$v}rpx;}
+}
+.z-m-auto{margin:auto;}
+.z-mx-auto{margin-left:auto;margin-right:auto;}
+
+/* ---------- Border radius ---------- */
+@each $r in $z-radius {
+  .z-rounded-#{$r}{border-radius:#{$r}rpx;}
+}
+.z-rounded-full{border-radius:9999rpx;}
+
+/* ---------- Width / Height ---------- */
+.z-w-auto{width:auto;}
+.z-w-full{width:100%;}
+.z-w-screen{width:100vw;}
+.z-min-w-0{min-width:0;}
+.z-max-w-full{max-width:100%;}
+.z-h-auto{height:auto;}
+.z-h-full{height:100%;}
+.z-h-screen{height:100vh;}
+.z-min-h-0{min-height:0;}
+.z-max-h-full{max-height:100%;}
+
+/* ---------- Position ---------- */
+.z-relative{position:relative;}
+.z-absolute{position:absolute;}
+.z-fixed{position:fixed;}
+.z-sticky{position:sticky;}
+
+@each $v in $z-space {
+  .z-top-#{$v}{top:#{$v}rpx;}
+  .z-right-#{$v}{right:#{$v}rpx;}
+  .z-bottom-#{$v}{bottom:#{$v}rpx;}
+  .z-left-#{$v}{left:#{$v}rpx;}
+
+  .z-inset-#{$v}{top:#{$v}rpx;right:#{$v}rpx;bottom:#{$v}rpx;left:#{$v}rpx;}
+  .z-inset-x-#{$v}{left:#{$v}rpx;right:#{$v}rpx;}
+  .z-inset-y-#{$v}{top:#{$v}rpx;bottom:#{$v}rpx;}
+}
+
+/* ---------- Z-index ---------- */
+@each $z in $z-zindex {
+  .z-z-#{$z}{z-index:$z;}
+}
+
+/* ---------- Overflow ---------- */
+.z-overflow-hidden{overflow:hidden;}
+.z-overflow-auto{overflow:auto;}
+.z-overflow-scroll{overflow:scroll;}
+.z-overflow-x-hidden{overflow-x:hidden;}
+.z-overflow-x-auto{overflow-x:auto;}
+.z-overflow-y-hidden{overflow-y:hidden;}
+.z-overflow-y-auto{overflow-y:auto;}
+
+/* ---------- Text ---------- */
+.z-text-left{display:block;width:100%;text-align:left !important;}
+.z-text-center{display:block;width:100%;text-align:center !important;}
+.z-text-right{display:block;width:100%;text-align:right !important;}
+.z-text-justify{text-align:justify;}
+.z-font-bold{font-weight:700;}
+.z-font-semibold{font-weight:600;}
+.z-font-medium{font-weight:500;}
+.z-font-normal{font-weight:400;}
+.z-font-light{font-weight:300;}
+.z-leading-1{line-height:1;}
+.z-leading-tight{line-height:1.25;}
+.z-leading-normal{line-height:1.5;}
+.z-leading-loose{line-height:1.75;}
+.z-whitespace-nowrap{white-space:nowrap;}
+.z-break-all{word-break:break-all;}
+.z-break-words{overflow-wrap:break-word;}
+.z-ellipsis{display:block;width:100%;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.z-line-clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.z-line-clamp-3{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+
+/* ---------- Opacity ---------- */
+.z-opacity-0{opacity:0;}
+.z-opacity-25{opacity:.25;}
+.z-opacity-50{opacity:.5;}
+.z-opacity-75{opacity:.75;}
+.z-opacity-100{opacity:1;}
+
+/* ---------- Cursor / select ---------- */
+.z-cursor-pointer{cursor:pointer;}
+.z-cursor-default{cursor:default;}
+.z-select-none{-webkit-user-select:none;user-select:none;}
+.z-select-text{-webkit-user-select:text;user-select:text;}
+
+/* ---------- Simple borders ---------- */
+.z-border{border-width:1px;border-style:solid;}
+.z-border-0{border-width:0;}
+.z-border-t{border-top-width:1px;border-top-style:solid;}
+.z-border-r{border-right-width:1px;border-right-style:solid;}
+.z-border-b{border-bottom-width:1px;border-bottom-style:solid;}
+.z-border-l{border-left-width:1px;border-left-style:solid;}
+
+/* ---------- Safe area helpers ---------- */
+.z-safe-bottom{padding-bottom:constant(safe-area-inset-bottom);padding-bottom:env(safe-area-inset-bottom);}
+.z-safe-top{padding-top:constant(safe-area-inset-top);padding-top:env(safe-area-inset-top);}
+
+/* ========== zhimo-ui layout & flex utils ========== */
+
+/* Display */
+.z-d-none{display:none;}
+.z-d-block{display:block;}
+.z-d-inline{display:inline;}
+.z-d-inline-block{display:inline-block;}
+.z-d-flex{display:flex;}
+.z-d-inline-flex{display:inline-flex;}
+
+/* Flex direction & wrap */
+.z-flex{display:flex;}
+.z-flex-row{flex-direction:row;}
+.z-flex-col{flex-direction:column;}
+.z-flex-wrap{flex-wrap:wrap;}
+.z-flex-nowrap{flex-wrap:nowrap;}
+.z-flex-1{flex:1;}
+.z-flex-auto{flex:auto;}
+.z-grow{flex-grow:1;}
+.z-grow-0{flex-grow:0;}
+.z-shrink{flex-shrink:1;}
+.z-shrink-0{flex-shrink:0;}
+
+/* Align items */
+.z-items-start{align-items:flex-start;}
+.z-items-center{align-items:center;}
+.z-items-end{align-items:flex-end;}
+.z-items-stretch{align-items:stretch;}
+.z-items-baseline{align-items:baseline;}
+
+/* Justify content */
+.z-justify-start{justify-content:flex-start;}
+.z-justify-center{justify-content:center;}
+.z-justify-end{justify-content:flex-end;}
+.z-justify-between{justify-content:space-between;}
+.z-justify-around{justify-content:space-around;}
+.z-justify-evenly{justify-content:space-evenly;}
+
+/* Align self */
+.z-self-auto{align-self:auto;}
+.z-self-start{align-self:flex-start;}
+.z-self-center{align-self:center;}
+.z-self-end{align-self:flex-end;}
+.z-self-stretch{align-self:stretch;}
+
+/* Gap (部分平台可能不支持，可酌情使用) */
+.z-gap-4{gap:4rpx;}
+.z-gap-8{gap:8rpx;}
+.z-gap-12{gap:12rpx;}
+.z-gap-16{gap:16rpx;}
+.z-gap-20{gap:20rpx;}
+.z-gap-24{gap:24rpx;}
+.z-gap-32{gap:32rpx;}
+
+/* ========== Typography ========== */
+
+/* Font sizes (rpx) */
+.z-text-xs{font-size:22rpx;}
+.z-text-sm{font-size:24rpx;}
+.z-text-base{font-size:28rpx;}
+.z-text-lg{font-size:32rpx;}
+.z-text-xl{font-size:36rpx;}
+.z-text-2xl{font-size:40rpx;}
+.z-text-3xl{font-size:48rpx;}
+
+/* Common numeric sizes */
+.z-text-20{font-size:20rpx;}
+.z-text-22{font-size:22rpx;}
+.z-text-24{font-size:24rpx;}
+.z-text-26{font-size:26rpx;}
+.z-text-28{font-size:28rpx;}
+.z-text-30{font-size:30rpx;}
+.z-text-32{font-size:32rpx;}
+.z-text-34{font-size:34rpx;}
+.z-text-36{font-size:36rpx;}
+.z-text-40{font-size:40rpx;}
+.z-text-44{font-size:44rpx;}
+.z-text-48{font-size:48rpx;}
+
+
+/* Smaller numeric sizes (may be clamped by some platforms) */
+.z-text-18{font-size:18rpx;}
+.z-text-16{font-size:16rpx;}
+.z-text-14{font-size:14rpx;}
+.z-text-12{font-size:12rpx;}
+.z-text-10{font-size:10rpx;}
+.z-text-8{font-size:8rpx;}
+
+/*
+  Break minimum font-size limit (visual scale)
+  用法：
+    <text class="z-text-20 z-text-scale-80">看起来更小</text>
+    <text class="z-text-16 z-text-scale-75">更小（更稳）</text>
+
+  说明：
+  - 很多端会把 font-size 小于某阈值直接“钳制”到最小字号
+  - 先用一个不会被钳制的字号（例如 20rpx），再用 transform 缩放
+*/
+.z-text-scale{display:inline-block;transform-origin:center center;}
+.z-text-scale-95{display:inline-block;transform:scale(.95);transform-origin:center center;}
+.z-text-scale-90{display:inline-block;transform:scale(.90);transform-origin:center center;}
+.z-text-scale-85{display:inline-block;transform:scale(.85);transform-origin:center center;}
+.z-text-scale-80{display:inline-block;transform:scale(.80);transform-origin:center center;}
+.z-text-scale-75{display:inline-block;transform:scale(.75);transform-origin:center center;}
+.z-text-scale-70{display:inline-block;transform:scale(.70);transform-origin:center center;}
+.z-text-scale-65{display:inline-block;transform:scale(.65);transform-origin:center center;}
+.z-text-scale-60{display:inline-block;transform:scale(.60);transform-origin:center center;}
+
+/* Quick presets (safe base size + scale) */
+.z-text-xxs{font-size:20rpx;} /* safe base size */
+.z-text-micro{font-size:20rpx;display:inline-block;transform:scale(.80);transform-origin:left center;}
+.z-text-nano{font-size:20rpx;display:inline-block;transform:scale(.70);transform-origin:left center;}
+
+/* Font weight */
+.z-fw-400{font-weight:400;}
+.z-fw-500{font-weight:500;}
+.z-fw-600{font-weight:600;}
+.z-fw-700{font-weight:700;}
+.z-fw-800{font-weight:800;}
+
+/* Line height */
+.z-lh-1{line-height:1;}
+.z-lh-11{line-height:1.1;}
+.z-lh-12{line-height:1.2;}
+.z-lh-14{line-height:1.4;}
+.z-lh-16{line-height:1.6;}
+.z-lh-18{line-height:1.8;}
+
+/* Font family stacks (App 常用) */
+.z-font-system{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","PingFang SC","Hiragino Sans","Microsoft YaHei",sans-serif;}
+.z-font-mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Monaco,Consolas,"Roboto Mono","Noto Sans Mono","Liberation Mono",monospace;}
+.z-font-number{font-variant-numeric:tabular-nums lining-nums;}
+
+/* Text align */
+.z-text-left{display:block;width:100%;text-align:left !important;}
+.z-text-center{display:block;width:100%;text-align:center !important;}
+.z-text-right{display:block;width:100%;text-align:right !important;}
+
+/* ========== Colors ========== */
+/* 说明：这些是“常用 App 文本/背景色”，不和具体主题强绑定 */
+
+.z-text-strong{color:var(--z-text-strong, #0f172a) !important;}
+.z-text-main{color:var(--z-text-main, #111) !important;}
+.z-text-muted{color:var(--z-text-muted, #888) !important;}
+.z-text-sub{color:var(--z-text-sub, #666) !important;}
+.z-text-inverse{color:#FFFFFF;}
+
+.z-text-primary{color:var(--z-primary, #465cff) !important;}
+.z-text-success{color:var(--z-success, #16a34a) !important;}
+.z-text-warning{color:var(--z-warning, #eab308) !important;}
+.z-text-danger{color:var(--z-danger, #ef4444) !important;}
+
+.z-bg-white{background:#FFFFFF;}
+.z-bg-surface{background:#F6F7FB;}
+.z-bg-soft{background:#F2F4F8;}
+.z-bg-primary{background:#465CFF;}
+.z-bg-success{background:#09BE4F;}
+.z-bg-warning{background:#FFB703;}
+.z-bg-danger{background:#FF3B30;}
+.z-bg-black{background:#000000;}
+
+/* ========== Text overflow / clamp ========== */
+.z-ellipsis{display:block;width:100%;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.z-line-2{display:-webkit-box;width:100%;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;}
+.z-line-3{display:-webkit-box;width:100%;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:3;}
+
+/* ========== Image helpers ========== */
+.z-img{display:block;max-width:100%;}
+.z-img-fluid{width:100%;height:auto;}
+.z-img-cover{object-fit:cover;}
+.z-img-contain{object-fit:contain;}
+
+/* Icon / image sizes (square) */
+.z-icon-20{width:20rpx;height:20rpx;}
+.z-icon-24{width:24rpx;height:24rpx;}
+.z-icon-28{width:28rpx;height:28rpx;}
+.z-icon-32{width:32rpx;height:32rpx;}
+.z-icon-36{width:36rpx;height:36rpx;}
+.z-icon-40{width:40rpx;height:40rpx;}
+.z-icon-48{width:48rpx;height:48rpx;}
+.z-icon-56{width:56rpx;height:56rpx;}
+.z-icon-64{width:64rpx;height:64rpx;}
+.z-icon-80{width:80rpx;height:80rpx;}
+.z-icon-96{width:96rpx;height:96rpx;}
+.z-icon-120{width:120rpx;height:120rpx;}
+
+/* Small image constraints */
+.z-img-max-240{max-width:240rpx;max-height:240rpx;}
+.z-img-max-320{max-width:320rpx;max-height:320rpx;}
+.z-img-max-480{max-width:480rpx;max-height:480rpx;}
+
+/* ========== Position & overflow (常用) ========== */
+.z-relative{position:relative;}
+.z-absolute{position:absolute;}
+.z-fixed{position:fixed;}
+.z-top-0{top:0;}
+.z-right-0{right:0;}
+.z-bottom-0{bottom:0;}
+.z-left-0{left:0;}
+.z-overflow-hidden{overflow:hidden;}
+.z-overflow-auto{overflow:auto;}
+
+.z-rounded-16{border-radius:16rpx;}
+
+.z-circle{border-radius:9999rpx !important;}
+.z-dot-24{width:24rpx;height:24rpx;border-radius:9999rpx;display:inline-block;}
+.z-dot-32{width:32rpx;height:32rpx;border-radius:9999rpx;display:inline-block;}
+.z-dot-40{width:40rpx;height:40rpx;border-radius:9999rpx;display:inline-block;}
+.z-dot-48{width:48rpx;height:48rpx;border-radius:9999rpx;display:inline-block;}
+.z-underline{text-decoration:underline !important;}
+.z-no-underline{text-decoration:none !important;}
+.z-line-4{display:-webkit-box;width:100%;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:4;}
+.z-line-5{display:-webkit-box;width:100%;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:5;}

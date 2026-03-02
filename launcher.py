@@ -190,12 +190,8 @@ def start_app():
         if debug_console:
             log_warning(f"[DEBUG] 已启用调试控制台模式: {debug_flag}")
         
-        # 1. 清理日志
-        log_info("[1/3] 清理超大日志文件...")
-        clean_logs()
-        
-        # 2. 检查环境
-        log_info("[2/3] 检查运行环境...")
+        # 1. 检查环境（日志清理延后到启动后，减少用户等待时间）
+        log_info("[1/3] 检查运行环境...")
         
         # 尝试多个可能的Python路径（与 app_backend.py start_gradio() 保持一致）
         python_paths = [
@@ -285,10 +281,17 @@ def start_app():
         log_info(f"子进程日志: {backend_log}")
         log_info(f"崩溃日志: {crash_log}")
 
+        # 启动后再清理日志（不阻塞用户）
+        try:
+            import threading
+            threading.Thread(target=clean_logs, daemon=True).start()
+        except Exception:
+            pass
+
         # ── 多轮轮询检测早期崩溃 ──
-        # 重型应用可能需要几秒才完成 import，总共等 10 秒
-        max_wait = 10
-        poll_interval = 1
+        # 缩短等待时间：5秒足够检测 import 级别的崩溃
+        max_wait = 5
+        poll_interval = 0.5
         elapsed = 0
         rc = None
         while elapsed < max_wait:

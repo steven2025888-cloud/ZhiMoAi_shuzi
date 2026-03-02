@@ -201,7 +201,7 @@ def check_for_updates():
                 'Accept': 'application/json'
             }
         )
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, timeout=3) as response:
             raw_data = response.read().decode('utf-8')
             print(f"[UPDATE] 服务器响应: {raw_data[:200]}")
             data = json.loads(raw_data)
@@ -1603,10 +1603,19 @@ if __name__ == "__main__":
         print("[LOCK] 未能激活现有窗口，为避免重复实例，当前进程退出")
         sys.exit(0)
 
-    # ── 检查更新 ─────────────────────────────────────────
     print("[MAIN] 单实例检查通过")
     if sys.stdout:
         sys.stdout.flush()
+
+    # ── 立即启动后台服务（越早越好，与更新检查/登录并行加载）──
+    print("[BOOT] 立即启动后台服务...")
+    signal.signal(signal.SIGINT, lambda s, f: cleanup())
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, lambda s, f: cleanup())
+    threading.Thread(target=start_gradio, daemon=True).start()
+    threading.Thread(target=wait_for_gradio, daemon=True).start()
+
+    # ── 检查更新（Gradio 已在后台加载，缩短超时避免阻塞）──
     if ENV_CONFIG.get('CHECK_UPDATE', True):
         print("[UPDATE] 检查更新...")
         has_update, update_info, error_msg = check_for_updates()
@@ -1634,18 +1643,8 @@ if __name__ == "__main__":
     else:
         print("[UPDATE] 更新检查已禁用")
 
-    # ── 先进行激活验证（在启动任何服务之前）─────────────────
+    # ── 激活验证 ─────────────────────────────────────────
     print("[LICENSE] 开始激活验证...")
-    if sys.stdout:
-        sys.stdout.flush()
-
-    # 立即启动服务（双击就启动，不等登录）
-    print("[LICENSE] 立即启动后台服务...")
-    signal.signal(signal.SIGINT, lambda s, f: cleanup())
-    if hasattr(signal, 'SIGTERM'):
-        signal.signal(signal.SIGTERM, lambda s, f: cleanup())
-    threading.Thread(target=start_gradio, daemon=True).start()
-    threading.Thread(target=wait_for_gradio, daemon=True).start()
     
     try:
         sys.path.insert(0, BASE_DIR)

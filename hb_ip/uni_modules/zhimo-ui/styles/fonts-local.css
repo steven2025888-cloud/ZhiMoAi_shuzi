@@ -1,0 +1,40 @@
+/* 本地字体引用（TTF Only 版）
+   字体文件放到：uni_modules/zhimo-ui/assets/fonts/
+
+   ✅ 使用相对路径（Vite + uni_modules 更稳）
+   styles/fonts-local.css  ->  ../assets/fonts/
+
+   你只放了 ttf，那么就只写 truetype：
+   - Inter-Regular.ttf / Inter-Bold.ttf
+   - Roboto-Regular.ttf / Roboto-Bold.ttf
+*/
+
+@font-face{
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face{
+  font-family: "Inter";
+  src: url("../assets/fonts/Inter-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face{
+  font-family: "Roboto";
+  src: url("../assets/fonts/Roboto-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face{
+  font-family: "Roboto";
+  src: url("../assets/fonts/Roboto-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

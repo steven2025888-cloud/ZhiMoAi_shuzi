@@ -1,0 +1,313 @@
+// z-drag-sort WXS handler
+// 用于微信小程序/H5的视图层拖拽处理
+
+var global = {}
+
+function checkDesktop() {
+	if (typeof navigator !== 'object') return false
+	var ua = navigator.userAgent
+	var mobiles = ['Android', 'iPhone', 'SymbianOS', 'Windows Phone', 'iPad', 'iPod']
+	var desktop = true
+	for (var i = 0; i < mobiles.length; i++) {
+		if (ua.indexOf(mobiles[i]) > 0) {
+			desktop = false
+			break
+		}
+	}
+	return desktop
+}
+
+var isWeb = typeof window === 'object'
+var isDesktop = isWeb && checkDesktop()
+
+function isOverflow(col, maxCols, row, maxRows, pos, total) {
+	if (col < 0 || col >= maxCols) return true
+	if (row < 0 || row >= maxRows) return true
+	if (pos < 0 || pos >= total) return true
+	return false
+}
+
+function computeNewOrder(fromPos, toPos, state) {
+	var cfg = state.cfg
+	var targetIdx = -1
+	for (var i = 0; i < state.nodes.length; i++) {
+		if (state.nodes[i].order === toPos) {
+			targetIdx = state.nodes[i].index
+			break
+		}
+	}
+
+	return state.nodes.map(function(node) {
+		var curOrder = node.order
+		var curIdx = node.index
+
+		if (fromPos < toPos) {
+			if (curOrder > fromPos && curOrder <= toPos) {
+				curOrder = curOrder - 1
+				curIdx = curIdx - 1
+			} else if (curOrder === fromPos) {
+				curOrder = toPos
+				curIdx = targetIdx
+			}
+		} else if (fromPos > toPos) {
+			if (curOrder >= toPos && curOrder < fromPos) {
+				curOrder = curOrder + 1
+				curIdx = curIdx + 1
+			} else if (curOrder === fromPos) {
+				curOrder = toPos
+				curIdx = targetIdx
+			}
+		}
+
+		if (node.order !== curOrder) {
+			node.tx = (curOrder % cfg.columns) * cfg.cellW + 'px'
+			node.ty = Math.floor(curOrder / cfg.columns) * cfg.cellH + 'px'
+			node.order = curOrder
+			node.index = curIdx
+		}
+		return node
+	})
+}
+
+function notifyComponent(nodes, eventType, owner) {
+	if (!owner) return
+	var sorted = []
+	var items = []
+
+	for (var i = 0; i < nodes.length; i++) {
+		sorted[nodes[i].order] = nodes[i]
+	}
+	for (var j = 0; j < sorted.length; j++) {
+		if (sorted[j]) items.push(sorted[j].data)
+	}
+
+	if (eventType === 'change') {
+		owner.callMethod('onSortChange', { list: items })
+	} else {
+		owner.callMethod('onSortEnd', { list: items })
+	}
+}
+
+function onLongPress(e, owner) {
+	var el = e.instance
+	var ds = el.getDataset()
+	var st = el.getState()
+
+	st.active = +ds.active === 1
+	if (!st.active) return
+
+	if (!st.cfg || st.cfg === 'undefined') {
+		st.cfg = JSON.parse(ds.config)
+	}
+	var cfg = st.cfg
+
+	var touch = null
+	if (isDesktop) {
+		touch = e
+	} else {
+		touch = e.changedTouches ? e.changedTouches[0] : st.savedTouch
+	}
+	if (!touch) return
+
+	st.dragIdx = +ds.idx
+	if (st.moving) return
+
+	owner.callMethod('onDragStart', { catching: true })
+
+	var offsetX = cfg.columns === 1 ? 0 : touch.pageX - (cfg.cellW / 2 + cfg.left)
+	var offsetY = touch.pageY - (cfg.cellH / 2 + cfg.top)
+	st.touchKey = touch.identifier
+
+	if (st.prevEl) st.prevEl.removeClass('z-drag-sort__cell--settle')
+
+	el.setStyle({
+		'transform': 'translate3d(' + offsetX + 'px, ' + offsetY + 'px, 0)'
+	})
+
+	if (st.allEls) {
+		st.allEls.forEach(function(item, idx) {
+			item.removeClass('z-drag-sort__cell--active')
+			item.removeClass('z-drag-sort__cell--smooth')
+			item.addClass(idx === st.dragIdx ? 'z-drag-sort__cell--active' : 'z-drag-sort__cell--smooth')
+		})
+	}
+
+	st.moving = true
+}
+
+function onTouchStart(e, owner) {
+	var el = e.instance
+	var st = el.getState()
+
+	st.nodes = global.nodes
+	st.allEls = global.allEls
+	st.cfg = global.cfg
+
+	if (isDesktop) {
+		st.savedTouch = e
+	} else {
+		st.savedTouch = e.changedTouches[0] || e.touches[0]
+	}
+
+	var ds = el.getDataset()
+	st.active = +ds.active === 1
+
+	owner.callMethod('onDragStart', { catching: false })
+}
+
+function onTouchMove(e, owner, extra) {
+	var st = {}
+	var touch = null
+	var el = null
+
+	if (isDesktop) {
+		touch = e
+		st = extra.instance.getState()
+		el = extra.instance
+	} else {
+		touch = e.changedTouches[0] || e.touches[0]
+		st = e.instance.getState()
+		el = e.instance
+	}
+
+	if (e.preventDefault && st.moving) {
+		e.preventDefault()
+	}
+	if (st.app && st.moving && typeof event !== 'undefined' && event && event.preventDefault) {
+		event.preventDefault()
+	}
+
+	var cfg = st.cfg
+	if (!st.moving || !st.active) return
+	if (!touch || st.touchKey !== touch.identifier) return
+
+	var posX = cfg.columns === 1 ? 0 : touch.pageX - (cfg.cellW / 2 + cfg.left)
+	var posY = touch.pageY - (cfg.cellH / 2 + cfg.top)
+
+	if (touch.clientY > cfg.screenH - cfg.cellH) {
+		owner.callMethod('scrollPage', {
+			scrollTop: touch.pageY + cfg.cellH - cfg.screenH
+		})
+	} else if (touch.clientY < cfg.cellH) {
+		owner.callMethod('scrollPage', {
+			scrollTop: touch.pageY - cfg.cellH
+		})
+	}
+
+	el.setStyle({
+		'transform': 'translate3d(' + posX + 'px, ' + posY + 'px, 0)'
+	})
+
+	var fromOrder = st.nodes[st.dragIdx].order
+	var gridCol = Math.round(posX / cfg.cellW)
+	var gridRow = Math.round(posY / cfg.cellH)
+	var toOrder = gridCol + cfg.columns * gridRow
+
+	if (isOverflow(gridCol, cfg.columns, gridRow, cfg.rows, toOrder, st.nodes.length)) return
+	if (fromOrder === toOrder || fromOrder === st.lastFrom) return
+
+	st.lastFrom = fromOrder
+
+	var updated = computeNewOrder(fromOrder, toOrder, st)
+
+	if (st.allEls) {
+		st.allEls.forEach(function(item, idx) {
+			var node = updated[idx]
+			if (idx !== st.dragIdx) {
+				item.setStyle({
+					'transform': 'translate3d(' + node.tx + ',' + node.ty + ', 0)'
+				})
+			}
+		})
+	}
+
+	owner.callMethod('syncNodes', { nodes: updated })
+	notifyComponent(updated, 'change', owner)
+}
+
+function onTouchEnd(e, owner, extra) {
+	var el = null
+	var st = {}
+
+	if (isDesktop) {
+		el = extra.instance
+		st = extra.instance.getState()
+	} else {
+		el = e.instance
+		st = e.instance.getState()
+	}
+
+	if (!st.moving || !st.active) return
+
+	notifyComponent(st.nodes, 'end', owner)
+
+	el.addClass('z-drag-sort__cell--settle')
+	el.setStyle({
+		'transform': 'translate3d(' + st.nodes[st.dragIdx].tx + ',' + st.nodes[st.dragIdx].ty + ', 0)'
+	})
+
+	if (st.allEls) {
+		st.allEls.forEach(function(item) {
+			item.removeClass('z-drag-sort__cell--smooth')
+			item.removeClass('z-drag-sort__cell--active')
+		})
+	}
+
+	st.prevEl = el
+	st.lastFrom = -1
+	st.moving = false
+
+	owner.callMethod('onDragStart', { catching: false })
+	st.dragIdx = -1
+}
+
+function syncList(newVal, oldVal, owner) {
+	global.allEls = owner.selectAllComponents('.z-drag-sort__cell')
+	global.nodes = newVal || []
+
+	if (!global.allEls || global.allEls.length === 0) return
+
+	for (var i = 0; i < global.nodes.length; i++) {
+		var node = global.nodes[i]
+		var el = global.allEls[i]
+		if (node && el) {
+			el.setStyle({
+				'transform': 'translate3d(' + node.tx + ',' + node.ty + ', 0)'
+			})
+		}
+	}
+}
+
+function syncConfig(newVal, oldVal, owner) {
+	global.cfg = newVal
+}
+
+var mouseActive = false
+
+function onMouseDown(e, owner) {
+	if (!isWeb || !isDesktop) return
+
+	onTouchStart(e, owner)
+	onLongPress(e, owner)
+	mouseActive = true
+
+	window.onmousemove = function(ev) {
+		if (!isDesktop || !mouseActive) return
+		onTouchMove(ev, owner, e)
+	}
+	window.onmouseup = function(ev) {
+		if (!isDesktop || !mouseActive) return
+		onTouchEnd(ev, owner, e)
+		mouseActive = false
+	}
+}
+
+module.exports = {
+	onLongPress: onLongPress,
+	onTouchStart: onTouchStart,
+	onTouchMove: onTouchMove,
+	onTouchEnd: onTouchEnd,
+	syncList: syncList,
+	syncConfig: syncConfig,
+	onMouseDown: onMouseDown
+}

@@ -115,7 +115,7 @@ Source: "{#SourceRoot}\ui\ui_style.css";   DestDir: "{app}\ui"; Flags: ignorever
 ; ── 配置文件 ──
 ; env.dat = 混淆后的配置（不打包明文 .env）
 Source: "{#SourceRoot}\env.dat";        DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
-Source: "{#SourceRoot}\.license";       DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
+Source: "{#SourceRoot}\.license";       DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist
 Source: "{#SourceRoot}\pip.ini";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ── Logo / 图标 ──
@@ -136,7 +136,9 @@ Source: "{#SourceRoot}\打包检查清单.bat";    DestDir: "{app}"; Flags: igno
 Source: "{#SourceRoot}\libs\__init__.py";                 DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\libs\app_version.pyc";             DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
 ; 注意：app_version.py 不打包源文件，只打包 .pyc
-Source: "{#SourceRoot}\libs\.license";                    DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\libs\.license";                    DestDir: "{app}\libs"; Flags: onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist
+; 字体元数据（lib_subtitle.py 需要在 libs/ 下找到 fonts_merged.json）
+Source: "{#SourceRoot}\data\fonts_merged.json";           DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; -- tools / debug --
 Source: "{#SourceRoot}\debug_start.bat";   DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -149,6 +151,13 @@ Source: "{#SourceRoot}\抖音发布功能说明.txt";          DestDir: "{app}";
 Source: "{#SourceRoot}\user_agreement.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\privacy_policy.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\功能演示-工作台记录.md";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+; ── 数据文件 ──
+Source: "{#SourceRoot}\data\music_database.json"; DestDir: "{app}\data"; Flags: ignoreversion skipifsourcedoesntexist
+
+; ── FFmpeg 二进制（字幕烧录、画中画等功能必需） ──
+Source: "{#SourceRoot}\heygem-win-50\py39\ffmpeg\bin\ffmpeg.exe";  DestDir: "{app}\ffmpeg_bin"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceRoot}\heygem-win-50\py39\ffmpeg\bin\ffprobe.exe"; DestDir: "{app}\ffmpeg_bin"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ── 字体目录（只打包默认字体，其他字体运行时按需下载） ──
 Source: "{#SourceRoot}\fonts\SourceHanSansCN-Bold.otf"; DestDir: "{app}\fonts"; Flags: ignoreversion skipifsourcedoesntexist
@@ -198,10 +207,10 @@ Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\ZhiMoAI_Launcher.exe"
 ;  安装后运行
 ; ============================================================
 [Run]
-; 普通安装完成后询问是否启动（runasoriginaluser 确保不以管理员身份启动）
+; 普通安装完成后询问是否启动（shellexec + runasoriginaluser 降权为普通用户）
 Filename: "{app}\ZhiMoAI_Launcher.exe"; WorkingDir: "{app}"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
 ; 静默安装完成后自动启动（用于自动更新）
-Filename: "{app}\ZhiMoAI_Launcher.exe"; WorkingDir: "{app}"; Flags: nowait skipifdoesntexist runhidden shellexec runasoriginaluser; Check: WizardSilent
+Filename: "{app}\ZhiMoAI_Launcher.exe"; WorkingDir: "{app}"; Flags: nowait skipifdoesntexist shellexec runasoriginaluser; Check: WizardSilent
 
 ; ============================================================
 ;  卸载时删除生成的文件（可选）

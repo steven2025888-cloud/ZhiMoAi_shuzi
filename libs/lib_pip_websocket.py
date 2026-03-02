@@ -48,6 +48,21 @@ def _find_exe(name):
         if os.path.exists(p):
             return p
 
+    # imageio_ffmpeg 自带 ffmpeg 二进制，作为兜底
+    try:
+        import imageio_ffmpeg as _ioff
+        _io_ff = _ioff.get_ffmpeg_exe()
+        if _io_ff and os.path.exists(_io_ff):
+            if name == "ffmpeg":
+                return _io_ff
+            else:
+                # ffprobe 可能在同目录
+                _io_alt = os.path.join(os.path.dirname(_io_ff), f"{name}.exe" if sys.platform == "win32" else name)
+                if os.path.exists(_io_alt):
+                    return _io_alt
+    except Exception:
+        pass
+
     # 尝试从系统PATH查找
     system_path = shutil.which(name)
     if system_path:

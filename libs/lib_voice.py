@@ -329,15 +329,14 @@ class VoiceStore:
                 # 读取本地 meta
                 meta = self.load_meta()
                 
-                # 保留本地版和已存在的在线版
+                # 只保留本地版音色
                 local_voices = [m for m in meta if m.get("source", "local") == "local"]
-                online_names = {m.get("name") for m in meta if m.get("source") == "online"}
                 
-                # 从服务器列表添加新的在线版
+                # 用服务器列表完整替换在线版（避免重复或遗漏）
                 for model in server_models:
                     model_name = model.get("name", "")
                     model_id = model.get("id")
-                    if model_name and model_name not in online_names:
+                    if model_name:
                         local_voices.append({
                             "name": model_name,
                             "source": "online",

@@ -53,6 +53,7 @@ class GPUPowerManager:
         self.last_task_time = None  # 最后一次任务时间
         self.gpu_status = "unknown"  # unknown, starting, running, stopping, stopped
         self.has_pending_task = False  # 是否有待处理任务
+        self._last_query_time = 0  # 上次发送 gpu.task.query 的时间戳
 
         self.check_task = None  # 定期检查任务
         self.gpu_start_task = None  # 后台开机任务
@@ -889,7 +890,18 @@ class GPUPowerManager:
                                 elif msg_type == "gpu.task.active":
                                     self.has_pending_task = True
                                     self.last_task_time = datetime.now()
-                                    print(f"[WS] ✓ GPU 有活跃任务: task_id={data.get('task_id','')}, task_type={data.get('task_type','')}")
+                                    print(f"[WS] ✓ GPU 有活跃任务(push): task_id={data.get('task_id','')}, task_type={data.get('task_type','')}")
+
+                                # 监听 gpu.task.query 响应（主动拉取结果）
+                                elif msg_type == "gpu.task.query.response":
+                                    active_count = data.get("active_count", 0)
+                                    has_recent = data.get("has_recent_active", False)
+                                    worker_online = data.get("worker_online", False)
+                                    if active_count > 0 or has_recent:
+                                        self.last_task_time = datetime.now()
+                                        print(f"[WS] ✓ 远程有活跃任务(pull): count={active_count}, recent={has_recent}, worker={worker_online}")
+                                    else:
+                                        print(f"[WS] 远程无活跃任务: count={active_count}, worker={worker_online}")
 
                                 # 监听 GPU 状态查询请求
                                 elif msg_type == "gpu.status.query":
@@ -1008,14 +1020,34 @@ class GPUPowerManager:
                     remaining = IDLE_TIMEOUT - idle_time
                     print(f"[Check] GPU 空闲时间: {idle_time:.0f}s / {IDLE_TIMEOUT}s (还剩 {remaining:.0f}s)")
 
+                    # ── 主动拉取：每 30 秒查询 dsp.php 是否有活跃任务 ──
+                    # 这是推送通知 (gpu.task.active) 的可靠备份
+                    _now = time.time()
+                    _just_queried = False
+                    if _now - self._last_query_time > 30:
+                        self._last_query_time = _now
+                        _just_queried = True
+                        try:
+                            await self._send_ws_message({
+                                "type": "gpu.task.query",
+                                "request_id": f"tq_{int(_now)}",
+                            })
+                            print("[Check] 已发送 gpu.task.query（主动拉取任务状态）")
+                        except Exception as qe:
+                            print(f"[Check] gpu.task.query 发送失败: {qe}")
+
                     if idle_time >= IDLE_TIMEOUT:
-                        print(f"[Check] ⚠️  GPU 空闲超过 {IDLE_TIMEOUT}s (30分钟)，准备关机")
-                        success = await self.stop_gpu()
-                        if success:
-                            self.last_task_time = None
-                            print(f"[Check] ✓ GPU 已关机")
+                        # 刚发了查询还没收到响应 → 跳过本次关机判断，等下一轮
+                        if _just_queried:
+                            print(f"[Check] ⚠️  空闲达 {IDLE_TIMEOUT}s 但刚发了查询，等待响应后再决定")
                         else:
-                            print(f"[Check] ✗ GPU 关机失败")
+                            print(f"[Check] ⚠️  GPU 空闲超过 {IDLE_TIMEOUT}s (30分钟)，准备关机")
+                            success = await self.stop_gpu()
+                            if success:
+                                self.last_task_time = None
+                                print(f"[Check] ✓ GPU 已关机")
+                            else:
+                                print(f"[Check] ✗ GPU 关机失败")
                 else:
                     # 首次检测到 GPU 运行且无任务，记录时间
                     self.last_task_time = datetime.now()

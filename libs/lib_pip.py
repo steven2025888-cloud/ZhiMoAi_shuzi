@@ -23,6 +23,19 @@ if os.path.exists(_HEYGEM_FFMPEG_EXE):
 if os.path.exists(_HEYGEM_FFPROBE_EXE):
     _FFPROBE = _HEYGEM_FFPROBE_EXE
 
+# imageio_ffmpeg 自带 ffmpeg 二进制，作为兜底
+if not os.path.exists(_FFMPEG):
+    try:
+        import imageio_ffmpeg as _ioff
+        _io_ff = _ioff.get_ffmpeg_exe()
+        if _io_ff and os.path.exists(_io_ff):
+            _FFMPEG = _io_ff
+            _io_pr = os.path.join(os.path.dirname(_io_ff), "ffprobe.exe" if sys.platform == "win32" else "ffprobe")
+            if os.path.exists(_io_pr):
+                _FFPROBE = _io_pr
+    except Exception:
+        pass
+
 OUTPUT_DIR = os.path.join(ROOT_DIR, "unified_outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 

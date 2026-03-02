@@ -1,6 +1,17 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+
+# 修复 Windows 控制台编码：避免 print() 输出 emoji/Unicode 时报 GBK 编码错误
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+import re
 import time
 import hashlib
 import json
@@ -315,6 +326,95 @@ def _resolve_ffprobe_exe():
     if os.path.exists(p):
         return p
     return shutil.which("ffprobe") or "ffprobe"
+
+
+def _read_wav_stdlib(path, crop_min=0, crop_max=100):
+    """用 stdlib wave + numpy 读取 PCM WAV，不依赖任何第三方库。"""
+    import wave
+    import numpy as np
+    with wave.open(str(path), "rb") as wf:
+        sr = wf.getframerate()
+        n_ch = wf.getnchannels()
+        sw = wf.getsampwidth()
+        frames = wf.readframes(wf.getnframes())
+    dt = {1: np.int8, 2: np.int16, 4: np.int32}.get(sw, np.int16)
+    data = np.frombuffer(frames, dtype=dt).astype(np.float32)
+    if dt == np.int16:
+        data /= 32768.0
+    elif dt == np.int32:
+        data /= 2147483648.0
+    elif dt == np.int8:
+        data = (data - 128) / 128.0
+    if n_ch > 1:
+        data = data.reshape(-1, n_ch)
+    if crop_min != 0 or crop_max != 100:
+        s = int(len(data) * crop_min / 100)
+        e = int(len(data) * crop_max / 100)
+        data = data[s:e]
+    return sr, data
+
+
+def _patch_gradio_audio():
+    """Gradio 4.44 的 Audio.preprocess 始终调用 pydub → ffprobe。
+    如果 ffprobe 不可用（打包环境常见），用 soundfile / wave+ffmpeg 替代。"""
+    try:
+        import gradio.processing_utils as _gpu
+        _orig = _gpu.audio_from_file
+
+        def _safe_audio_from_file(filename, crop_min=0, crop_max=100):
+            # 1) 先尝试原始实现（有 ffprobe 时直接走 pydub）
+            try:
+                return _orig(filename, crop_min, crop_max)
+            except (RuntimeError, FileNotFoundError, OSError):
+                pass
+            # 2) soundfile 直接读（WAV / FLAC / OGG）— 可能未安装
+            try:
+                import soundfile as sf
+                import numpy as np
+                data, sr = sf.read(str(filename))
+                if crop_min != 0 or crop_max != 100:
+                    s = int(len(data) * crop_min / 100)
+                    e = int(len(data) * crop_max / 100)
+                    data = data[s:e]
+                return sr, data
+            except Exception:
+                pass
+            # 3) stdlib wave 直接读（纯 PCM WAV）
+            try:
+                return _read_wav_stdlib(filename, crop_min, crop_max)
+            except Exception:
+                pass
+            # 4) 用 ffmpeg 转 PCM WAV 再用 stdlib wave 读（MP3/M4A 等任意格式）
+            import tempfile
+            ffmpeg = _resolve_ffmpeg_exe()
+            wav_tmp = tempfile.mktemp(suffix=".wav")
+            try:
+                flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                proc = subprocess.run(
+                    [ffmpeg, "-y", "-i", str(filename),
+                     "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", wav_tmp],
+                    capture_output=True, timeout=60, creationflags=flags)
+                if proc.returncode != 0:
+                    raise RuntimeError(proc.stderr.decode("utf-8", errors="replace")[-500:])
+                return _read_wav_stdlib(wav_tmp, crop_min, crop_max)
+            except RuntimeError:
+                raise
+            except Exception as e:
+                raise RuntimeError(
+                    f"无法加载音频文件。请确保上传的是有效的音频格式（WAV/MP3/M4A）。\n原因: {e}"
+                )
+            finally:
+                try:
+                    os.remove(wav_tmp)
+                except OSError:
+                    pass
+
+        _gpu.audio_from_file = _safe_audio_from_file
+        print("[PATCH] Gradio audio_from_file 已打补丁（ffprobe 兼容）")
+    except Exception as e:
+        print(f"[PATCH] Gradio audio 补丁失败: {e}")
+
+_patch_gradio_audio()
 
 # ── 视频合成质量预设 ──
 QUALITY_PRESETS = {
@@ -1036,7 +1136,7 @@ def generate_speech_online_concurrent(text, voice_name, progress=gr.Progress()):
                     if not isinstance(result, dict):
                         return (idx, None, f"轮询结果异常")
 
-                    data = result.get("data", {})
+                    data = result.get("data") or {}
                     task_status = data.get("status", "")
 
                     is_completed = (
@@ -2109,7 +2209,8 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
             hdata = resp.json()
             if hdata.get("code") != 0 or not hdata.get("initialized"):
                 elapsed = int(time.time() - health_start_time)
-                progress(0.01, desc=f"GPU 服务器初始化中... ({elapsed}s)")
+                fake_init_pct = min(10, 1 + int(elapsed / 5))
+                progress(fake_init_pct / 100, desc=f"GPU 服务器初始化中... ({elapsed}s) {fake_init_pct}%")
                 time.sleep(health_check_interval)
                 continue
 
@@ -2130,7 +2231,8 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                 wait_minutes = elapsed // 60
                 wait_seconds = elapsed % 60
                 time_str = f"{wait_minutes}分{wait_seconds}秒" if wait_minutes > 0 else f"{wait_seconds}秒"
-                progress(0.01, desc=f"等待 GPU 服务器上线... (已等待 {time_str})")
+                fake_wait_pct = min(10, 1 + int(elapsed / 10))
+                progress(fake_wait_pct / 100, desc=f"等待 GPU 服务器上线... (已等待 {time_str}) {fake_wait_pct}%")
                 time.sleep(health_check_interval)
                 continue
             else:
@@ -2269,21 +2371,28 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
         el = int(elapsed)
 
         if status == "queued":
-            desc = f"排队中 (第{queue_pos}位)..."
-            progress(0.12, desc=desc)
+            # 排队时展示缓慢递增的假进度（12%~25%），避免用户认为卡死
+            fake_pct = min(25, 12 + int(elapsed / 5))
+            desc = f"排队中 (第{queue_pos}位)... {fake_pct}%"
+            progress(fake_pct / 100, desc=desc)
             if detail_cb:
-                try: detail_cb(_dual_progress_html("排队等待", 12, f"队列位置 {queue_pos}", 0, el))
+                try: detail_cb(_dual_progress_html("排队等待", fake_pct, f"队列位置 {queue_pos}", fake_pct, el))
                 except Exception: pass
 
         elif status in ("processing", "synthesizing", "encoding"):
-            safe_pct = max(12, min(95, pct))
+            if pct > 0:
+                safe_pct = max(12, min(95, pct))
+            else:
+                # 服务器还没返回真实进度时，显示基于时间的假进度（25%~50%）
+                safe_pct = min(50, 25 + int(elapsed / 3))
             grad_pct = 0.12 + (safe_pct - 12) * 0.01
-            progress(min(0.95, grad_pct), desc=f"{msg} ({safe_pct}%)")
+            display_msg = msg if msg else "合成处理中..."
+            progress(min(0.95, grad_pct), desc=f"{display_msg} ({safe_pct}%)")
             if detail_cb:
                 try:
                     cur_frame = pdata.get("current_frame", 0)
                     total_frame = pdata.get("total_frames", 0)
-                    step_label = f"{cur_frame}/{total_frame} 帧" if total_frame else msg
+                    step_label = f"{cur_frame}/{total_frame} 帧" if total_frame else display_msg
                     detail_cb(_dual_progress_html("在线合成", safe_pct, step_label, safe_pct, el))
                 except Exception: pass
 
@@ -4916,13 +5025,13 @@ def build_ui():
             outputs=[vc_save_hint, vc_gallery, voice_select, vc_del_js_input])
 
         def _del_voice_handler(name):
-            print(f"[DEBUG] _del_voice_handler 被调用，name='{name}'")
+            safe_print(f"[DEBUG] _del_voice_handler 被调用，name='{name}'")
             if not _LIBS_OK:
                 return _vc_all_outputs(_hint_html("error","扩展模块未加载"))
             if not name or not name.strip() or name.startswith("（"):
                 return _vc_all_outputs(_hint_html("warning","请先选择要删除的音色"))
             ok, msg = _vc.del_voice(name.strip())
-            print(f"[DEBUG] del_voice 返回: ok={ok}, msg={msg}")
+            safe_print(f"[DEBUG] del_voice 返回: ok={ok}, msg={msg}")
             return _vc_all_outputs(_hint_html("ok" if ok else "warning", msg))
 
         # 卡片内 🗑 按钮 → JS bridge
