@@ -9,7 +9,7 @@ from itertools import combinations
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)  # 项目根目录
-PIP_DIR  = os.path.join(ROOT_DIR, "画中画")
+PIP_DIR  = os.path.join(ROOT_DIR, "pip_videos")
 os.makedirs(PIP_DIR, exist_ok=True)
 
 HEYGEM_DIR = os.path.join(ROOT_DIR, "heygem-win-50")

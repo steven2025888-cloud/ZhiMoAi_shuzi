@@ -12,7 +12,23 @@
       "Bash(php:*)",
       "Bash(ssh:*)",
       "Bash(dir d:\\\\ZhiMoAi_shuzi:*)",
-      "Bash(powershell.exe:*)"
+      "Bash(powershell.exe:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(bash:*)",
+      "Bash(test:*)",
+      "Bash(set:*)",
+      "Bash(\"D:\\\\ZhiMoAi_shuzi\\\\_internal_app\\\\installer_files\\\\env\\\\Scripts\\\\python.exe\":*)",
+      "Bash(dir D:\\\\ZhiMoAi_shuzi\\\\_internal_app\\\\installer_files\\\\env:*)",
+      "Bash(copy:*)",
+      "Bash(cmd:*)",
+      "Bash(pyinstaller:*)",
+      "Bash(build_package.bat:*)",
+      "Bash(\"_internal_tts\\\\installer_files\\\\env\\\\Scripts\\\\python.exe\":*)",
+      "Bash(timeout 5 _internal_tts\\\\installer_files\\\\env\\\\Scripts\\\\python.exe:*)",
+      "Bash(\"_internal_tts\\\\installer_files\\\\env\\\\python.exe\":*)",
+      "Bash(\"_internal_app\\\\installer_files\\\\env\\\\Scripts\\\\python.exe\":*)",
+      "Bash(dir:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

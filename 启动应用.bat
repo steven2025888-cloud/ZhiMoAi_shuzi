@@ -2,7 +2,7 @@
 REM 织梦AI启动脚本
 REM 优先使用.py文件，如果不存在则使用.pyc文件
 
-set PYTHON_EXE=_internal_tts\installer_files\env\pythonw.exe
+set PYTHON_EXE=_internal_tts\installer_files\env\Scripts\pythonw.exe
 set APP_PY=app_backend.py
 set APP_PYC=app_backend.pyc
 

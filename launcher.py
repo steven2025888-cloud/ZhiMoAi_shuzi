@@ -174,6 +174,7 @@ def start_app():
         
         # 尝试多个可能的Python路径
         python_paths = [
+            os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
             os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
             "python.exe"  # 系统Python
@@ -227,16 +228,48 @@ def start_app():
         else:
             log_info(f"  使用pythonw.exe")
         
+        # 将子进程输出重定向到日志文件（便于排查打包后无窗口的问题）
+        backend_log = os.path.join(LOG_DIR, "backend_startup.log")
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        
+        log_f = open(backend_log, "w", encoding="utf-8", errors="replace")
         process = subprocess.Popen(
-            [pythonw_exe, app_backend],
+            [pythonw_exe, "-u", app_backend],
             cwd=BASE_DIR,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_f,
+            stderr=log_f,
             creationflags=flags
         )
         
         log_info(f"应用已启动 (PID: {process.pid})")
+        log_info(f"子进程日志: {backend_log}")
+        
+        # 短暂等待检测早期崩溃（如 import 失败、.env 缺失等）
+        time.sleep(3)
+        rc = process.poll()
+        if rc is not None:
+            log_f.close()
+            # 子进程已退出，读取日志显示错误
+            try:
+                with open(backend_log, "r", encoding="utf-8", errors="replace") as f:
+                    err_content = f.read()[-2000:]
+            except Exception:
+                err_content = "(无法读取子进程日志)"
+            log_error(f"app_backend 启动后立即退出! 退出码={rc}")
+            log_error(f"错误日志:\n{err_content}")
+            # 弹窗提示用户
+            try:
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    f"应用启动失败 (退出码: {rc})\n\n{err_content[:500]}\n\n详细日志: {backend_log}",
+                    "织梦AI - 启动失败",
+                    0x10  # MB_ICONERROR
+                )
+            except Exception:
+                pass
+            return False
+        
+        log_info("应用进程运行正常")
         log_info("=" * 80)
         return True
         

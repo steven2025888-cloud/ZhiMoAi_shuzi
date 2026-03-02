@@ -2,9 +2,14 @@
 ; 织梦AI大模型 v2.0 — Inno Setup 打包脚本
 ; ============================================================
 ; 说明：
-;   本脚本只打包根目录下的轻量文件（代码 + UI + 配置 + 启动脚本 + 资源目录）。
-;   _internal_tts 和 _internal_sync（引擎环境）不包含在内，
-;   需另行打包后让用户解压到安装目录对应位置。
+;   本脚本支持打包两种版本：
+;   - 线上版：打包 _internal_app（轻量级Python环境，约100-200MB）
+;   - 本地版：打包 _internal_tts（完整TTS环境，约9.5GB）
+;
+; 版本选择：
+;   修改下面的 PackageType 定义：
+;   - "ONLINE"  = 线上版（使用 _internal_app）
+;   - "LOCAL"   = 本地版（使用 _internal_tts）
 ;
 ; 更新内容：
 ;   - avatars/、voices/、unified_outputs/ 目录只创建空文件夹，不打包内容
@@ -20,12 +25,27 @@
 ;   3. 点击 Compile 即可生成安装包 exe
 ; ============================================================
 
+; ============================================================
+; 打包类型配置（修改这里选择版本）
+; ============================================================
+#define PackageType    "ONLINE"
+; 可选值: "ONLINE" (线上版) 或 "LOCAL" (本地版)
+
 #define MyAppName      "织梦AI大模型"
 #define MyAppVersion   "2.0"
 #define MyAppPublisher "织梦AI"
 #define MyAppURL       "https://zhimengai.xyz"
 ; 源文件根目录 — 编译时请确保此路径正确
 #define SourceRoot     "D:\ZhiMoAi_shuzi"
+
+; 根据打包类型选择Python环境源目录
+#if PackageType == "ONLINE"
+  #define PythonEnvSource SourceRoot + "\_internal_app\installer_files\env"
+  #define VersionSuffix   "_Online"
+#else
+  #define PythonEnvSource SourceRoot + "\_internal_tts\installer_files\env"
+  #define VersionSuffix   "_Local"
+#endif
 
 [Setup]
 AppId={{B7E5F3A2-9C41-4D8E-A6B1-2F0E7D3C5A89}
@@ -37,7 +57,7 @@ DefaultDirName={autopf}\ZhiMoAI
 DefaultGroupName={#MyAppName}
 ; 输出安装包到 SourceRoot\dist 目录
 OutputDir={#SourceRoot}\dist
-OutputBaseFilename=ZhiMoAI_v{#MyAppVersion}_Setup
+OutputBaseFilename=ZhiMoAI_v{#MyAppVersion}{#VersionSuffix}_Setup
 SetupIconFile={#SourceRoot}\logo.ico
 UninstallDisplayIcon={app}\logo.ico
 Compression=lzma2/ultra64
@@ -70,21 +90,23 @@ Name: "startmenuicon"; Description: "创建开始菜单快捷方式"; GroupDescr
 ; ── Python 字节码（加密版本 - 只打包.pyc，不打包.py）──
 Source: "{#SourceRoot}\app_backend.pyc";          DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\unified_app.pyc";          DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_avatar.pyc";           DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_voice.pyc";            DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_subtitle.pyc";         DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_license.pyc";          DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_douyin_publish.pyc";   DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_bilibili_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_shipinhao_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_xiaohongshu_publish.pyc"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\lib_meta_store.pyc";       DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_avatar.pyc";           DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_voice.pyc";            DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_subtitle.pyc";         DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_license.pyc";          DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_douyin_publish.pyc";   DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_bilibili_publish.pyc"; DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_shipinhao_publish.pyc"; DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_xiaohongshu_publish.pyc"; DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_meta_store.pyc";       DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_pip.pyc";              DestDir: "{app}\libs"; Flags: ignoreversion
+Source: "{#SourceRoot}\libs\lib_pip_websocket.pyc";    DestDir: "{app}\libs"; Flags: ignoreversion
 
 ; 注意：不打包任何.py源文件，只打包.pyc加密文件
 
 ; ── 前端资源 ──
-Source: "{#SourceRoot}\ui_init.js";     DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\ui_style.css";   DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\ui\ui_init.js";     DestDir: "{app}\ui"; Flags: ignoreversion
+Source: "{#SourceRoot}\ui\ui_style.css";   DestDir: "{app}\ui"; Flags: ignoreversion
 
 ; ── 配置文件 ──
 Source: "{#SourceRoot}\.env";           DestDir: "{app}"; Flags: ignoreversion
@@ -126,12 +148,18 @@ Source: "{#SourceRoot}\_internal_data\*";   DestDir: "{app}\_internal_data";   F
 Source: "{#SourceRoot}\_internal_logs\*";   DestDir: "{app}\_internal_logs";   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "{#SourceRoot}\_internal_temp\*";   DestDir: "{app}\_internal_temp";   Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
-; ── 注意：avatars/、voices/、unified_outputs/ 目录只创建空文件夹，不打包内容 ──
+; ── Python环境（根据��包类型选择） ──
+; 线上版：打包 _internal_app 为 _internal_tts（轻量级环境）
+; 本地版：打包 _internal_tts（完整TTS环境）
+Source: "{#PythonEnvSource}\*"; DestDir: "{app}\_internal_tts\installer_files\env"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; ── 注意：avatars/、voices/、unified_outputs/ 目录���创建空文件夹，不打包内容 ──
 
 ; ============================================================
-;  注意：以下目录 **不** 包含在安装包中：
-;    _internal_tts   （语音合成引擎 — 需用户单独解压）
-;    _internal_sync   （口型同步引擎 — 需用户单独解压）
+;  打包说明：
+;    线上版（ONLINE）：打包 _internal_app 的 Python 环境（约100-200MB）
+;    本地版（LOCAL）：打包 _internal_tts 的完整环境（约9.5GB）
+;    _internal_sync（口型同步引擎）— 需用户单独解压
 ;    启动浏览器版本.bat （调试用，不打包）
 ;    启动应用_调试模式.bat （调试用，不打包）
 ; ============================================================
@@ -141,7 +169,6 @@ Name: "{app}\avatars"
 Name: "{app}\voices"
 Name: "{app}\unified_outputs"
 Name: "{app}\logs"; Flags: uninsneveruninstall
-Name: "{app}\_internal_tts";  Flags: uninsneveruninstall
 Name: "{app}\_internal_sync"; Flags: uninsneveruninstall
 
 ; ============================================================

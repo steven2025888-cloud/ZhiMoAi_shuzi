@@ -19,29 +19,86 @@ from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 from pathlib import Path
 
-# ── 加载 .env 配置 ──
-def load_env_file():
-    """加载.env文件到环境变量"""
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_path):
-        try:
-            with open(env_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#') or '=' not in line:
-                        continue
-                    key, value = line.split('=', 1)
-                    os.environ[key.strip()] = value.strip()
+# ── 配置文件路径（优先 %LOCALAPPDATA%\ZhiMoAI\config.dat，用户不可见）──
+_CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'ZhiMoAI')
+_CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.dat')
 
-            if not os.getenv("LIPVOICE_SIGN"):
-                enc = (os.getenv("LIPVOICE_SIGN_ENC") or "").strip()
-                if enc:
-                    try:
-                        os.environ["LIPVOICE_SIGN"] = _dpapi_decrypt_text(enc)
-                    except Exception as _e:
-                        print(f"[WARN] LIPVOICE_SIGN_ENC 解密失败: {_e}")
-        except Exception as e:
-            print(f"[WARN] 加载.env文件失败: {e}")
+
+def _read_config_lines(path):
+    """读取 key=value 格式配置文件，返回 dict"""
+    cfg = {}
+    if not os.path.exists(path):
+        return cfg
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                cfg[key.strip()] = value.strip()
+    except Exception:
+        pass
+    return cfg
+
+
+def _write_config(cfg: dict):
+    """将 dict 写入 config.dat（%LOCALAPPDATA%\ZhiMoAI\）"""
+    try:
+        os.makedirs(_CONFIG_DIR, exist_ok=True)
+        with open(_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            for k, v in cfg.items():
+                f.write(f"{k}={v}\n")
+    except Exception as e:
+        print(f"[WARN] 保存配置失败: {e}")
+
+
+def _update_config_key(key: str, value: str):
+    """更新 config.dat 中单个键值"""
+    cfg = _read_config_lines(_CONFIG_FILE)
+    cfg[key] = value
+    _write_config(cfg)
+
+
+def _migrate_env_to_config():
+    """首次运行时：如果旧 .env 文件存在，迁移到 config.dat"""
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if not os.path.exists(env_path):
+        return
+    if os.path.exists(_CONFIG_FILE):
+        return  # 已经迁移过
+    cfg = _read_config_lines(env_path)
+    if cfg:
+        _write_config(cfg)
+        print(f"[CONFIG] 已将 .env 配置迁移到 {_CONFIG_FILE}")
+
+
+# ── 加载配置 ──
+def load_env_file():
+    """加载配置到环境变量（优先 config.dat，兼容旧 .env）"""
+    # 首次运行迁移
+    _migrate_env_to_config()
+
+    # 1) 读取 config.dat（主配置）
+    cfg = _read_config_lines(_CONFIG_FILE)
+
+    # 2) 读取 .env（开发覆盖，优先级更高）
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    dev_cfg = _read_config_lines(env_path)
+    cfg.update(dev_cfg)
+
+    # 3) 写入 os.environ
+    for k, v in cfg.items():
+        os.environ[k] = v
+
+    # DPAPI 解密 LIPVOICE_SIGN
+    if not os.getenv("LIPVOICE_SIGN"):
+        enc = (os.getenv("LIPVOICE_SIGN_ENC") or "").strip()
+        if enc:
+            try:
+                os.environ["LIPVOICE_SIGN"] = _dpapi_decrypt_text(enc)
+            except Exception as _e:
+                print(f"[WARN] LIPVOICE_SIGN_ENC 解密失败: {_e}")
 
 
 class _DATA_BLOB(ctypes.Structure):
@@ -308,25 +365,23 @@ def _dual_progress_html(stage: str, total_pct: int, step_label: str, step_pct: i
     )
 
 
-# 从.env文件读取版本信息
+# 从配置文件读取版本信息
 def _load_version_from_env():
-    """从.env文件读取版本号和 build 号"""
-    env_file = os.path.join(BASE_DIR, ".env")
-    version = "1.0.0"  # 默认版本号
-    build = 100
+    """从 config.dat / .env 读取版本号和 build 号"""
+    version = "2.0.0"  # 默认版本号（打包时可修改此值）
+    build = 200
     try:
-        if os.path.exists(env_file):
-            with open(env_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    # 注意：APP_VERSION_NUMBER 是版本号（如 "1.0.0"）
-                    # TTS_MODE 是 TTS 模式选择（local / online），不要混淆
-                    if line.startswith('APP_VERSION_NUMBER='):
-                        version = line.split('=', 1)[1].strip()
-                    elif line.startswith('APP_BUILD='):
-                        build = int(line.split('=', 1)[1].strip())
+        cfg = _read_config_lines(_CONFIG_FILE)
+        # .env 开发覆盖
+        env_path = os.path.join(BASE_DIR, '.env')
+        dev_cfg = _read_config_lines(env_path)
+        cfg.update(dev_cfg)
+        if 'APP_VERSION_NUMBER' in cfg:
+            version = cfg['APP_VERSION_NUMBER']
+        if 'APP_BUILD' in cfg:
+            build = int(cfg['APP_BUILD'])
     except Exception as e:
-        print(f"[WARNING] 读取.env版本信息失败: {e}")
+        print(f"[WARNING] 读取版本信息失败: {e}")
     return version, build
 
 APP_VERSION, APP_BUILD = _load_version_from_env()
@@ -408,7 +463,7 @@ def auto_load_model():
     """根据 TTS 模式选择决定是否加载 IndexTTS2 模型"""
     global tts
     
-    # 重新加载.env文件，确保获取最新的TTS_MODE
+    # 重新加载配置，确保获取最新的TTS_MODE
     load_env_file()
     
     # 读取 TTS 模式选择（local 或 online）
@@ -1844,7 +1899,7 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
     api_secret = os.getenv("HEYGEM_API_SECRET", "").strip()
 
     if not server_url:
-        raise gr.Error("HEYGEM_SERVER_URL 未配置，请在 .env 中设置 Linux HeyGem 服务器地址\n"
+        raise gr.Error("HEYGEM_SERVER_URL 未配置，请在设置中配置 Linux HeyGem 服务器地址\n"
                        "格式示例: http://192.168.1.100:8383")
     # 自动补全 http:// 前缀
     if not server_url.startswith("http://") and not server_url.startswith("https://"):
@@ -2767,7 +2822,7 @@ def build_ui():
                             # ── 模式A: 文字转语音 ──
                             with gr.Group(visible=True) as tts_mode_group:
                                 # ── TTS 模式切换 ──
-                                # 重新读取.env确保获取最新值
+                                # 重新读取配置确保获取最新值
                                 load_env_file()
                                 current_tts_mode = os.getenv('TTS_MODE', 'local')
                                 tts_mode_switch = gr.Radio(
@@ -4663,27 +4718,9 @@ def build_ui():
             # 更新环境变量
             os.environ['TTS_MODE'] = mode
             
-            # 保存到.env文件
-            env_path = os.path.join(BASE_DIR, '.env')
+            # 保存到配置文件（config.dat）
             try:
-                env_lines = []
-                mode_found = False
-                
-                if os.path.exists(env_path):
-                    with open(env_path, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            if line.startswith('TTS_MODE='):
-                                env_lines.append(f'TTS_MODE={mode}\n')
-                                mode_found = True
-                            else:
-                                env_lines.append(line)
-                
-                if not mode_found:
-                    env_lines.append(f'TTS_MODE={mode}\n')
-                
-                with open(env_path, 'w', encoding='utf-8') as f:
-                    f.writelines(env_lines)
-                
+                _update_config_key('TTS_MODE', mode)
                 safe_print(f"[TTS_MODE] 已切换到: {mode}")
             except Exception as e:
                 safe_print(f"[TTS_MODE] 保存失败: {e}")
@@ -5118,17 +5155,12 @@ def build_ui():
                 # DeepSeek API配置
                 api_key = os.environ.get("DEEPSEEK_API_KEY", "")
                 if not api_key:
-                    # 尝试从.env文件读取
-                    env_file = os.path.join(BASE_DIR, ".env")
-                    if os.path.exists(env_file):
-                        with open(env_file, "r", encoding="utf-8") as f:
-                            for line in f:
-                                if line.startswith("DEEPSEEK_API_KEY="):
-                                    api_key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                                    break
+                    # 尝试从 config.dat 读取
+                    cfg = _read_config_lines(_CONFIG_FILE)
+                    api_key = cfg.get("DEEPSEEK_API_KEY", "").strip().strip('"').strip("'")
                 
                 if not api_key:
-                    return None, "❌ 未配置DeepSeek API密钥\n\n请在.env文件中添加：\nDEEPSEEK_API_KEY=your_api_key"
+                    return None, "❌ 未配置DeepSeek API密钥\n\n请在设置中配置 DEEPSEEK_API_KEY"
                 
                 # 记录本次调用时间（在实际发请求前记录，防止并发绕过）
                 _deepseek_last_call[0] = time.time()

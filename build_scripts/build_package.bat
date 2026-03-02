@@ -52,16 +52,19 @@ echo [4/6] 验证.pyc文件...
 set MISSING=0
 if not exist "app_backend.pyc" set MISSING=1
 if not exist "unified_app.pyc" set MISSING=1
-if not exist "lib_avatar.pyc" set MISSING=1
-if not exist "lib_voice.pyc" set MISSING=1
-if not exist "lib_subtitle.pyc" set MISSING=1
-if not exist "lib_license.pyc" set MISSING=1
-if not exist "lib_douyin_publish.pyc" set MISSING=1
-if not exist "lib_meta_store.pyc" set MISSING=1
+if not exist "libs\lib_avatar.pyc" set MISSING=1
+if not exist "libs\lib_voice.pyc" set MISSING=1
+if not exist "libs\lib_subtitle.pyc" set MISSING=1
+if not exist "libs\lib_license.pyc" set MISSING=1
+if not exist "libs\lib_douyin_publish.pyc" set MISSING=1
+if not exist "libs\lib_meta_store.pyc" set MISSING=1
+if not exist "libs\lib_pip.pyc" set MISSING=1
+if not exist "libs\lib_pip_websocket.pyc" set MISSING=1
 
 if %MISSING%==1 (
     echo   ✗ 错误：部分.pyc文件缺失
     dir *.pyc /b 2>nul
+    dir libs\*.pyc /b 2>nul
     exit /b 1
 )
 echo   ✓ 所有.pyc文件已就绪

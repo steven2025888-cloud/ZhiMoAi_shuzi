@@ -11,10 +11,14 @@ import shutil
 # 项目根目录（本脚本在 build_scripts/ 子目录下）
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 需要编译的Python文件
+# 需要编译的Python文件（根目录）
 PYTHON_FILES = [
     "app_backend.py",
     "unified_app.py",
+]
+
+# 需要编译的libs目录下的文件
+LIBS_FILES = [
     "lib_avatar.py",
     "lib_voice.py",
     "lib_subtitle.py",
@@ -24,6 +28,8 @@ PYTHON_FILES = [
     "lib_shipinhao_publish.py",
     "lib_xiaohongshu_publish.py",
     "lib_meta_store.py",
+    "lib_pip.py",
+    "lib_pip_websocket.py",
 ]
 
 
@@ -31,45 +37,62 @@ def clean_pyc_files():
     """清理临时生成的.pyc文件"""
     print("清理临时.pyc文件...")
     count = 0
+
+    # 清理根目录的pyc文件
     for py_file in PYTHON_FILES:
         pyc_file = os.path.join(BASE_DIR, py_file + "c")
         if os.path.exists(pyc_file):
             os.remove(pyc_file)
             print(f"  [删除] {py_file}c")
             count += 1
-    
+
+    # 清理libs目录的pyc文件
+    libs_dir = os.path.join(BASE_DIR, "libs")
+    for py_file in LIBS_FILES:
+        pyc_file = os.path.join(libs_dir, py_file + "c")
+        if os.path.exists(pyc_file):
+            os.remove(pyc_file)
+            print(f"  [删除] libs/{py_file}c")
+            count += 1
+
     # 清理__pycache__目录
     cache_dir = os.path.join(BASE_DIR, "__pycache__")
     if os.path.exists(cache_dir):
         shutil.rmtree(cache_dir)
         print(f"  [删除] __pycache__/")
-    
+
+    libs_cache_dir = os.path.join(BASE_DIR, "libs", "__pycache__")
+    if os.path.exists(libs_cache_dir):
+        shutil.rmtree(libs_cache_dir)
+        print(f"  [删除] libs/__pycache__/")
+
     print(f"已清理 {count} 个.pyc文件")
 
 
 def compile_to_pyc():
     """编译Python文件为.pyc（不删除原文件）"""
     print("编译Python文件为字节码...")
-    
+
     # 使用项目内的Python环境编译
     python_exe = os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe")
-    
+
     if not os.path.exists(python_exe):
         print(f"  [警告] 未找到项目Python环境: {python_exe}")
         print(f"  [提示] 将使用系统Python编译")
         python_exe = "python"
     else:
         print(f"  [使用] {python_exe}")
-    
+
     success_count = 0
     fail_count = 0
-    
+
+    # 编译根目录文件
     for py_file in PYTHON_FILES:
         source_path = os.path.join(BASE_DIR, py_file)
         if not os.path.exists(source_path):
             print(f"  [跳过] {py_file} (文件不存在)")
             continue
-        
+
         try:
             # 使用指定的Python编译
             result = subprocess.run(
@@ -77,16 +100,16 @@ def compile_to_pyc():
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode != 0:
                 print(f"  [错误] {py_file} 编译失败: {result.stderr}")
                 fail_count += 1
                 continue
-            
+
             # 找到生成的pyc文件
             cache_dir = os.path.join(BASE_DIR, "__pycache__")
             module_name = os.path.splitext(py_file)[0]
-            
+
             # 查找对应的pyc文件
             pyc_found = False
             if os.path.exists(cache_dir):
@@ -100,15 +123,62 @@ def compile_to_pyc():
                         pyc_found = True
                         success_count += 1
                         break
-            
+
             if not pyc_found:
                 print(f"  [警告] {py_file} 编译成功但未找到pyc文件")
                 fail_count += 1
-                
+
         except Exception as e:
             print(f"  [错误] {py_file} 编译失败: {e}")
             fail_count += 1
-    
+
+    # 编译libs目录文件
+    libs_dir = os.path.join(BASE_DIR, "libs")
+    for py_file in LIBS_FILES:
+        source_path = os.path.join(libs_dir, py_file)
+        if not os.path.exists(source_path):
+            print(f"  [跳过] libs/{py_file} (文件不存在)")
+            continue
+
+        try:
+            # 使用指定的Python编译
+            result = subprocess.run(
+                [python_exe, "-m", "py_compile", source_path],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                print(f"  [错误] libs/{py_file} 编译失败: {result.stderr}")
+                fail_count += 1
+                continue
+
+            # 找到生成的pyc文件
+            cache_dir = os.path.join(libs_dir, "__pycache__")
+            module_name = os.path.splitext(py_file)[0]
+
+            # 查找对应的pyc文件
+            pyc_found = False
+            if os.path.exists(cache_dir):
+                for filename in os.listdir(cache_dir):
+                    if filename.startswith(module_name + ".cpython") and filename.endswith(".pyc"):
+                        # 复制到libs目录并重命名为简单的.pyc
+                        src_pyc = os.path.join(cache_dir, filename)
+                        dst_pyc = os.path.join(libs_dir, py_file + "c")
+                        shutil.copy2(src_pyc, dst_pyc)
+                        print(f"  [编译] libs/{py_file} -> libs/{py_file}c")
+                        pyc_found = True
+                        success_count += 1
+                        break
+
+            if not pyc_found:
+                print(f"  [警告] libs/{py_file} 编译成功但未找到pyc文件")
+                fail_count += 1
+
+        except Exception as e:
+            print(f"  [错误] libs/{py_file} 编译失败: {e}")
+            fail_count += 1
+
     return success_count, fail_count
 
 

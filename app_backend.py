@@ -80,25 +80,55 @@ def has_local_tts_content():
 LEGACY_PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 LEGACY_DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "user_agreement.md")
 
-# 从.env文件读取版本信息
-def _load_version_from_env():
-    """从.env文件读取版本号和 build 号"""
-    env_file = os.path.join(BASE_DIR, ".env")
-    version = "1.0.0"  # 默认版本号
-    build = 100
-    try:
-        if os.path.exists(env_file):
+# ── 配置文件路径（与 unified_app.py 保持一致）──
+_CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'ZhiMoAI')
+_CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.dat')
+
+
+def _read_all_config():
+    """读取 config.dat + .env（开发覆盖），返回合并 dict"""
+    cfg = {}
+    # 1) config.dat（主配置）
+    if os.path.exists(_CONFIG_FILE):
+        try:
+            with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    k, v = line.split('=', 1)
+                    cfg[k.strip()] = v.strip()
+        except Exception:
+            pass
+    # 2) .env（开发覆盖，优先级更高）
+    env_file = os.path.join(BASE_DIR, '.env')
+    if os.path.exists(env_file):
+        try:
             with open(env_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
-                    # 注意：APP_VERSION_NUMBER 是版本号（如 "1.0.0"）
-                    # TTS_MODE 是 TTS 模式选择（local / online），不要混淆
-                    if line.startswith('APP_VERSION_NUMBER='):
-                        version = line.split('=', 1)[1].strip()
-                    elif line.startswith('APP_BUILD='):
-                        build = int(line.split('=', 1)[1].strip())
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    k, v = line.split('=', 1)
+                    cfg[k.strip()] = v.strip()
+        except Exception:
+            pass
+    return cfg
+
+
+# 从配置文件读取版本信息
+def _load_version_from_env():
+    """从 config.dat / .env 读取版本号和 build 号"""
+    version = "2.0.0"  # 默认版本号（打包时可修改此值）
+    build = 200
+    try:
+        cfg = _read_all_config()
+        if 'APP_VERSION_NUMBER' in cfg:
+            version = cfg['APP_VERSION_NUMBER']
+        if 'APP_BUILD' in cfg:
+            build = int(cfg['APP_BUILD'])
     except Exception as e:
-        print(f"[WARNING] 读取.env版本信息失败: {e}")
+        print(f"[WARNING] 读取版本信息失败: {e}")
     return version, build
 
 CURRENT_VERSION, CURRENT_BUILD = _load_version_from_env()
@@ -1035,7 +1065,7 @@ def _start_tray_icon():
 
 
 # ══════════════════════════════════════════════════════════════
-#  读取 .env 配置
+#  读取应用配置
 # ══════════════════════════════════════════════════════════════
 def load_env_config():
     config = {
@@ -1045,23 +1075,16 @@ def load_env_config():
         'CHECK_UPDATE': True,  # 默认启用更新检查
         'TTS_MODE': 'local'  # TTS 模式：local 或 online（默认本地版）
     }
-    env_path = os.path.join(BASE_DIR, '.env')
-    if os.path.exists(env_path):
-        try:
-            with open(env_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#') or '=' not in line:
-                        continue
-                    key, value = line.split('=', 1)
-                    key = key.strip(); value = value.strip()
-                    if   key == 'DEBUG_MODE':          config['DEBUG_MODE'] = value.lower() in ('true','1','yes','on')
-                    elif key == 'SERVER_PORT_START':   config['SERVER_PORT_START'] = int(value)
-                    elif key == 'SERVER_PORT_END':     config['SERVER_PORT_END']   = int(value)
-                    elif key == 'CHECK_UPDATE':        config['CHECK_UPDATE'] = value.lower() in ('true','1','yes','on')
-                    elif key == 'TTS_MODE':            config['TTS_MODE'] = value  # 读取 TTS 模式选择
-        except Exception:
-            pass
+    try:
+        cfg = _read_all_config()
+        for key, value in cfg.items():
+            if   key == 'DEBUG_MODE':          config['DEBUG_MODE'] = value.lower() in ('true','1','yes','on')
+            elif key == 'SERVER_PORT_START':   config['SERVER_PORT_START'] = int(value)
+            elif key == 'SERVER_PORT_END':     config['SERVER_PORT_END']   = int(value)
+            elif key == 'CHECK_UPDATE':        config['CHECK_UPDATE'] = value.lower() in ('true','1','yes','on')
+            elif key == 'TTS_MODE':            config['TTS_MODE'] = value
+    except Exception:
+        pass
     return config
 
 ENV_CONFIG = load_env_config()
@@ -1621,7 +1644,6 @@ if __name__ == "__main__":
             
             # Logo和标题已取消，节省空间
             # try:
-            #     logo_path = os.path.join(BASE_DIR, "logo.jpg")
             #     ...
             # except Exception:
             #     ...
@@ -2053,31 +2075,19 @@ if __name__ == "__main__":
                 
                 ok, msg = lic.validate_online(key)
                 if ok:
-                    # 保存 TTS 模式选择到 .env 文件
+                    # 保存 TTS 模式选择到 config.dat
                     selected_mode = version_var.get()
                     try:
-                        env_path = os.path.join(os.path.dirname(__file__), ".env")
-                        env_lines = []
-                        mode_found = False
-                        
-                        if os.path.exists(env_path):
-                            with open(env_path, 'r', encoding='utf-8') as f:
-                                for line in f:
-                                    if line.startswith('TTS_MODE='):
-                                        env_lines.append(f'TTS_MODE={selected_mode}\n')
-                                        mode_found = True
-                                    else:
-                                        env_lines.append(line)
-                        
-                        if not mode_found:
-                            env_lines.append(f'TTS_MODE={selected_mode}\n')
-                        
-                        with open(env_path, 'w', encoding='utf-8') as f:
-                            f.writelines(env_lines)
+                        os.makedirs(_CONFIG_DIR, exist_ok=True)
+                        cfg = _read_all_config()
+                        cfg['TTS_MODE'] = selected_mode
+                        with open(_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                            for k, v in cfg.items():
+                                f.write(f"{k}={v}\n")
                         
                         # 同时设置环境变量，以便子进程可以读取
                         os.environ['TTS_MODE'] = selected_mode
-                        print(f"[LICENSE] TTS 模式已保存: {selected_mode}")
+                        print(f"[LICENSE] TTS 模式已保存到 config.dat: {selected_mode}")
                     except Exception as e:
                         print(f"[LICENSE] 保存 TTS 模式失败: {e}")
                     
