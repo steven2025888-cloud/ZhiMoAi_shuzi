@@ -78,27 +78,18 @@ def compile_to_pyc():
     """编译Python文件为.pyc（不删除原文件）"""
     print("编译Python文件为字节码...")
 
-    # 尝试多个可能的Python环境路径（与launcher.py保持一致）
-    python_paths = [
-        os.path.join(BASE_DIR, "_internal_app", "installer_files", "env", "Scripts", "python.exe"),
-        os.path.join(BASE_DIR, "_internal_app", "installer_files", "env", "python.exe"),
-        os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
-        os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
-        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
-        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
-    ]
+    # 优先使用当前 Python 解释器（build_package.bat 已确保用正确的 env Python 调用本脚本）
+    # 这样编译出的 .pyc magic number 一定与运行时 Python 版本匹配
+    python_exe = sys.executable
+    print(f"  [使用] {python_exe}")
 
-    python_exe = None
-    for path in python_paths:
-        if os.path.exists(path):
-            python_exe = path
-            print(f"  [使用] {python_exe}")
-            break
-
-    if not python_exe:
-        print(f"  [警告] 未找到项目Python环境")
-        print(f"  [提示] 将使用系统Python编译")
-        python_exe = "python"
+    # 安全检查：如果当前 Python 不在项目 env 目录下，给出警告
+    env_markers = ["_internal_app", "_internal_tts", "IndexTTS2-SonicVale"]
+    exe_lower = python_exe.lower()
+    if not any(m.lower() in exe_lower for m in env_markers):
+        print(f"  [警告] 当前 Python 不在项目环境目录中！")
+        print(f"  [警告] .pyc 的 magic number 可能与安装版运行时不匹配")
+        print(f"  [提示] 请通过 build_package.bat 运行本脚本（它会使用正确的 env Python）")
 
     # 显示Python版本
     try:

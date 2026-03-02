@@ -113,7 +113,8 @@ Source: "{#SourceRoot}\ui\ui_init.js";     DestDir: "{app}\ui"; Flags: ignorever
 Source: "{#SourceRoot}\ui\ui_style.css";   DestDir: "{app}\ui"; Flags: ignoreversion
 
 ; ── 配置文件 ──
-; .env 文件不打包（包含敏感信息，程序会自动创建）
+; env.dat = 混淆后的配置（不打包明文 .env）
+Source: "{#SourceRoot}\env.dat";        DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 Source: "{#SourceRoot}\.license";       DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 Source: "{#SourceRoot}\pip.ini";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
@@ -134,7 +135,7 @@ Source: "{#SourceRoot}\打包检查清单.bat";    DestDir: "{app}"; Flags: igno
 ; -- libs extras --
 Source: "{#SourceRoot}\libs\__init__.py";                 DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\libs\app_version.pyc";             DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "{#SourceRoot}\libs\app_version.py";              DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
+; 注意：app_version.py 不打包源文件，只打包 .pyc
 Source: "{#SourceRoot}\libs\.license";                    DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; -- tools / debug --
@@ -197,10 +198,10 @@ Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\ZhiMoAI_Launcher.exe"
 ;  安装后运行
 ; ============================================================
 [Run]
-; 普通安装完成后询问是否启动
-Filename: "{app}\ZhiMoAI_Launcher.exe"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; 普通安装完成后询问是否启动（runasoriginaluser 确保不以管理员身份启动）
+Filename: "{app}\ZhiMoAI_Launcher.exe"; WorkingDir: "{app}"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
 ; 静默安装完成后自动启动（用于自动更新）
-Filename: "{app}\ZhiMoAI_Launcher.exe"; Flags: nowait skipifdoesntexist runhidden; Check: WizardSilent
+Filename: "{app}\ZhiMoAI_Launcher.exe"; WorkingDir: "{app}"; Flags: nowait skipifdoesntexist runhidden shellexec runasoriginaluser; Check: WizardSilent
 
 ; ============================================================
 ;  卸载时删除生成的文件（可选）
@@ -216,8 +217,19 @@ Type: files;          Name: "{app}\*.log"
 ; 注意：不删除 .license 文件，保留用户的卡密信息
 
 [Code]
-// 安装完成后的处理（已禁用提示）
+// pyvenv.cfg 已在构建前删除（env 已转换为独立安装，不依赖外部 Python）
+// 安装完成后清理残留的 pyvenv.cfg（以防万一）
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  CfgFile: string;
 begin
-  // 不显示任何提示，直接完成安装
+  if CurStep = ssPostInstall then
+  begin
+    CfgFile := ExpandConstant('{app}\_internal_tts\installer_files\env\pyvenv.cfg');
+    if FileExists(CfgFile) then
+    begin
+      DeleteFile(CfgFile);
+      Log('Deleted residual pyvenv.cfg');
+    end;
+  end;
 end;

@@ -12,7 +12,10 @@ import shutil
 import time
 from typing import Dict, List, Optional, Tuple, Any
 
-from voice_api import API_BASE_URL
+try:
+    from .voice_api import API_BASE_URL
+except ImportError:
+    from voice_api import API_BASE_URL
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 

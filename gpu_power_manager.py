@@ -793,20 +793,25 @@ class GPUPowerManager:
                     })
 
     async def _broadcast_gpu_online(self, request_id: str | None = None):
-        """通过 WS 广播 GPU 已上线消息给所有客户端（由 Dsp.php 中继转发）"""
+        """通知客户端 GPU 机器已启动（但服务可能尚未就绪）。
+
+        注意：真正的 gpu.power.online 由 run_server.py 的 ws_client 在 Flask
+        服务就绪后发送。gpu_power_manager 只发送 gpu.power.booted 表示机器已开机，
+        避免客户端在服务未就绪时就尝试连接 API 导致 connection refused。
+        """
         payload = {
-            "type": "gpu.power.online",
-            "status": "running",
-            "msg": "GPU 服务器已上线",
+            "type": "gpu.power.booted",
+            "status": "booted",
+            "msg": "GPU 机器已启动，等待服务就绪...",
             "source": "gpu_monitor",
         }
         if request_id:
             payload["request_id"] = request_id
         sent = await self._send_ws_message(payload)
         if sent:
-            print("[WS] ✓ 已广播 gpu.power.online")
+            print("[WS] ✓ 已广播 gpu.power.booted（等待 run_server.py 发送 gpu.power.online）")
         else:
-            print("[WS] ✗ 广播 gpu.power.online 失败（WS 未连接）")
+            print("[WS] ✗ 广播 gpu.power.booted 失败（WS 未连接）")
 
     async def _refresh_and_report_status(self, request_id: str):
         """后台刷新 GPU 精确状态并通过 WS 上报"""

@@ -50,6 +50,7 @@ _internal_tts/
 _internal_tts2/
 
 .env
+env.dat
 
 # 日志文件
 logs/

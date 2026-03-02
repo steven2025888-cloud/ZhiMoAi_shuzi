@@ -13,7 +13,7 @@ echo   Package type: ONLINE
 echo   Python env: %ENV_DIR%
 echo.
 
-echo [1/7] Verify Python environment exists...
+echo [1/9] Verify Python environment exists...
 set "PY="
 if exist "%ENV_DIR%\Scripts\python.exe" set "PY=%ENV_DIR%\Scripts\python.exe"
 if "%PY%"=="" if exist "%ENV_DIR%\python.exe" set "PY=%ENV_DIR%\python.exe"
@@ -27,25 +27,41 @@ if "%PY%"=="" (
 echo   [OK] %PY%
 echo.
 
-echo [2/7] Verify Python env native extensions...
-"%PY%" build_scripts\verify_env.py
-if errorlevel 1 (
-    echo.
-    echo   Python env is broken! Run setup_app_env.bat to fix.
-    pause
-    exit /b 1
-)
+echo [2/9] Verify Python env is standalone (no pyvenv.cfg)...
+if exist "%ENV_DIR%\pyvenv.cfg" goto :ENV_NOT_STANDALONE
+"%PY%" -c "import sys, os, ssl; print('  Python', sys.version.split()[0], '- stdlib OK')"
+if errorlevel 1 goto :ENV_STDLIB_BROKEN
+echo   [OK] Standalone env verified
 echo.
 
-echo [3/7] Clean temp directories...
+echo [3/9] Verify Python env native extensions (pip packages)...
+"%PY%" build_scripts\verify_env.py
+if errorlevel 1 goto :ENV_VERIFY_FAILED
+echo.
+
+echo [4/9] Clean temp directories...
 if exist "avatars" rmdir /s /q "avatars" 2>nul & mkdir "avatars"
 if exist "voices" rmdir /s /q "voices" 2>nul & mkdir "voices"
 if exist "unified_outputs" rmdir /s /q "unified_outputs" 2>nul & mkdir "unified_outputs"
 echo   [OK]
 echo.
 
-echo [4/7] Compile Python to .pyc bytecode...
-python build_scripts\build_pyc_for_package.py
+echo [5/9] Generate env.dat (obfuscated config)...
+if exist ".env" (
+    "%PY%" build_scripts\generate_env_dat.py
+    if errorlevel 1 (
+        echo   [ERROR] env.dat generation failed
+        pause
+        exit /b 1
+    )
+    echo   [OK]
+) else (
+    echo   [SKIP] No .env file found
+)
+echo.
+
+echo [6/9] Compile Python to .pyc bytecode...
+"%PY%" build_scripts\build_pyc_for_package.py
 if errorlevel 1 (
     echo   [ERROR] Python compile failed
     pause
@@ -54,13 +70,13 @@ if errorlevel 1 (
 echo   [OK]
 echo.
 
-echo [5/7] Check launcher exe...
+echo [7/9] Check launcher exe...
 if not exist "ZhiMoAI_Launcher.exe" (
     echo   Launcher not found, building...
     call build_scripts\build_launcher.bat
     if errorlevel 1 (
         echo   [ERROR] Launcher build failed
-        python build_scripts\build_pyc_for_package.py --clean
+        "%PY%" build_scripts\build_pyc_for_package.py --clean
         pause
         exit /b 1
     )
@@ -70,7 +86,7 @@ if not exist "ZhiMoAI_Launcher.exe" (
 )
 echo.
 
-echo [6/7] Verify .pyc files...
+echo [8/9] Verify .pyc files...
 set MISSING=0
 if not exist "app_backend.pyc" ( echo   [MISSING] app_backend.pyc & set MISSING=1 )
 if not exist "unified_app.pyc" ( echo   [MISSING] unified_app.pyc & set MISSING=1 )
@@ -99,28 +115,28 @@ if %MISSING%==1 (
 echo   [OK]
 echo.
 
-echo [7/7] Build installer (Inno Setup)...
+echo [9/9] Build installer (Inno Setup)...
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if exist %ISCC% (
     echo   Compiling installer...
     %ISCC% build_scripts\setup_zhimengai.iss
     if errorlevel 1 (
         echo   [ERROR] Inno Setup compile failed
-        python build_scripts\build_pyc_for_package.py --clean
+        "%PY%" build_scripts\build_pyc_for_package.py --clean
         pause
         exit /b 1
     )
     echo   [OK]
 ) else (
     echo   [ERROR] Inno Setup not found at default path
-    python build_scripts\build_pyc_for_package.py --clean
+    "%PY%" build_scripts\build_pyc_for_package.py --clean
     pause
     exit /b 1
 )
 
 echo.
 echo Cleaning temp .pyc files...
-python build_scripts\build_pyc_for_package.py --clean
+"%PY%" build_scripts\build_pyc_for_package.py --clean
 echo.
 
 echo ============================================================
@@ -132,3 +148,26 @@ echo.
 pause
 
 popd
+
+goto :EOF
+
+:ENV_NOT_STANDALONE
+echo   [ERROR] pyvenv.cfg found! Env is still a venv, not standalone.
+echo   The packaged env must be self-contained (no dependency on build machine Python).
+echo   Current: %ENV_DIR%\pyvenv.cfg
+pause
+popd
+exit /b 1
+
+:ENV_STDLIB_BROKEN
+echo   [ERROR] Python env stdlib broken! Env may still be a venv.
+pause
+popd
+exit /b 1
+
+:ENV_VERIFY_FAILED
+echo.
+echo   [ERROR] Python env is broken! Run build_scripts\setup_app_env.bat to fix.
+pause
+popd
+exit /b 1

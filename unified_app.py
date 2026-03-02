@@ -23,6 +23,13 @@ from pathlib import Path
 _CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'ZhiMoAI')
 _CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.dat')
 
+# env.dat 混淆密钥（与 build_scripts/generate_env_dat.py 保持一致）
+_XOR_KEY = b"ZhiMoAI2025@Cfg"
+
+
+def _xor_bytes(data: bytes, key: bytes) -> bytes:
+    return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+
 
 def _read_config_lines(path):
     """读取 key=value 格式配置文件，返回 dict"""
@@ -39,6 +46,26 @@ def _read_config_lines(path):
                 cfg[key.strip()] = value.strip()
     except Exception:
         pass
+    return cfg
+
+
+def _read_env_dat(path):
+    """读取 env.dat 混淆配置文件，返回 dict"""
+    cfg = {}
+    if not os.path.exists(path):
+        return cfg
+    try:
+        with open(path, 'r', encoding='ascii') as f:
+            encoded = f.read().strip()
+        raw = _xor_bytes(base64.b64decode(encoded), _XOR_KEY).decode('utf-8')
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            cfg[key.strip()] = value.strip()
+    except Exception as e:
+        print(f"[WARN] 读取 env.dat 失败: {e}")
     return cfg
 
 
@@ -61,33 +88,50 @@ def _update_config_key(key: str, value: str):
 
 
 def _migrate_env_to_config():
-    """首次运行时：如果旧 .env 文件存在，迁移到 config.dat"""
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    if not os.path.exists(env_path):
-        return
+    """首次运行时：如果旧 .env 或 env.dat 存在且无 config.dat，迁移到 config.dat"""
     if os.path.exists(_CONFIG_FILE):
         return  # 已经迁移过
-    cfg = _read_config_lines(env_path)
-    if cfg:
-        _write_config(cfg)
-        print(f"[CONFIG] 已将 .env 配置迁移到 {_CONFIG_FILE}")
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    # 优先迁移 .env（开发环境），其次 env.dat（打包环境）
+    env_path = os.path.join(app_dir, '.env')
+    dat_path = os.path.join(app_dir, 'env.dat')
+    cfg = {}
+    if os.path.exists(env_path):
+        cfg = _read_config_lines(env_path)
+        if cfg:
+            _write_config(cfg)
+            print(f"[CONFIG] 已将 .env 配置迁移到 {_CONFIG_FILE}")
+    elif os.path.exists(dat_path):
+        cfg = _read_env_dat(dat_path)
+        if cfg:
+            _write_config(cfg)
+            print(f"[CONFIG] 已将 env.dat 配置迁移到 {_CONFIG_FILE}")
 
 
 # ── 加载配置 ──
 def load_env_file():
-    """加载配置到环境变量（优先 config.dat，兼容旧 .env）"""
+    """加载配置到环境变量。
+    优先级（后面覆盖前面）：env.dat < config.dat < .env（仅开发环境）
+    """
     # 首次运行迁移
     _migrate_env_to_config()
 
-    # 1) 读取 config.dat（主配置）
-    cfg = _read_config_lines(_CONFIG_FILE)
+    app_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # 2) 读取 .env（开发覆盖，优先级更高）
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    # 1) 读取 env.dat（打包默认配置，最低优先级）
+    dat_path = os.path.join(app_dir, 'env.dat')
+    cfg = _read_env_dat(dat_path)
+
+    # 2) 读取 config.dat（用户运行时配置，覆盖 env.dat）
+    user_cfg = _read_config_lines(_CONFIG_FILE)
+    cfg.update(user_cfg)
+
+    # 3) 读取 .env（仅开发环境覆盖，最高优先级）
+    env_path = os.path.join(app_dir, '.env')
     dev_cfg = _read_config_lines(env_path)
     cfg.update(dev_cfg)
 
-    # 3) 写入 os.environ
+    # 4) 写入 os.environ
     for k, v in cfg.items():
         os.environ[k] = v
 
@@ -255,7 +299,15 @@ def _resolve_ffmpeg_exe():
     p = os.path.join(HEYGEM_FFMPEG, "ffmpeg.exe")
     if os.path.exists(p):
         return p
-    return shutil.which("ffmpeg") or "ffmpeg"
+    w = shutil.which("ffmpeg")
+    if w:
+        return w
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    return "ffmpeg"
 
 
 def _resolve_ffprobe_exe():
@@ -1992,10 +2044,14 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                                     pass
 
                             elif msg_type in ("gpu.power.online", "gpu_online"):
-                                safe_print("[WS] ✓ 收到 GPU 上线通知!")
+                                safe_print("[WS] ✓ 收到 GPU 服务就绪通知!")
                                 _gpu_ws_status["status"] = "running"
                                 _gpu_ws_status["online_event"].set()
                                 return
+
+                            elif msg_type == "gpu.power.booted":
+                                safe_print("[WS] GPU 机器已启动，等待服务就绪...")
+                                _gpu_ws_status["status"] = "booted"
 
                             elif msg_type == "gpu.power.boot.result":
                                 if data.get("success"):

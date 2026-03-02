@@ -64,8 +64,8 @@ echo   --- UI (webview + tray + image) ---
 "%PY%" -m pip install pywebview pystray "Pillow>=10.0,<11.0" %PIP_INDEX%
 if errorlevel 1 goto :install_failed
 
-echo   --- Media (opencv + audio + plotting) ---
-"%PY%" -m pip install opencv-python numpy pydub matplotlib kiwisolver %PIP_INDEX%
+echo   --- Media (opencv + audio + plotting + ffmpeg) ---
+"%PY%" -m pip install opencv-python numpy pydub matplotlib kiwisolver imageio-ffmpeg %PIP_INDEX%
 if errorlevel 1 goto :install_failed
 
 echo   --- Crypto + Network ---
