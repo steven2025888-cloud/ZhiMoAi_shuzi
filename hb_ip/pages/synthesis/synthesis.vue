@@ -80,6 +80,16 @@
       <view class="card-header">
         <view class="step-badge">3</view>
         <text class="card-title">在线合成</text>
+        <view class="gpu-status" :class="gpuOnlineStatus">
+          <text class="gpu-dot"></text>
+          <text class="gpu-text">{{ gpuStatusText }}</text>
+        </view>
+      </view>
+
+      <!-- GPU 离线提示 -->
+      <view v-if="gpuOnlineStatus === 'offline'" class="gpu-offline-tip">
+        <text class="tip-icon">💡</text>
+        <text class="tip-text">GPU 服务器未运行，点击合成将自动唤醒（约1-3分钟）</text>
       </view>
 
       <z-button
@@ -145,6 +155,7 @@ import { ref, computed, onMounted } from 'vue'
 import { isLoggedIn } from '@/utils/storage.js'
 import {
   listAssets, uploadAsset,
+  gpuStatus, gpuPowerOn, waitForGpuOnline,
   heygemHealth, heygemSubmitByHash, heygemProgress, heygemDownloadUrl,
   videoEditUpload, videoEditDownloadUrl,
   downloadFileWithAuth
@@ -175,6 +186,14 @@ const bgmPath = ref('')
 const bgmName = ref('')
 const editing = ref(false)
 
+// GPU 状态
+const gpuOnlineStatus = ref('checking') // 'online', 'offline', 'checking'
+const gpuStatusText = computed(() => {
+  if (gpuOnlineStatus.value === 'online') return 'GPU在线'
+  if (gpuOnlineStatus.value === 'offline') return 'GPU离线'
+  return '检测中...'
+})
+
 let recorderManager = null
 let recordTimer = null
 let audioCtx = null
@@ -198,7 +217,19 @@ onMounted(() => {
   if (lastVideoLocal && !resultLocalPath.value) resultLocalPath.value = lastVideoLocal
 
   loadAvatars()
+  checkGpuStatus()
 })
+
+// 检查 GPU 状态
+async function checkGpuStatus() {
+  gpuOnlineStatus.value = 'checking'
+  try {
+    const res = await gpuStatus()
+    gpuOnlineStatus.value = (res.code === 0 && res.data && res.data.online) ? 'online' : 'offline'
+  } catch (e) {
+    gpuOnlineStatus.value = 'offline'
+  }
+}
 
 async function downloadAndCacheVideo(url) {
   uni.showLoading({ title: '准备视频...' })
@@ -358,13 +389,56 @@ async function startSynthesis() {
   if (!hasAudio.value || !selectedAvatar.value) return
 
   synthesizing.value = true
-  progressMsg.value = '检查服务器...'
+  progressMsg.value = '检查 GPU 状态...'
   progressPct.value = 5
   resultVideoUrl.value = ''
 
   try {
+    // 检查 GPU 状态，如果离线则发送开机请求
+    let gpuOnline = false
+    try {
+      const statusRes = await gpuStatus()
+      gpuOnline = statusRes.code === 0 && statusRes.data && statusRes.data.online
+      console.log('[合成] GPU 状态:', gpuOnline ? '在线' : '离线')
+    } catch (e) {
+      console.log('[合成] GPU 状态检查失败:', e.message)
+    }
+
+    if (!gpuOnline) {
+      // GPU 离线，发送开机请求
+      progressMsg.value = '正在唤醒 GPU 服务器...'
+      progressPct.value = 8
+      
+      try {
+        const powerRes = await gpuPowerOn()
+        if (powerRes.code === 0) {
+          progressMsg.value = 'GPU 开机中，请稍候（约1-3分钟）...'
+          progressPct.value = 10
+          
+          // 轮询等待 GPU 上线（最长等待 3 分钟）
+          const waitRes = await waitForGpuOnline(180000, 5000)
+          if (!waitRes.success) {
+            throw new Error('GPU 开机超时，请稍后重试')
+          }
+          progressMsg.value = 'GPU 已就绪'
+          progressPct.value = 15
+        } else {
+          console.log('[合成] 开机请求返回:', powerRes)
+          // 即使开机请求失败，也尝试继续（可能 GPU 正在启动中）
+          progressMsg.value = '等待 GPU 就绪...'
+          await waitForGpuOnline(60000, 5000)
+        }
+      } catch (e) {
+        console.log('[合成] GPU 开机流程:', e.message)
+        // 继续尝试合成，让后续的 health check 决定是否失败
+      }
+    }
+
+    progressMsg.value = '检查合成服务器...'
+    progressPct.value = 18
+    
     const health = await heygemHealth()
-    if (health.code !== 0) throw new Error('合成服务器不可用')
+    if (health.code !== 0) throw new Error('合成服务器不可用，请稍后重试')
 
     progressMsg.value = '提交合成任务...'
     progressPct.value = 15
@@ -617,6 +691,35 @@ async function doEdit(editType) {
 
 .upload-bar { margin-top: 16rpx; padding: 16rpx; background: #dbeafe; border-radius: 12rpx; }
 .upload-text { font-size: 24rpx; color: #1d4ed8; }
+
+// GPU 状态指示器
+.gpu-status {
+  display: flex; align-items: center; gap: 8rpx;
+  padding: 8rpx 16rpx; border-radius: 20rpx; font-size: 20rpx;
+  &.online { background: #dcfce7; }
+  &.offline { background: #fee2e2; }
+  &.checking { background: #fef3c7; }
+}
+.gpu-dot {
+  width: 12rpx; height: 12rpx; border-radius: 50%;
+  .online & { background: #22c55e; }
+  .offline & { background: #ef4444; }
+  .checking & { background: #f59e0b; animation: blink 1s infinite; }
+}
+.gpu-text {
+  .online & { color: #15803d; }
+  .offline & { color: #b91c1c; }
+  .checking & { color: #92400e; }
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.gpu-offline-tip {
+  display: flex; align-items: flex-start; gap: 12rpx;
+  padding: 16rpx 20rpx; margin-bottom: 16rpx;
+  background: #fffbeb; border: 2rpx solid #fde68a; border-radius: 12rpx;
+}
+.tip-icon { font-size: 28rpx; flex-shrink: 0; }
+.tip-text { font-size: 22rpx; color: #92400e; line-height: 1.5; }
 
 .progress-info {
   margin-top: 20rpx; background: #f1f5f9; border-radius: 12rpx;

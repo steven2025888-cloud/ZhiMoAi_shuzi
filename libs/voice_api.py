@@ -169,22 +169,26 @@ class VoiceApiClient:
         )
         return safe_json(response)
 
-    def tts(self, model_id: int, text: str) -> Dict[str, Any]:
+    def tts(self, model_id: int, text: str, speed: float = 1.0) -> Dict[str, Any]:
         """
         创建TTS任务
         
         Args:
             model_id: 模型ID
             text: 要合成的文本
+            speed: 语速，0.5-2.0，默认1.0
             
         Returns:
             包含任务ID的响应
         """
         url = f"{self.base_url}/api/dsp/voice/tts"
+        payload = {"model_id": model_id, "text": text}
+        if speed != 1.0:
+            payload["speed"] = speed
         response = requests.post(
             url, 
             headers=self._headers(), 
-            json={"model_id": model_id, "text": text}, 
+            json=payload, 
             timeout=300
         )
         return safe_json(response)

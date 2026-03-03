@@ -395,9 +395,15 @@ class GPUPowerManager:
                     """
                 )
 
+                # 窗口最小化时 outerWidth/outerHeight 为 0，跳过同步避免强制恢复窗口
+                ow = int(size["outerWidth"])
+                oh = int(size["outerHeight"])
+                if ow < 100 or oh < 100:
+                    continue
+
                 # 估算浏览器边框与工具栏占用
-                target_w = max(800, int(size["outerWidth"]) - 16)
-                target_h = max(600, int(size["outerHeight"]) - 96)
+                target_w = max(800, ow - 16)
+                target_h = max(600, oh - 96)
 
                 # inner 尺寸与目标差异较大时，主动同步 viewport
                 if abs(int(size["innerWidth"]) - target_w) > 8 or abs(int(size["innerHeight"]) - target_h) > 8:
@@ -448,17 +454,22 @@ class GPUPowerManager:
         for selector in selectors:
             try:
                 buttons = await self.page.query_selector_all(selector)
+                print(f"[GPU] 选择器 '{selector}' 匹配到 {len(buttons)} 个按钮")
                 if not buttons:
                     continue
 
                 visible_buttons = []
                 for btn in buttons:
                     try:
-                        if await btn.is_visible():
+                        is_vis = await btn.is_visible()
+                        btn_text = await btn.text_content() or ""
+                        print(f"[GPU]   按钮 '{btn_text.strip()}' visible={is_vis}")
+                        if is_vis:
                             visible_buttons.append(btn)
                     except Exception:
                         continue
 
+                print(f"[GPU] 可见按钮数: {len(visible_buttons)}")
                 if not visible_buttons:
                     continue
 
@@ -474,6 +485,23 @@ class GPUPowerManager:
                 return visible_buttons[0]
             except Exception:
                 continue
+
+        # 未找到启动按钮，输出页面上所有可见按钮帮助诊断
+        try:
+            all_btns = await self.page.query_selector_all("button")
+            print(f"[GPU] ⚠️ 未找到启动按钮，页面共有 {len(all_btns)} 个 button 元素:")
+            for i, btn in enumerate(all_btns[:20]):
+                try:
+                    txt = (await btn.text_content() or "").strip()
+                    vis = await btn.is_visible()
+                    if vis and txt:
+                        print(f"[GPU]   [{i}] '{txt}' visible={vis}")
+                except Exception:
+                    pass
+            print(f"[GPU] 当前页面 URL: {self.page.url}")
+        except Exception:
+            pass
+
         return None
 
     async def start_gpu(self) -> bool:
@@ -489,6 +517,33 @@ class GPUPowerManager:
                 print("[GPU] API 启动失败，回退到页面点击...")
 
             if not api_started:
+                # 确保在控制台页面并刷新，获取最新按钮状态
+                await self.ensure_on_console_page()
+                try:
+                    await self.page.reload(wait_until="networkidle")
+                    await asyncio.sleep(3)
+                    print("[GPU] 页面已刷新，准备查找启动按钮")
+                except Exception as e:
+                    print(f"[GPU] 页面刷新失败: {e}")
+
+                # 先关闭可能存在的弹窗/遮罩（如欠费提示等）
+                try:
+                    close_btns = await self.page.query_selector_all(
+                        "button:has-text('关闭'), button:has-text('取消'), "
+                        "button:has-text('我知道了'), button:has-text('确定'), "
+                        "span.uc-fe-modal-close, div.uc-fe-modal-close"
+                    )
+                    for cb in close_btns:
+                        try:
+                            if await cb.is_visible():
+                                await cb.click()
+                                print(f"[GPU] 已关闭弹窗")
+                                await asyncio.sleep(1)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
                 # 查找启动按钮
                 print("[GPU] 查找启动按钮...")
                 start_button = await self._find_start_button()

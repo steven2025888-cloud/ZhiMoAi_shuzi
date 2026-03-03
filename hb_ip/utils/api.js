@@ -252,6 +252,34 @@ export function deleteAsset(assetId) {
   })
 }
 
+// ── GPU 电源管理 ──
+// 检查 GPU 状态
+export function gpuStatus() {
+  return request('/api/gpu/status', { method: 'GET', timeout: 10000 })
+}
+
+// 请求开机
+export function gpuPowerOn() {
+  return request('/api/gpu/power/on', { method: 'POST', timeout: 30000 })
+}
+
+// 轮询等待 GPU 上线
+export async function waitForGpuOnline(maxWaitMs = 180000, pollIntervalMs = 5000) {
+  const startTime = Date.now()
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const res = await gpuStatus()
+      if (res.code === 0 && res.data && res.data.online) {
+        return { success: true, data: res.data }
+      }
+    } catch (e) {
+      console.log('[GPU] 状态检查失败:', e.message)
+    }
+    await new Promise(r => setTimeout(r, pollIntervalMs))
+  }
+  return { success: false, error: 'GPU 开机超时' }
+}
+
 // ── HeyGem 在线合成（直连合成服务器） ──
 export function heygemHealth() {
   return synthRequest('/api/heygem/health', { method: 'GET', timeout: 10000 })

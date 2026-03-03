@@ -2,6 +2,18 @@
 import os
 import sys
 
+# ── 在任何导入之前设置 HuggingFace 离线模式（避免连接 huggingface.co）──
+# 必须在导入 transformers/huggingface_hub 之前设置
+_INDEXTTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_internal_tts")
+_HF_CACHE_DIR = os.path.join(_INDEXTTS_DIR, "checkpoints", "hf_cache")
+if os.path.exists(_HF_CACHE_DIR):
+    os.environ['HF_HOME'] = _HF_CACHE_DIR
+    os.environ['HF_HUB_CACHE'] = _HF_CACHE_DIR
+    os.environ['TRANSFORMERS_CACHE'] = _HF_CACHE_DIR
+    os.environ['HF_HUB_OFFLINE'] = '1'
+    os.environ['TRANSFORMERS_OFFLINE'] = '1'
+    os.environ['HF_DATASETS_OFFLINE'] = '1'
+
 # 修复 Windows 控制台编码：避免 print() 输出 emoji/Unicode 时报 GBK 编码错误
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
@@ -122,7 +134,8 @@ def _migrate_env_to_config():
 # ── 加载配置 ──
 def load_env_file():
     """加载配置到环境变量。
-    优先级（后面覆盖前面）：env.dat < config.dat < .env（仅开发环境）
+    优先级（后面覆盖前面）：env.dat < .env < config.dat（用户选择最高）
+    注意：TTS_MODE 和 HEYGEM_MODE 用户选择优先级最高
     """
     # 首次运行迁移
     _migrate_env_to_config()
@@ -133,14 +146,15 @@ def load_env_file():
     dat_path = os.path.join(app_dir, 'env.dat')
     cfg = _read_env_dat(dat_path)
 
-    # 2) 读取 config.dat（用户运行时配置，覆盖 env.dat）
-    user_cfg = _read_config_lines(_CONFIG_FILE)
-    cfg.update(user_cfg)
-
-    # 3) 读取 .env（仅开发环境覆盖，最高优先级）
+    # 2) 读取 .env（开发环境配置）
     env_path = os.path.join(app_dir, '.env')
     dev_cfg = _read_config_lines(env_path)
     cfg.update(dev_cfg)
+
+    # 3) 读取 config.dat（用户运行时配置，最高优先级）
+    # 用户选择的 TTS_MODE 和 HEYGEM_MODE 会覆盖 .env 中的设置
+    user_cfg = _read_config_lines(_CONFIG_FILE)
+    cfg.update(user_cfg)
 
     # 4) 写入 os.environ
     for k, v in cfg.items():
@@ -607,6 +621,23 @@ def auto_load_model():
     """根据 TTS 模式选择决定是否加载 IndexTTS2 模型"""
     global tts
     
+    # 等待门控文件被删除（登录完成后 app_backend 会删除此文件）
+    _gate_file = os.path.join(BASE_DIR, '_tts_gate.lock')
+    if os.path.exists(_gate_file):
+        safe_print("[MODEL] 等待登录完成（门控文件存在）...")
+        for _wait in range(120):  # 最多等 60 秒
+            if not os.path.exists(_gate_file):
+                break
+            time.sleep(0.5)
+        else:
+            safe_print("[MODEL] 门控等待超时，继续执行")
+        # 清理残留的门控文件
+        try:
+            if os.path.exists(_gate_file):
+                os.remove(_gate_file)
+        except Exception:
+            pass
+    
     # 重新加载配置，确保获取最新的TTS_MODE
     load_env_file()
     
@@ -622,6 +653,7 @@ def auto_load_model():
     
     # 本地版才加载模型
     safe_print("[MODEL] 当前为本地版，开始加载 IndexTTS2 模型...")
+    safe_print(f"[MODEL] HF离线模式: HF_HUB_OFFLINE={os.environ.get('HF_HUB_OFFLINE', 'not set')}")
     
     model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
     if not os.path.exists(model_dir):
@@ -988,19 +1020,32 @@ def download_voice_from_lipvoice_direct(voice_url: str, output_path: str, sign: 
 
 
 def _pip_force_chinese_person(prompt: str) -> str:
+    """处理画中画提示词：
+    1. 默认不出现人物（添加负向提示）
+    2. 如果提示词中明确要求人物，则确保是中国人
+    """
     p = (prompt or "").strip()
     if not p:
         return p
     p_low = p.lower()
-    if "中国" in p or "chinese" in p_low:
-        return p
+    
+    # 人物相关关键词
     human_keywords = [
         "人", "人物", "真人", "模特", "男人", "女人", "男孩", "女孩", "少年", "少女", "大叔", "阿姨",
         "person", "people", "man", "woman", "boy", "girl", "male", "female", "human",
     ]
-    if any(k in p for k in human_keywords) or any(k in p_low for k in human_keywords):
-        return p + "，中国人"
-    return p
+    
+    # 检查提示词中是否明确要求人物
+    has_human_keyword = any(k in p for k in human_keywords) or any(k in p_low for k in human_keywords)
+    
+    if has_human_keyword:
+        # 如果明确要求人物，确保是中国人
+        if "中国" not in p and "chinese" not in p_low:
+            return p + "，必须是中国人，东方面孔"
+        return p
+    else:
+        # 默认不出现人物，添加负向约束
+        return p + "，画面中不要出现任何人物，只展示场景和物品"
 
 
 def split_text_by_sentences(text, max_chars=100):
@@ -1059,10 +1104,15 @@ def split_text_by_sentences(text, max_chars=100):
     return chunks
 
 
-def generate_speech_online_concurrent(text, voice_name, progress=gr.Progress()):
+def generate_speech_online_concurrent(text, voice_name, speed=1.0, progress=gr.Progress()):
     """在线版 TTS：并发调用云端 API 合成语音（优化版）
 
     将长文本分割成多个100字以内的段落，并发请求，全部完成后合成
+    
+    Args:
+        text: 要合成的文本
+        voice_name: 音色名称
+        speed: 语速，0.5-2.0，默认1.0
     """
     if not text.strip():
         raise gr.Error("请输入要合成的文本内容")
@@ -1104,11 +1154,11 @@ def generate_speech_online_concurrent(text, voice_name, progress=gr.Progress()):
 
         client = VoiceApiClient(API_BASE_URL, license_key)
 
-        # 提交所有任务
+        # 提交所有任务（传递语速参数）
         task_ids = []
         for i, chunk in enumerate(text_chunks):
             try:
-                result = client.tts(model_id, chunk)
+                result = client.tts(model_id, chunk, speed=speed)
                 if result.get("code") != 0:
                     raise gr.Error(f"段落{i+1}提交失败：{result.get('msg', '未知错误')}")
 
@@ -1469,16 +1519,20 @@ def generate_speech_local(text, prompt_audio, top_p, top_k, temperature, num_bea
 def generate_speech(text, prompt_audio, voice_name, top_p, top_k, temperature, num_beams,
                     repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
                     emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
+                    online_speed=1.0,
                     progress=gr.Progress()):
     """语音合成入口：以当前 TTS_MODE 为准选择本地/在线。
 
     说明：之前仅根据 voice_name 是否为在线音色来决定走在线合成，
     会导致「登录时选在线版 → UI 切到本地版」后仍然误走在线合成（表现为非常慢）。
+    
+    Args:
+        online_speed: 在线版语速，0.5-2.0，默认1.0
     """
     tts_mode = os.getenv('TTS_MODE', 'local')
     if tts_mode == 'online':
-        # 使用并发优化版本
-        return generate_speech_online_concurrent(text, voice_name, progress)
+        # 使用并发优化版本，传递语速参数
+        return generate_speech_online_concurrent(text, voice_name, speed=online_speed, progress=progress)
     return generate_speech_local(text, prompt_audio, top_p, top_k, temperature, num_beams,
                                  repetition_penalty, max_mel_tokens, emo_mode, emo_audio, emo_weight,
                                  emo_text, vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
@@ -2508,9 +2562,14 @@ def _render_task_list(tasks):
         ab = ('<span class="bt-badge bt-badge-tts">🎙 文字合成</span>'
               if t.get("audio_mode") == "tts" else
               '<span class="bt-badge bt-badge-audio">🎵 上传音频</span>')
-        vb = ('<span class="bt-badge bt-badge-shared">🎬 公共视频</span>'
-              if t.get("video_mode") == "shared" else
-              '<span class="bt-badge bt-badge-own">🎬 专属视频</span>')
+        # 视频来源显示：优先数字人库，其次公共/专属视频
+        avatar_name = t.get("avatar_name")
+        if avatar_name:
+            vb = f'<span class="bt-badge bt-badge-avatar">🎭 {avatar_name[:8]}</span>'
+        elif t.get("video_mode") == "shared":
+            vb = '<span class="bt-badge bt-badge-shared">🎬 公共视频</span>'
+        else:
+            vb = '<span class="bt-badge bt-badge-own">🎬 专属视频</span>'
         chip = (f'<span style="background:{sbg};color:{sc};border-radius:20px;'
                 f'padding:2px 9px;font-size:11px;font-weight:700;">{si} {status}</span>')
         if status not in ("进行中", "✅ 完成"):
@@ -3035,6 +3094,13 @@ def build_ui():
                                         info="← 慢  |  快 →",
                                         minimum=0.5, maximum=1.5, value=1.0, step=0.05)
 
+                                # ── 在线版设置（仅在线版可见）──
+                                with gr.Group(visible=not _is_local_tts) as online_only_settings_group:
+                                    online_voice_speed = gr.Slider(
+                                        label="语速调节",
+                                        info="← 慢  |  快 →",
+                                        minimum=0.5, maximum=2.0, value=1.0, step=0.05)
+
                                 with gr.Group(visible=False) as pro_mode_group:
                                     with gr.Row():
                                         top_p = gr.Slider(label="词语多样性", info="越高越随机 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
@@ -3159,7 +3225,12 @@ def build_ui():
                                     '✨高质量：20步，效果最佳但较慢</div>'
                                 )
 
-                            ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg")
+                            with gr.Row():
+                                ls_btn = gr.Button("🚀  开始合成", variant="primary", size="lg", scale=3)
+                                # 添加到批量任务按钮（仅本地版可见，默认显示让用户选择）
+                                add_to_batch_btn = gr.Button("📋 加入批量", variant="secondary", size="lg", scale=2, visible=True)
+                            
+                            add_to_batch_hint = gr.HTML(value="", visible=False)
                             
                             # ── 合成视频显示区（在步骤3内部）──
                             ls_detail_html = gr.HTML(value="", visible=False, elem_id="ls-detail-box")
@@ -3564,94 +3635,56 @@ def build_ui():
 
             # ── Tab 5：批量任务 ──────────────────────────────
             with gr.Tab("⚡  批量任务"):
-                with gr.Row(elem_classes="workspace"):
+                with gr.Column(elem_classes="panel"):
+                    gr.HTML(
+                        '<div class="panel-head"><span class="step-chip">📋</span>批量任务队列</div>'
+                        '<div style="font-size:12px;color:#64748b;padding:8px 12px;background:#f8fafc;border-radius:8px;margin-bottom:12px;">'
+                        '💡 在「工作台」完成语音合成后，点击「📋 加入批量」按钮添加任务到此队列<br>'
+                        '⚠️ 批量任务仅支持本地版合成</div>'
+                    )
 
-                    # ══ 左列：新建任务表单 ══
-                    with gr.Column(scale=1, elem_classes="panel bt-form"):
-                        gr.HTML('<div class="panel-head"><span class="step-chip">＋</span>新建任务</div>')
+                    # 批次设置
+                    with gr.Row():
+                        bt_batch_name = gr.Textbox(label="📁 批次名称（输出文件夹）",
+                            placeholder="留空则使用时间戳", max_lines=1, scale=2)
+                        bt_shared_video = gr.File(label="🎬 公共视频（无数字人时使用）",
+                            file_types=["video"], type="filepath", scale=3)
 
-                        bt_name = gr.Textbox(label="任务名称",
-                            placeholder="留空自动编号（任务1、任务2…）", max_lines=1)
+                    gr.HTML('<div class="divider"></div>')
 
-                        # ── 步骤 1：音频 ──
-                        gr.HTML('<div class="bt-step-row"><span class="step-chip" style="width:20px;height:20px;font-size:11px;">1</span><span class="bt-step-label">选择音频来源</span></div>')
-                        bt_audio_mode = gr.Radio(
-                            choices=["文字合成语音", "上传音频文件"],
-                            value="文字合成语音", label="", elem_classes="bt-radio")
+                    # 任务列表
+                    bt_task_list_html = gr.HTML(
+                        value=_render_task_list([]), elem_id="bt-task-list")
 
-                        with gr.Group(visible=True) as bt_tts_group:
-                            bt_text = gr.Textbox(label="合成文字内容",
-                                placeholder="输入要转换为语音的文字...", lines=3)
-                            bt_ref_audio = gr.Audio(label="参考音色（3~10 秒）",
-                                sources=["upload"], type="filepath")
+                    # 隐藏触发器：JS 写入序号 → Python 删除
+                    bt_del_trigger = gr.Textbox(value="", visible=False,
+                        elem_id="bt-del-trigger")
 
-                        with gr.Group(visible=False) as bt_custom_audio_group:
-                            bt_custom_audio = gr.Audio(label="上传音频（WAV / MP3）",
-                                sources=["upload"], type="filepath")
+                    gr.HTML('<div class="divider"></div>')
+                    with gr.Row():
+                        bt_start_btn = gr.Button("🚀  开始批量生成", variant="primary", scale=3)
+                        bt_clear_btn = gr.Button("🗑 清空队列", variant="stop", scale=1)
 
-                        # ── 步骤 2：视频 ──
-                        gr.HTML('<div class="bt-step-row"><span class="step-chip" style="width:20px;height:20px;font-size:11px;">2</span><span class="bt-step-label">选择视频来源</span></div>')
-                        bt_video_mode = gr.Radio(
-                            choices=["使用公共视频", "上传专属视频"],
-                            value="使用公共视频", label="", elem_classes="bt-radio")
-
-                        with gr.Group(visible=False) as bt_own_video_group:
-                            bt_own_video = gr.File(label="专属视频（仅此任务）",
-                                file_types=["video"], type="filepath")
-
-                        # ── 步骤 3：添加 ──
-                        gr.HTML('<div class="bt-step-row"><span class="step-chip" style="width:20px;height:20px;font-size:11px;">3</span><span class="bt-step-label">加入任务队列</span></div>')
-                        bt_add_hint = gr.HTML(value="")
-                        bt_add_btn  = gr.Button("➕  加入队列", variant="primary", size="lg")
-
-                    # ══ 右列：公共视频 + 批次设置 + 队列 ══
-                    with gr.Column(scale=2, elem_classes="panel bt-queue"):
-                        gr.HTML('<div class="panel-head"><span class="step-chip">📋</span>任务队列与设置</div>')
-
-                        # 顶部：公共视频 + 批次名称 横排
-                        with gr.Row():
-                            with gr.Column(scale=1):
-                                gr.HTML('<div class="bt-section-title">🎬 公共视频</div>')
-                                bt_shared_video = gr.File(label="所有任务共享此人物视频",
-                                    file_types=["video"], type="filepath")
-                            with gr.Column(scale=1):
-                                gr.HTML('<div class="bt-section-title">📁 批次名称</div>')
-                                bt_batch_name = gr.Textbox(label="输出文件夹名",
-                                    placeholder="留空则使用时间戳", max_lines=1)
-                                gr.HTML('<div style="font-size:11px;color:#94a3b8;margin-top:2px;">输出目录：unified_outputs / <b>时间戳_批次名</b></div>')
-
-                        gr.HTML('<div class="divider"></div>')
-
-                        # 任务列表（JS 中的叉号会把 index 写入隐藏 textbox）
-                        bt_task_list_html = gr.HTML(
-                            value=_render_task_list([]), elem_id="bt-task-list")
-
-                        # 隐藏触发器：JS 写入序号 → Python 删除
-                        bt_del_trigger = gr.Textbox(value="", visible=False,
-                            elem_id="bt-del-trigger")
-
-                        gr.HTML('<div class="divider"></div>')
-                        with gr.Row():
-                            bt_start_btn = gr.Button("🚀  开始批量生成", variant="primary", scale=3)
-                            bt_clear_btn = gr.Button("🗑 清空队列", variant="stop", scale=1)
-
-                        bt_progress_html = gr.HTML(value="", visible=False, elem_id="bt-progress-box")
+                    bt_progress_html = gr.HTML(value="", visible=False, elem_id="bt-progress-box")
+                    
+                    # 隐藏的控件（保持兼容性）
+                    bt_name = gr.Textbox(visible=False)
+                    bt_audio_mode = gr.Radio(choices=["文字合成语音"], value="文字合成语音", visible=False)
+                    bt_text = gr.Textbox(visible=False)
+                    bt_ref_audio = gr.Audio(visible=False)
+                    bt_custom_audio = gr.Audio(visible=False)
+                    bt_video_mode = gr.Radio(choices=["使用公共视频"], value="使用公共视频", visible=False)
+                    bt_own_video = gr.File(visible=False)
+                    bt_add_hint = gr.HTML(visible=False)
+                    bt_add_btn = gr.Button(visible=False)
 
                 bt_tasks_state = gr.State([])
 
                 # ── AI优化状态跟踪 ──
                 ai_rewrite_done = gr.State(False)
 
-                # ── 事件：切换音频来源 ──
-                bt_audio_mode.change(
-                    lambda m: (gr.update(visible=(m=="文字合成语音")),
-                               gr.update(visible=(m=="上传音频文件"))),
-                    inputs=[bt_audio_mode], outputs=[bt_tts_group, bt_custom_audio_group])
-
-                # ── 事件：切换视频来源 ──
-                bt_video_mode.change(
-                    lambda m: gr.update(visible=(m=="上传专属视频")),
-                    inputs=[bt_video_mode], outputs=[bt_own_video_group])
+                # 批量任务页面已简化，以下事件绑定不再需要
+                # 原有的 bt_audio_mode.change 和 bt_video_mode.change 已移除
 
                 # ── 事件：添加任务 ──
                 def _bt_add(tasks, name, am, text, ref, cust, vm, ov):
@@ -3754,7 +3787,14 @@ def build_ui():
                                 ext = os.path.splitext(ap)[1]
                                 dst = os.path.join(batch_dir, f"音频_{idx}{ext}")
                                 shutil.copy2(ap, dst); ap = dst
-                            if task.get("video_mode") == "shared":
+                            # 确定视频来源：优先使用数字人库，其次公共视频，最后专属视频
+                            avatar_name = task.get("avatar_name")
+                            if avatar_name and _LIBS_OK:
+                                # 从数字人库获取视频路径
+                                vp = _av.get_path(avatar_name)
+                                if not vp or not os.path.exists(vp):
+                                    raise RuntimeError(f"数字人「{avatar_name}」视频不存在")
+                            elif task.get("video_mode") == "shared":
                                 if not shared_video or not os.path.exists(shared_video):
                                     raise RuntimeError("公共视频未上传")
                                 vp = shared_video
@@ -3781,6 +3821,44 @@ def build_ui():
                 bt_start_btn.click(_bt_run,
                     inputs=[bt_tasks_state, bt_shared_video, bt_batch_name],
                     outputs=[bt_progress_html, bt_task_list_html, bt_tasks_state])
+
+                # ── 事件：从工作台添加到批量任务 ──
+                def _add_from_workspace(tasks, text_content, audio_path, avatar_name, heygem_mode):
+                    """从工作台添加任务到批量队列"""
+                    # 检查是否为本地版
+                    if "在线" in heygem_mode or "online" in heygem_mode.lower():
+                        return tasks, _render_task_list(tasks), gr.update(visible=True, value=_hint("warning", "批量任务仅支持本地版，请先切换到「💻 本地版」"))
+                    
+                    idx = len(tasks) + 1
+                    tn = f"工作台任务{idx}"
+                    
+                    # 验证必要参数
+                    if not audio_path:
+                        return tasks, _render_task_list(tasks), gr.update(visible=True, value=_hint("warning", "请先完成语音合成或上传音频"))
+                    
+                    if not avatar_name:
+                        return tasks, _render_task_list(tasks), gr.update(visible=True, value=_hint("warning", "请先选择数字人"))
+                    
+                    # 构建任务
+                    task = {
+                        "id": idx,
+                        "name": tn,
+                        "audio_mode": "custom",  # 工作台添加的都是已有音频
+                        "text": text_content or "",
+                        "ref_audio": None,
+                        "audio_path": audio_path,
+                        "video_mode": "shared",  # 使用公共视频
+                        "video_path": None,
+                        "avatar_name": avatar_name,  # 记录数字人名称
+                        "status": "等待中"
+                    }
+                    nt = tasks + [task]
+                    hint_msg = f"已添加「{tn}」到批量队列，共 {len(nt)} 个任务 ｜ 请到「批量任务」标签页开始生成"
+                    return nt, _render_task_list(nt), gr.update(visible=True, value=_hint("ok", hint_msg))
+
+                add_to_batch_btn.click(_add_from_workspace,
+                    inputs=[bt_tasks_state, input_text, audio_for_ls, avatar_select, heygem_mode_radio],
+                    outputs=[bt_tasks_state, bt_task_list_html, add_to_batch_hint])
 
 
         # ════════════════════ 事件绑定 ════════════════════
@@ -4246,6 +4324,7 @@ def build_ui():
         def tts_wrap(text, pa, voice_name, spd, tp, tk, temp, nb, rp, mmt,
                      emo_m, emo_a, emo_w, emo_t,
                      v1, v2, v3, v4, v5, v6, v7, v8,
+                     online_speed=1.0,
                      progress=gr.Progress()):
             # 参数验证
             if not text or not text.strip():
@@ -4265,6 +4344,7 @@ def build_ui():
                 r = generate_speech(text, pa, voice_name, tp, tk, temp, nb, rp, mmt,
                                     emo_m, emo_a, emo_w, emo_t,
                                     v1, v2, v3, v4, v5, v6, v7, v8,
+                                    online_speed=online_speed,
                                     progress=progress)
                 out_path = r[0]
                 
@@ -4313,7 +4393,7 @@ def build_ui():
                 raise gr.Error("合成失败: " + str(e))
 
         # TTS 按钮点击 - 直接在完成后保存
-        def tts_and_save(text, pa, voice_sel, spd, tp, tk, temp, nb, rp, mmt,
+        def tts_and_save(text, pa, voice_sel, spd, online_spd, tp, tk, temp, nb, rp, mmt,
                         emo_m, emo_a, emo_w, emo_t,
                         v1, v2, v3, v4, v5, v6, v7, v8,
                         # 保存需要的其他参数
@@ -4327,11 +4407,16 @@ def build_ui():
                         douyin_title_val, douyin_topics_val,
                         progress=gr.Progress()):
             """合成并自动保存工作台状态"""
+            # 根据 TTS 模式选择使用哪个语速值
+            tts_mode = os.getenv('TTS_MODE', 'local')
+            effective_speed = online_spd if tts_mode == 'online' else spd
+            
             # 先执行TTS，voice_sel 在第三个位置
             audio_path, audio_for_ls_path = tts_wrap(
-                text, pa, voice_sel, spd, tp, tk, temp, nb, rp, mmt,
+                text, pa, voice_sel, effective_speed, tp, tk, temp, nb, rp, mmt,
                 emo_m, emo_a, emo_w, emo_t,
                 v1, v2, v3, v4, v5, v6, v7, v8,
+                online_speed=online_spd,
                 progress=progress
             )
             
@@ -4365,7 +4450,7 @@ def build_ui():
         gen_btn.click(
             tts_and_save,
             inputs=[
-                input_text, prompt_audio, voice_select, voice_speed, top_p, top_k, temperature,
+                input_text, prompt_audio, voice_select, voice_speed, online_voice_speed, top_p, top_k, temperature,
                 num_beams, repetition_penalty, max_mel_tokens,
                 emo_mode, emo_audio, emo_weight, emo_text,
                 vec1, vec2, vec3, vec4, vec5, vec6, vec7, vec8,
@@ -4540,9 +4625,10 @@ def build_ui():
 任务三：生成一个吸引人的短视频标题（不超过30字，吸引眼球、引发好奇）
 任务四：生成5个相关的热门话题标签，用逗号分隔
 任务五：为画中画视频生成多个提示词。每个提示词描述一个不同的真实场景画面，用于AI生成实景B-roll视频素材。
-生成1个提示词（例如30秒文案生成1个，60秒文案生成2个，90秒文案生成3个）。每个提示词描述一个适合口播推广的真实场景画面，用于AI生成实景B-roll视频素材。
-要求：根据文案朗读时长估算（约每秒3-4个字），按每30秒1个提示词的规则生成对应数量。每个不超过80字。
-场景要求：实物场景，适合短视频口播画中画素材，主要用于展示厂家、商品、工作场景或服务环境。画面干净高级，空间通透，主体明确，构图简洁，具有短视频B-roll质感，灯光柔和，真实细节丰富，整体高级感强，生活化但不杂乱，超清写实风格。场景必须不同。
+首先分析文案的核心推广对象（具体是什么产品、食物、服务、店铺等），然后围绕这个核心对象生成场景描述。
+例如：如果文案是关于羊肉店，提示词应描述鲜切羊肉特写、滚烫羊汤冒着热气、干净明亮的店铺内景等；如果是关于装修，应描述施工现场、材料展示、完工效果等。
+生成数量规则：根据文案朗读时长估算（约每秒3-4个字），按每30秒1个提示词生成对应数量（30秒文案1个，60秒2个，90秒3个）。每个不超过80字。
+场景要求：必须与文案推广的具体产品/服务直接相关，突出核心卖点和吸引力。画面干净高级，主体明确，构图简洁，具有短视频B-roll质感，灯光柔和，真实细节丰富，超清写实风格。每个场景必须不同，从不同角度展示核心推广对象。
 
 视频文本内容：
 {video_text[:500]}
@@ -4915,14 +5001,14 @@ def build_ui():
             filter_mode = mode  # "local" 或 "online"
             new_choices = _vc.get_choices(filter_mode) if _LIBS_OK else []
             
-            # 本地版显示语音风格/合成速度/语速，在线版隐藏
+            # 本地版显示语音风格/合成速度/语速，在线版显示在线语速
             is_local = (mode == "local")
-            return gr.update(choices=new_choices, value=None), gr.update(visible=is_local)
+            return gr.update(choices=new_choices, value=None), gr.update(visible=is_local), gr.update(visible=not is_local)
         
         tts_mode_switch.change(
             _on_tts_mode_switch,
             inputs=[tts_mode_switch],
-            outputs=[voice_select, local_only_settings_group]
+            outputs=[voice_select, local_only_settings_group, online_only_settings_group]
         )
 
         # ── 数字人库事件 ──
@@ -6317,11 +6403,11 @@ def build_ui():
             outputs=[output_video, ls_detail_html,
                     workspace_record_hint, workspace_record_dropdown, ls_btn])
 
-        # 合成模式切换：在线版隐藏质量选项
+        # 合成模式切换：在线版隐藏质量选项和批量任务按钮
         heygem_mode_radio.change(
-            lambda m: gr.update(visible=("本地" in m)),
+            lambda m: (gr.update(visible=("本地" in m)), gr.update(visible=("本地" in m))),
             inputs=[heygem_mode_radio],
-            outputs=[quality_group])
+            outputs=[quality_group, add_to_batch_btn])
 
         # ══════════════════════════════════════════════════════════
         #  工作台记录事件绑定

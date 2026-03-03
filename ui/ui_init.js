@@ -49,18 +49,17 @@
 
     /* ── 2.8. 立即定义关闭/最小化逻辑（必须在对话框HTML之前）── */
     window._zm = {
+        _timer: null,
+        _countdown: 120,
         show() {
             console.log('[织梦AI] _zm.show() 被调用');
-            console.log('[织梦AI] 当前 window._zm 对象:', window._zm);
             const dialog = document.getElementById('zdai-cm');
-            console.log('[织梦AI] 查找对话框元素 #zdai-cm:', dialog);
             if (dialog) {
                 dialog.style.display = 'flex';
+                this._startCountdown();
                 console.log('[织梦AI] ✓ 关闭对话框已显示');
             } else {
                 console.error('[织梦AI] ✗ 错误：关闭对话框元素不存在！');
-                console.log('[织梦AI] DOM 状态:', document.readyState);
-                console.log('[织梦AI] body 子元素数量:', document.body ? document.body.children.length : 'body不存在');
                 // 如果对话框不存在，使用浏览器原生确认框
                 if (confirm('确定要关闭程序吗？\n\n点击"确定"退出，点击"取消"返回')) {
                     this.exit();
@@ -69,9 +68,38 @@
         },
         hide() { 
             console.log('[织梦AI] _zm.hide() 被调用');
+            this._stopCountdown();
             const dialog = document.getElementById('zdai-cm');
             if (dialog) {
                 dialog.style.display = 'none';
+            }
+        },
+        _startCountdown() {
+            this._stopCountdown();
+            this._countdown = 120;
+            this._updateTimerDisplay();
+            this._timer = setInterval(() => {
+                this._countdown--;
+                this._updateTimerDisplay();
+                if (this._countdown <= 0) {
+                    this._stopCountdown();
+                    this.hide();  // 超时后只隐藏弹窗，不退出程序
+                }
+            }, 1000);
+        },
+        _stopCountdown() {
+            if (this._timer) {
+                clearInterval(this._timer);
+                this._timer = null;
+            }
+            const timerEl = document.getElementById('zdai-cm-timer');
+            if (timerEl) timerEl.textContent = '';
+        },
+        _updateTimerDisplay() {
+            const timerEl = document.getElementById('zdai-cm-timer');
+            if (timerEl) {
+                timerEl.textContent = this._countdown > 0 ? 
+                    `⏱️ ${this._countdown} 秒后自动关闭此弹窗` : '';
             }
         },
         minimize() {
@@ -122,18 +150,19 @@
         console.log('[织梦AI] 5秒后检查 window._zm:', window._zm);
     }, 5000);
 
-    /* ── 3. 关闭确认对话框 ── */
+    /* ── 3. 关闭确认对话框（美化版，120秒超时） ── */
     document.body.insertAdjacentHTML('beforeend', `
       <div id="zdai-cm" style="display:none;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;">
-        <div style="position:absolute;inset:0;background:rgba(15,23,42,.6);backdrop-filter:blur(6px)" onclick="window._zm.hide()"></div>
-        <div style="position:relative;background:#fff;border-radius:20px;padding:36px 32px 28px;width:380px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.22)">
-          <div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:26px;">🖥</div>
-          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:8px">关闭程序</div>
-          <div style="font-size:13px;color:#64748b;margin-bottom:24px;line-height:1.7">最小化到通知区域后程序继续运行，<br>不会中断正在进行的任务。</div>
-          <div style="display:flex;gap:10px">
-            <button onclick="window._zm.minimize()" style="flex:1;padding:12px;border-radius:10px;border:1.5px solid #e2e8f0;background:#f8fafc;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;color:#374151;transition:all .15s">⊟ 最小化到通知区域</button>
-            <button onclick="window._zm.exit()" style="flex:1;padding:12px;border-radius:10px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s">✕ 退出程序</button>
+        <div style="position:absolute;inset:0;background:rgba(15,23,42,.7);backdrop-filter:blur(8px)"></div>
+        <div style="position:relative;background:linear-gradient(145deg,#ffffff,#f8fafc);border-radius:24px;padding:40px 36px 32px;width:420px;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,.28),0 0 0 1px rgba(99,102,241,.1)">
+          <div style="width:72px;height:72px;border-radius:18px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:32px;box-shadow:0 8px 24px rgba(99,102,241,.4);">🖥️</div>
+          <div style="font-size:22px;font-weight:800;color:#0f172a;margin-bottom:10px;letter-spacing:-0.5px;">关闭程序</div>
+          <div style="font-size:14px;color:#64748b;margin-bottom:28px;line-height:1.8;">最小化到通知区域后程序继续运行，<br>不会中断正在进行的任务。</div>
+          <div style="display:flex;gap:14px">
+            <button onclick="window._zm.minimize()" style="flex:1;padding:14px 20px;border-radius:12px;border:2px solid #e2e8f0;background:linear-gradient(145deg,#ffffff,#f1f5f9);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;color:#475569;transition:all .2s;box-shadow:0 2px 8px rgba(0,0,0,.05);" onmouseover="this.style.borderColor='#6366f1';this.style.color='#6366f1';this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 20px rgba(99,102,241,.15)';" onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#475569';this.style.transform='none';this.style.boxShadow='0 2px 8px rgba(0,0,0,.05)';">⊟ 最小化</button>
+            <button onclick="window._zm.exit()" style="flex:1;padding:14px 20px;border-radius:12px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 16px rgba(239,68,68,.35);" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(239,68,68,.45)';" onmouseout="this.style.transform='none';this.style.boxShadow='0 4px 16px rgba(239,68,68,.35)';">✕ 退出程序</button>
           </div>
+          <div id="zdai-cm-timer" style="margin-top:20px;font-size:12px;color:#94a3b8;"></div>
         </div>
       </div>
 

@@ -133,12 +133,15 @@ _CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.dat')
 
 
 def _read_all_config():
-    """读取 config.dat + .env（开发覆盖），返回合并 dict"""
+    """读取 .env + config.dat，返回合并 dict
+    优先级：.env < config.dat（用户选择优先级最高）
+    """
     cfg = {}
-    # 1) config.dat（主配置）
-    if os.path.exists(_CONFIG_FILE):
+    # 1) .env（开发默认配置，优先级较低）
+    env_file = os.path.join(BASE_DIR, '.env')
+    if os.path.exists(env_file):
         try:
-            with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(env_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith('#') or '=' not in line:
@@ -147,11 +150,10 @@ def _read_all_config():
                     cfg[k.strip()] = v.strip()
         except Exception:
             pass
-    # 2) .env（开发覆盖，优先级更高；打包后不存在则跳过）
-    env_file = os.path.join(BASE_DIR, '.env')
-    if os.path.exists(env_file):
+    # 2) config.dat（用户运行时配置，优先级最高）
+    if os.path.exists(_CONFIG_FILE):
         try:
-            with open(env_file, 'r', encoding='utf-8') as f:
+            with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith('#') or '=' not in line:
@@ -182,6 +184,7 @@ _root_ref      = [None]
 _webview_win   = [None]
 _tray_icon     = [None]
 _hwnd          = [None]   # 主窗口 HWND 缓存
+_minimized_at  = [0]      # 最小化时间戳，防止立即被恢复
 
 
 # ══════════════════════════════════════════════════════════════
@@ -850,6 +853,7 @@ class AppApi:
     def minimize_to_tray(self):
         """最小化到系统托盘"""
         print("[API] minimize_to_tray 被调用")
+        _minimized_at[0] = time.time()  # 设置最小化时间戳
 
         def _do():
             # 1. 确保托盘图标已启动
@@ -879,6 +883,7 @@ class AppApi:
                     style = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
                     style = (style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
                     u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+                    _minimized_at[0] = time.time()  # 更新时间戳
                     print(f"[API] [OK] 窗口已隐藏至托盘 (hwnd={hwnd})")
                 except Exception as e:
                     print(f"[API] ctypes 失败: {e}")
@@ -1304,6 +1309,13 @@ def cleanup():
     global _cleaned_up, gradio_process
     if _cleaned_up: return
     _cleaned_up = True
+    # 清理门控文件
+    try:
+        _gate = os.path.join(BASE_DIR, '_tts_gate.lock')
+        if os.path.exists(_gate):
+            os.remove(_gate)
+    except Exception:
+        pass
     if gradio_process and gradio_process.pid:
         kill_process_tree(gradio_process.pid)
     os._exit(0)
@@ -1429,7 +1441,7 @@ def wait_for_gradio(timeout=180):
 # ══════════════════════════════════════════════════════════════
 #  启动画面
 # ══════════════════════════════════════════════════════════════
-STATUS_TIMELINE = [
+STATUS_TIMELINE_LOCAL = [
     ( 0,  "正在启动运行环境，请稍候..."),
     ( 4,  "正在加载语音合成引擎..."),
     (10,  "正在初始化声学模型与音色编码器..."),
@@ -1441,8 +1453,17 @@ STATUS_TIMELINE = [
     (110, "仍在加载，模型文件较大请耐心等待..."),
 ]
 
+STATUS_TIMELINE_ONLINE = [
+    ( 0,  "正在启动运行环境，请稍候..."),
+    ( 3,  "在线版模式，跳过本地模型加载..."),
+    ( 6,  "正在初始化在线语音合成服务..."),
+    (10,  "正在启动界面服务..."),
+    (20,  "界面服务启动中，即将就绪..."),
+    (40,  "最后准备中，马上就好..."),
+]
 
-def build_splash():
+
+def build_splash(tts_mode='local'):
     import tkinter as tk
     from tkinter import ttk
     root = tk.Tk()
@@ -1487,7 +1508,8 @@ def build_splash():
              font=("Microsoft YaHei", 9), bg="#ffffff", fg="#64748b").pack(anchor="w", pady=(2,0))
 
     tk.Frame(card, bg="#e2e8f0", height=1).pack(fill="x", padx=28, pady=(20, 0))
-    status_var = tk.StringVar(value=STATUS_TIMELINE[0][1])
+    _timeline = STATUS_TIMELINE_LOCAL if tts_mode == 'local' else STATUS_TIMELINE_ONLINE
+    status_var = tk.StringVar(value=_timeline[0][1])
     tk.Label(card, textvariable=status_var,
              font=("Microsoft YaHei", 10), bg="#ffffff", fg="#6366f1",
              anchor="w").pack(fill="x", padx=32, pady=(16, 8))
@@ -1518,6 +1540,7 @@ def build_splash():
     for w in (root, card):
         w.bind("<ButtonPress-1>", on_press)
         w.bind("<B1-Motion>",     on_drag)
+    root._status_timeline = STATUS_TIMELINE_LOCAL if tts_mode == 'local' else STATUS_TIMELINE_ONLINE
     return root, status_var
 
 
@@ -1533,15 +1556,16 @@ def _splash_default_logo(parent):
 def run_splash(root, status_var):
     start_time = time.time()
     tl_idx = [0]
+    timeline = getattr(root, '_status_timeline', STATUS_TIMELINE_LOCAL)
 
     def tick():
         elapsed = time.time() - start_time
         i = tl_idx[0]
-        while i + 1 < len(STATUS_TIMELINE) and elapsed >= STATUS_TIMELINE[i+1][0]:
+        while i + 1 < len(timeline) and elapsed >= timeline[i+1][0]:
             i += 1
         if i != tl_idx[0]:
             tl_idx[0] = i
-            status_var.set(STATUS_TIMELINE[i][1])
+            status_var.set(timeline[i][1])
         if _gradio_url is not None:
             status_var.set("✅ 界面服务已就绪，正在打开窗口...")
             root.after(700, root.quit)
@@ -1608,7 +1632,14 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
     # ── 立即启动后台服务（越早越好，与更新检查/登录并行加载）──
-    print("[BOOT] 立即启动后台服务...")
+    # 创建门控文件：让子进程等待登录完成后再加载模型
+    _gate_file = os.path.join(BASE_DIR, '_tts_gate.lock')
+    try:
+        with open(_gate_file, 'w') as f:
+            f.write('waiting')
+    except Exception:
+        pass
+    print(f"[BOOT] 启动后台服务...")
     signal.signal(signal.SIGINT, lambda s, f: cleanup())
     if hasattr(signal, 'SIGTERM'):
         signal.signal(signal.SIGTERM, lambda s, f: cleanup())
@@ -2177,19 +2208,40 @@ if __name__ == "__main__":
                 
                 ok, msg = lic.validate_online(key)
                 if ok:
-                    # 保存 TTS 模式选择到 config.dat
+                    # 保存 TTS 模式选择到 config.dat（只更新 TTS_MODE，不覆盖其他配置）
                     selected_mode = version_var.get()
                     try:
                         os.makedirs(_CONFIG_DIR, exist_ok=True)
-                        cfg = _read_all_config()
+                        # 只读取 config.dat 自身的键（不合并 .env，避免冻结开发配置）
+                        cfg = {}
+                        if os.path.exists(_CONFIG_FILE):
+                            try:
+                                with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                                    for line in f:
+                                        line = line.strip()
+                                        if not line or line.startswith('#') or '=' not in line:
+                                            continue
+                                        k, v = line.split('=', 1)
+                                        cfg[k.strip()] = v.strip()
+                            except Exception:
+                                pass
                         cfg['TTS_MODE'] = selected_mode
                         with open(_CONFIG_FILE, 'w', encoding='utf-8') as f:
                             for k, v in cfg.items():
                                 f.write(f"{k}={v}\n")
                         
-                        # 同时设置环境变量，以便子进程可以读取
+                        # 同时设置环境变量
                         os.environ['TTS_MODE'] = selected_mode
                         print(f"[LICENSE] TTS 模式已保存到 config.dat: {selected_mode}")
+                        
+                        # 删除门控文件，通知子进程可以开始加载模型
+                        _gate = os.path.join(BASE_DIR, '_tts_gate.lock')
+                        try:
+                            if os.path.exists(_gate):
+                                os.remove(_gate)
+                                print(f"[LICENSE] 已删除门控文件，子进程将开始加载")
+                        except Exception:
+                            pass
                     except Exception as e:
                         print(f"[LICENSE] 保存 TTS 模式失败: {e}")
                     
@@ -2276,8 +2328,11 @@ if __name__ == "__main__":
 
     print("[LICENSE] 激活验证通过 [OK]")
 
+    # 读取登录后最新的 TTS_MODE（登录时可能已更新 config.dat）
+    _tts_mode = os.environ.get('TTS_MODE') or ENV_CONFIG.get('TTS_MODE', 'local')
+
     try:
-        root, status_var = build_splash()
+        root, status_var = build_splash(_tts_mode)
         run_splash(root, status_var)
         try: root.destroy()
         except Exception: pass
@@ -2406,45 +2461,33 @@ if __name__ == "__main__":
 
             def _show_confirm():
                 try:
-                    import tkinter as tk
-                    from tkinter import messagebox
+                    import ctypes
+                    # 使用原生 Windows MessageBox（线程安全，不依赖 tkinter 主线程）
+                    MB_YESNOCANCEL = 0x03
+                    MB_ICONQUESTION = 0x20
+                    MB_TOPMOST = 0x40000
+                    MB_SETFOREGROUND = 0x10000
 
-                    root = tk.Tk()
-                    root.withdraw()
-                    root.attributes('-topmost', True)
-
-                    # 10秒超时强制退出
-                    def timeout_exit():
-                        try: root.destroy()
-                        except Exception: pass
-                        print("[EXIT] 对话框超时，强制退出")
-                        _force_exit()
-
-                    exit_timer = root.after(10000, timeout_exit)
-
-                    result = messagebox.askyesnocancel(
-                        "关闭程序",
+                    result = ctypes.windll.user32.MessageBoxW(
+                        0,
                         "选择操作：\n\n"
                         "「是」- 最小化到通知区域（后台运行）\n"
                         "「否」- 退出程序\n"
                         "「取消」- 返回\n\n"
                         "提示：快速连按两次 X 可强制退出",
-                        icon='question'
+                        "关闭程序",
+                        MB_YESNOCANCEL | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND
                     )
+                    # 6=IDYES, 7=IDNO, 2=IDCANCEL
 
-                    if exit_timer:
-                        root.after_cancel(exit_timer)
-                    root.destroy()
-
-                    if result is True:  # 是 - 最小化
+                    if result == 6:  # 是 - 最小化
                         try:
                             hwnd = _get_main_hwnd()
                             if hwnd:
-                                import ctypes
                                 ctypes.windll.user32.ShowWindow(hwnd, 0)
                         except Exception:
                             pass
-                    elif result is False:  # 否 - 退出
+                    elif result == 7:  # 否 - 退出
                         _force_exit()
                     else:
                         # 取消 — 重置计数
@@ -2472,6 +2515,11 @@ if __name__ == "__main__":
                     try:
                         conn, _ = srv.accept()
                         if conn.recv(1024) == b'ACTIVATE':
+                            # 防止在刚最小化后立即恢复（冷却期 2 秒）
+                            if _minimized_at[0] and (time.time() - _minimized_at[0]) < 2.0:
+                                print("[ACTIVATE] 跳过激活（冷却期内）")
+                                conn.close()
+                                continue
                             hwnd = _get_main_hwnd()
                             if hwnd:
                                 try:
