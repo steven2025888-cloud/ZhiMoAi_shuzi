@@ -313,7 +313,7 @@ def _download_video(url: str, output_path: str, max_retries: int = 3) -> bool:
     import requests as _req
     for attempt in range(1, max_retries + 1):
         try:
-            _safe_print(f"[PIP] 下载视频 第{attempt}/{max_retries}次: {url[:80]}...")
+            _safe_print(f"[PIP] 下载视频 第{attempt}/{max_retries}次...")
             r = _req.get(url, timeout=(15, 300), stream=True)
             r.raise_for_status()
             with open(output_path, 'wb') as f:
@@ -398,7 +398,7 @@ def generate_pip_via_extractor(prompt: str, extractor, output_path: str = None,
 
     # 处理转义的 URL
     video_url = video_url.replace("\\/", "/")
-    _safe_print(f"[PIP] 收到视频URL: {video_url[:80]}...")
+    _safe_print(f"[PIP] 收到视频URL，开始下载...")
 
     # 下载视频
     _prog(0.88, "⬇️ 下载画中画视频...")
@@ -557,7 +557,7 @@ def generate_and_compose_pips(main_video: str, prompts: list, extractor,
             # 下载视频
             video_url = data.get("video_url", "").replace("\\/", "/")
             if video_url:
-                _safe_print(f"[PIP] 下载第 {i+1} 个视频: {video_url[:80]}...")
+                _safe_print(f"[PIP] 下载第 {i+1} 个视频...")
                 if _download_video(video_url, out_path):
                     results[i] = out_path
                     completed += 1

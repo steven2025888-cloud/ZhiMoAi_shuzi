@@ -1136,3 +1136,112 @@ div.svelte-1nguped:not(.panel),
   transform: scale(1.05) !important;
   box-shadow: 0 6px 24px rgba(239, 68, 68, 0.4) !important;
 }
+
+/* ══════════════════════════════════════
+   Gradio Toast 报错/提示弹窗 — 顶部居中
+   ══════════════════════════════════════ */
+/* 容器：移到顶部居中 */
+.toast-wrap,
+div[class*="toast-wrap"] {
+  position: fixed !important;
+  top: 20px !important;
+  bottom: auto !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  z-index: 99999 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 10px !important;
+  pointer-events: none !important;
+  width: auto !important;
+  max-width: 520px !important;
+  min-width: 320px !important;
+}
+
+/* 每条 toast 卡片 */
+.toast-body,
+div[class*="toast-body"] {
+  pointer-events: auto !important;
+  border-radius: 14px !important;
+  padding: 14px 20px !important;
+  font-family: 'Microsoft YaHei', system-ui, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.6 !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.05) !important;
+  backdrop-filter: blur(12px) !important;
+  animation: zdai-toast-in .35s cubic-bezier(.21,1.02,.73,1) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  max-width: 520px !important;
+}
+
+/* Info 样式（蓝色） */
+.toast-body.info,
+div[class*="toast-body"].info {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe) !important;
+  border: 2px solid #93c5fd !important;
+  color: #1e40af !important;
+}
+
+/* Warning 样式（橙色） */
+.toast-body.warning,
+div[class*="toast-body"].warning {
+  background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;
+  border: 2px solid #fcd34d !important;
+  color: #92400e !important;
+}
+
+/* Error 样式（红色） */
+.toast-body.error,
+div[class*="toast-body"].error {
+  background: linear-gradient(135deg, #fef2f2, #fee2e2) !important;
+  border: 2px solid #fca5a5 !important;
+  color: #991b1b !important;
+}
+
+/* toast 标题 */
+.toast-title,
+div[class*="toast-title"] {
+  font-weight: 800 !important;
+  font-size: 14px !important;
+  margin: 0 !important;
+}
+
+/* toast 描述文字 */
+.toast-text,
+div[class*="toast-text"] {
+  font-size: 13px !important;
+  margin: 0 !important;
+  opacity: .85 !important;
+}
+
+/* toast 关闭按钮 */
+.toast-close,
+div[class*="toast-close"] {
+  cursor: pointer !important;
+  opacity: .5 !important;
+  transition: opacity .2s !important;
+  margin-left: auto !important;
+  flex-shrink: 0 !important;
+}
+.toast-close:hover,
+div[class*="toast-close"]:hover {
+  opacity: 1 !important;
+}
+
+/* 入场动画 */
+@keyframes zdai-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-18px) scale(.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

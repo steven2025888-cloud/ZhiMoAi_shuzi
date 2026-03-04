@@ -1,2 +1,4 @@
 # WebSocket 客户端依赖
 websocket-client>=1.6.0
+# WebSocket 服务端（PC 端直连进度推送）
+flask-sock>=0.7.0

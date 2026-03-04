@@ -335,7 +335,7 @@ def check_for_updates():
         return False, None, "网络模块未加载"
     
     try:
-        print(f"[UPDATE] 连接更新服务器: {UPDATE_CHECK_URL}")
+        print(f"[UPDATE] 正在检查更新...")
         req = urllib.request.Request(
             UPDATE_CHECK_URL,
             headers={
@@ -345,7 +345,6 @@ def check_for_updates():
         )
         with urllib.request.urlopen(req, timeout=3) as response:
             raw_data = response.read().decode('utf-8')
-            print(f"[UPDATE] 服务器响应: {raw_data[:200]}")
             data = json.loads(raw_data)
             
         # 解析返回数据
@@ -693,7 +692,7 @@ def show_update_dialog(update_info, is_force):
         os.makedirs(download_dir, exist_ok=True)
         dest_path = os.path.join(download_dir, filename)
         
-        print(f"[DOWNLOAD] 开始下载: {url}")
+        print(f"[DOWNLOAD] 开始下载更新包...")
         print(f"[DOWNLOAD] 保存到: {dest_path}")
         
         success, error_msg = _download_with_resume(

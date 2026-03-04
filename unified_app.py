@@ -549,8 +549,8 @@ def _simple_progress_html(stage: str, pct: int, elapsed_s: int = 0) -> str:
     )
 
 
-def _dual_progress_html(stage: str, total_pct: int, step_label: str, step_pct: int, elapsed_s: int = 0) -> str:
-    """双进度条 HTML：总进度 + 当前步骤进度"""
+def _dual_progress_html(stage: str, total_pct: int, step_label: str, step_pct: int, elapsed_s: int = 0, error_msg: str = "") -> str:
+    """双进度条 HTML：总进度 + 当前步骤进度，支持错误消息展示"""
     total_pct = max(0, min(100, int(total_pct or 0)))
     step_pct = max(0, min(100, int(step_pct or 0)))
     total_bar = max(2, total_pct)
@@ -558,6 +558,34 @@ def _dual_progress_html(stage: str, total_pct: int, step_label: str, step_pct: i
     stage = (stage or "处理中").strip()
     step_label = (step_label or "").strip()
     sub = f"用时 {int(elapsed_s)}s" if elapsed_s else ""
+
+    # ── 错误状态：使用红色主题 ──
+    if error_msg:
+        safe_err = str(error_msg).replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+        return (
+            '<div style="background:linear-gradient(135deg,#1c1017,#1a0a0a);'
+            'border:2px solid #ef4444;border-radius:12px;'
+            'padding:16px 18px 14px;margin:0 0 10px;'
+            'font-family:Microsoft YaHei,system-ui,sans-serif;'
+            'box-shadow:0 4px 20px rgba(239,68,68,.25);">'
+            # 标题行
+            '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">'
+            '<span style="font-size:15px;font-weight:800;color:#fca5a5;">❌ 合成失败</span>'
+            f'<span style="margin-left:auto;font-size:12px;color:#ef4444;font-weight:600;">{sub}</span>'
+            '</div>'
+            # 错误原因卡片
+            '<div style="background:rgba(239,68,68,.1);border:1.5px solid rgba(239,68,68,.3);'
+            'border-radius:10px;padding:12px 14px;margin-bottom:8px;">'
+            '<div style="font-size:11px;font-weight:700;color:#f87171;margin-bottom:6px;">💡 错误原因</div>'
+            f'<div style="font-size:13px;font-weight:600;color:#fecaca;line-height:1.6;word-break:break-all;">{safe_err}</div>'
+            '</div>'
+            # 建议
+            '<div style="font-size:11px;color:#6b7280;line-height:1.5;">'
+            '建议：请检查网络连接，确认服务器状态后重试'
+            '</div>'
+            '</div>'
+        )
+
     return (
         '<div style="background:linear-gradient(135deg,#1e293b,#0f172a);'
         'border:1.5px solid #6366f1;border-radius:12px;'
@@ -2371,7 +2399,7 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                 time.sleep(health_check_interval)
                 continue
             else:
-                raise gr.Error(f"无法连接 HeyGem 服务器 ({server_url}): {e}")
+                raise gr.Error(f"无法连接 HeyGem 合成服务器，请检查网络连接或服务器配置")
 
     # ── 1) 计算本地文件 hash ──
     progress(0.02, desc="计算文件指纹...")
@@ -2486,30 +2514,12 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
     except Exception as e:
         raise gr.Error(f"提交合成任务失败: {e}")
 
-    # ── 5) 轮询进度 ──
+    # ── 5) 接收进度（优先 WebSocket 推送，失败回退 HTTP 轮询） ──
     progress(0.12, desc="等待服务器处理...")
-    poll_interval = 2
     max_wait = 1800
 
-    while True:
-        elapsed = time.time() - t0
-        if elapsed > max_wait:
-            raise gr.Error(f"合成超时 ({int(elapsed)}s)，请检查服务器状态")
-
-        try:
-            resp = _req.get(
-                f"{server_url}/api/heygem/progress",
-                params={"task_id": task_id},
-                headers=headers,
-                timeout=15,
-            )
-            resp.raise_for_status()
-            pdata = resp.json().get("data", {})
-        except Exception as e:
-            safe_print(f"[HEYGEM-ONLINE] 轮询异常: {e}")
-            time.sleep(poll_interval)
-            continue
-
+    def _process_progress_update(pdata, elapsed):
+        """处理进度数据，更新 Gradio 进度条。返回: 'done' | 'error' | 'continue'"""
         status = pdata.get("status", "")
         pct = pdata.get("progress", 0)
         msg = pdata.get("message", "")
@@ -2517,7 +2527,6 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
         el = int(elapsed)
 
         if status == "queued":
-            # 排队时展示缓慢递增的假进度（12%~25%），避免用户认为卡死
             fake_pct = min(25, 12 + int(elapsed / 5))
             desc = f"排队中 (第{queue_pos}位)... {fake_pct}%"
             progress(fake_pct / 100, desc=desc)
@@ -2529,7 +2538,6 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
             if pct > 0:
                 safe_pct = max(12, min(95, pct))
             else:
-                # 服务器还没返回真实进度时，显示基于时间的假进度（25%~88%，对数曲线）
                 safe_pct = min(88, 25 + int(63 * elapsed / (elapsed + 120)))
             grad_pct = 0.12 + (safe_pct - 12) * 0.01
             display_msg = msg if msg else "合成处理中..."
@@ -2548,13 +2556,101 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
             if detail_cb:
                 try: detail_cb(_dual_progress_html("下载结果", 95, "正在下载", 50, el))
                 except Exception: pass
-            break
+            return "done"
 
         elif status == "error":
-            err = pdata.get("error", "未知错误")
-            raise gr.Error(f"服务器合成失败: {err}")
+            return "error"
 
-        time.sleep(poll_interval)
+        return "continue"
+
+    def _poll_progress_ws():
+        """通过 WebSocket 接收进度推送。返回 True=成功完成 / False=需回退 HTTP"""
+        if not _WS_OK:
+            return False
+
+        ws_url = server_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_url}/ws/progress/{task_id}"
+        if api_secret:
+            ws_url += f"?token={api_secret}"
+
+        import websockets as _ws_lib
+
+        async def _recv():
+            try:
+                async with _ws_lib.connect(ws_url, open_timeout=5, close_timeout=3) as ws:
+                    safe_print(f"[HEYGEM-ONLINE] WS 进度连接已建立")
+                    while True:
+                        elapsed = time.time() - t0
+                        if elapsed > max_wait:
+                            raise gr.Error(f"合成超时 ({int(elapsed)}s)，请检查服务器状态")
+
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                        except asyncio.TimeoutError:
+                            continue
+
+                        data = json.loads(raw)
+                        if data.get("code") != 0:
+                            err = data.get("msg", "未知错误")
+                            raise gr.Error(f"服务器错误: {err}")
+
+                        pdata = data.get("data", {})
+                        result = _process_progress_update(pdata, elapsed)
+                        if result == "done":
+                            return True
+                        elif result == "error":
+                            err = pdata.get("error", "未知错误")
+                            raise gr.Error(f"服务器合成失败: {err}")
+            except gr.Error:
+                raise
+            except Exception as e:
+                safe_print(f"[HEYGEM-ONLINE] WS 进度连接失败: {e}")
+                return False
+
+        try:
+            return asyncio.run(_recv())
+        except gr.Error:
+            raise
+        except Exception as e:
+            safe_print(f"[HEYGEM-ONLINE] WS 运行异常: {e}")
+            return False
+
+    def _poll_progress_http():
+        """HTTP 轮询进度（回退方案）"""
+        safe_print("[HEYGEM-ONLINE] 使用 HTTP 轮询获取进度")
+        poll_interval = 2
+        while True:
+            elapsed = time.time() - t0
+            if elapsed > max_wait:
+                raise gr.Error(f"合成超时 ({int(elapsed)}s)，请检查服务器状态")
+
+            try:
+                resp = _req.get(
+                    f"{server_url}/api/heygem/progress",
+                    params={"task_id": task_id},
+                    headers=headers,
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                pdata = resp.json().get("data", {})
+            except Exception as e:
+                safe_print(f"[HEYGEM-ONLINE] 轮询异常: {e}")
+                time.sleep(poll_interval)
+                continue
+
+            result = _process_progress_update(pdata, elapsed)
+            if result == "done":
+                break
+            elif result == "error":
+                err = pdata.get("error", "未知错误")
+                raise gr.Error(f"服务器合成失败: {err}")
+
+            time.sleep(poll_interval)
+
+    # 优先 WebSocket 推送，失败则回退到 HTTP 轮询
+    if not _poll_progress_ws():
+        safe_print("[HEYGEM-ONLINE] WS 不可用，回退到 HTTP 轮询")
+        _poll_progress_http()
 
     # ── 6) 下载结果 ──
     try:
@@ -2567,17 +2663,64 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
         )
         resp.raise_for_status()
 
+        # 检查返回类型：如果服务器返回了 JSON 错误而非视频流，提前报错
+        content_type = resp.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            try:
+                err_data = resp.json()
+                err_msg = err_data.get("msg") or err_data.get("message") or err_data.get("error") or str(err_data)
+            except Exception:
+                err_msg = "服务器返回了非视频数据"
+            raise gr.Error(f"下载失败，服务器返回错误: {err_msg}")
+
+        total_size = 0
         with open(out, "wb") as f:
             for chunk in resp.iter_content(chunk_size=256 * 1024):
                 if chunk:
                     f.write(chunk)
+                    total_size += len(chunk)
 
-        if not os.path.exists(out) or os.path.getsize(out) < 1024:
-            raise RuntimeError("下载的结果文件异常")
+        if not os.path.exists(out) or total_size < 1024:
+            detail = f"文件大小: {total_size} bytes" if total_size > 0 else "文件为空"
+            # 尝试读取小文件内容，可能是服务器返回的错误信息
+            server_err = ""
+            if os.path.exists(out) and total_size > 0 and total_size < 4096:
+                try:
+                    with open(out, "r", encoding="utf-8", errors="replace") as ef:
+                        raw = ef.read().strip()
+                    # 尝试解析 JSON 错误
+                    try:
+                        jd = json.loads(raw)
+                        server_err = jd.get("msg") or jd.get("message") or jd.get("error") or ""
+                    except (json.JSONDecodeError, ValueError):
+                        # 可能是纯文本或 HTML
+                        if len(raw) < 500:
+                            server_err = raw
+                except Exception:
+                    pass
+            safe_print(f"[HEYGEM-ONLINE] 下载文件异常: {detail}")
+            if server_err:
+                safe_print(f"[HEYGEM-ONLINE] 服务器返回: {server_err[:200]}")
+                raise gr.Error(f"服务器返回错误: {server_err[:200]}\n\n请重新合成视频")
+            raise gr.Error(
+                f"下载的视频文件异常（{detail}），可能原因：\n"
+                f"1. 服务器合成结果已过期或被清理\n"
+                f"2. 服务器磁盘空间不足\n"
+                f"3. 网络传输中断\n"
+                f"请重新合成视频"
+            )
 
-        safe_print(f"[HEYGEM-ONLINE] 下载完成: {out} ({os.path.getsize(out)} bytes)")
+        safe_print(f"[HEYGEM-ONLINE] 下载完成: {out} ({total_size} bytes)")
+    except gr.Error:
+        raise  # 已经是 gr.Error 的直接抛出
+    except _req.exceptions.ConnectionError as e:
+        raise gr.Error(f"下载失败，无法连接到合成服务器\n请检查服务器是否在线")
+    except _req.exceptions.Timeout as e:
+        raise gr.Error(f"下载超时，服务器响应过慢\n请稍后重试或检查网络连接")
     except _req.exceptions.RequestException as e:
         raise gr.Error(f"下载合成结果失败: {e}")
+    except Exception as e:
+        raise gr.Error(f"下载过程出错: {e}")
 
     el = int(time.time() - t0)
     if detail_cb:
@@ -3106,7 +3249,7 @@ def build_ui():
                                 
                                 # ── AI改写功能（放在提取框内） ──
                                 gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-top:12px;margin-bottom:8px;">AI智能改写文案，同时生成标题和话题标签</div>')
-                                rewrite_btn = gr.Button("✨ AI改写 + 标题标签", variant="secondary", size="sm")
+                                rewrite_btn = gr.Button("✨ AI改写", variant="secondary", size="sm")
                             
                             input_text = gr.TextArea(
                                 label="文案内容",
@@ -3954,6 +4097,16 @@ def build_ui():
 
 
         # ════════════════════ 事件绑定 ════════════════════
+
+        def _clean_text(text):
+            """去掉文案中的回车、换行和多余空格"""
+            if not text:
+                return text
+            # 去掉回车和换行符
+            text = re.sub(r'[\r\n]+', '', text)
+            # 连续两个以上空格合并为一个，再 strip
+            text = re.sub(r' {2,}', ' ', text).strip()
+            return text
 
         def _hint_html(kind, msg):
             cfg = {
@@ -5621,7 +5774,7 @@ def build_ui():
                         text_lines.append(stripped)
                 
                 if text_lines:
-                    new_text = "\n".join(text_lines)
+                    new_text = _clean_text("".join(text_lines))
                 
                 # 如果没解析到文案（可能AI没严格按格式），用整个结果作为改写文案
                 if new_text == original_text and not any(
@@ -5635,7 +5788,7 @@ def build_ui():
                         if line:
                             text_parts.append(line)
                     if text_parts:
-                        new_text = "\n".join(text_parts)
+                        new_text = _clean_text("".join(text_parts))
                 
                 # 如果有关键词，自动开启关键词高亮
                 kw_enable = bool(new_keywords.strip())
@@ -6344,8 +6497,9 @@ def build_ui():
                     yield gr.update(), gr.update(value=_last_detail, visible=True)
 
             if result["err"]:
-                yield gr.update(), gr.update(value=_dual_progress_html("出错", 0, "失败", 0, int(time.time() - _t0)), visible=True)
-                raise gr.Error(str(result["err"]))
+                err_str = str(result["err"])
+                yield gr.update(), gr.update(value=_dual_progress_html("出错", 0, "失败", 0, int(time.time() - _t0), error_msg=err_str), visible=True)
+                raise gr.Error(f"❌ 合成失败：{err_str}")
 
             out      = result["out"]
             
@@ -6524,11 +6678,16 @@ def build_ui():
                 # 最后一次 yield，包含保存结果并重新启用按钮
                 # 注意：第一个值需要是视频路径，Gradio 会自动处理
                 yield video_path, ls_detail, hint_msg, dropdown_update, gr.update(interactive=True)
+            except gr.Error as e:
+                # gr.Error 重新招出，触发顶部 toast 弹窗提示用户
+                # 但先重新启用按钮，否则按钮会卡死
+                yield gr.update(), gr.update(), gr.update(), gr.update(), gr.update(interactive=True)
+                raise
             except Exception as e:
-                # 异常时也要重新启用按钮（否则会卡死）
-                err_hint = _hint_html("error", f"合成失败：{e}")
-                yield gr.update(), gr.update(), gr.update(value=err_hint, visible=True), gr.update(), gr.update(interactive=True)
-                return
+                # 其他异常：在进度面板和 toast 同时显示错误
+                err_str = str(e)
+                yield gr.update(), gr.update(value=_dual_progress_html("出错", 0, "失败", 0, 0, error_msg=err_str), visible=True), gr.update(), gr.update(), gr.update(interactive=True)
+                raise gr.Error(f"❌ 合成失败：{err_str}")
         
         ls_btn.click(
             video_and_save,
@@ -6618,7 +6777,8 @@ def build_ui():
             progress(1.0, desc="完成")
             
             if success:
-                # 提取成功，返回内容到合成文本框
+                # 提取成功，去掉回车换行和多余空格，返回内容到合成文本框
+                result = _clean_text(result)
                 return gr.update(value=result), '<div class="hint-ok">✅ 文案提取成功！</div>'
             else:
                 # 提取失败

@@ -80,6 +80,13 @@ if _ENABLE_GFPGAN == "0":
 import cv2
 from flask import Flask, request, jsonify, send_file
 
+try:
+    from flask_sock import Sock
+    _FLASK_SOCK_OK = True
+except ImportError:
+    _FLASK_SOCK_OK = False
+    logger_msg = "[Server] flask-sock 未安装，直连 WebSocket 进度推送不可用 (pip install flask-sock)"
+
 import service.trans_dh_service
 from h_utils.custom import CustomError
 from y_utils.config import GlobalConfig
@@ -99,7 +106,9 @@ except ImportError:
 _cfg = configparser.ConfigParser()
 _cfg.read(_CFG_PATH, encoding="utf-8")
 
-MAX_CONCURRENT = int(_cfg.get("server", "max_concurrent", fallback="3"))
+# ── 强制单任务串行：避免多任务同时占用 GPU 导致 OOM ──
+# 忽略 config.ini 中的 max_concurrent，强制为 1
+MAX_CONCURRENT = 1
 UPLOAD_DIR = _cfg.get("server", "upload_dir", fallback="./uploads")
 OUTPUT_DIR = _cfg.get("server", "output_dir", fallback="./outputs")
 FILE_TTL = int(_cfg.get("server", "file_ttl_seconds", fallback="86400"))
@@ -121,16 +130,14 @@ def _abs_path(p: str) -> str:
 UPLOAD_DIR = _abs_path(UPLOAD_DIR)
 OUTPUT_DIR = _abs_path(OUTPUT_DIR)
 
-# 文件池目录：按 md5 hash 存储，实现去重
-FILE_POOL_DIR = os.path.join(UPLOAD_DIR, "pool")
+# 统一存储目录：所有文件按 md5 hash 存储，实现去重（上传、资产、合成缓存共用）
+STORE_DIR = os.path.join(UPLOAD_DIR, "store")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(FILE_POOL_DIR, exist_ok=True)
+os.makedirs(STORE_DIR, exist_ok=True)
 
-# 资产目录：音色和数字人文件（30天保留）
-ASSET_DIR = os.path.join(UPLOAD_DIR, "assets")
+# 资产 TTL（30天保留，仅 DB 记录用）
 ASSET_TTL = int(_cfg.get("server", "asset_ttl_seconds", fallback=str(30 * 86400)))  # 30天
-os.makedirs(ASSET_DIR, exist_ok=True)
 
 # SQLite 数据库：资产元数据
 _DB_PATH = os.path.join(os.path.dirname(__file__), "assets.db")
@@ -169,44 +176,25 @@ def _init_db():
 _init_db()
 
 
-def _pool_path(file_hash, ext):
-    """根据 hash 和扩展名，返回文件池中的路径"""
-    return os.path.join(FILE_POOL_DIR, f"{file_hash}{ext}")
+def _store_path(file_hash, ext):
+    """根据 hash 和扩展名，返回统一存储目录中的路径"""
+    return os.path.join(STORE_DIR, f"{file_hash}{ext}")
 
 
-def _file_exists_in_pool(file_hash, ext):
-    """检查文件池中是否已存在该 hash 的文件"""
-    p = _pool_path(file_hash, ext)
+def _file_exists(file_hash, ext):
+    """检查文件是否已存在于统一存储"""
+    p = _store_path(file_hash, ext)
     return os.path.exists(p) and os.path.getsize(p) > 0
 
 
-def _resolve_to_pool(file_hash: str, ext: str) -> str:
-    """确保文件存在于文件池中，不在则从资产目录自动恢复。
+def _resolve_file(file_hash: str, ext: str) -> str:
+    """查找文件在统一存储中的路径。
 
-    返回文件池路径（如果找到），否则返回空字符串。
+    返回文件路径（如果找到），否则返回空字符串。
     """
-    pool_p = _pool_path(file_hash, ext)
-    if os.path.exists(pool_p) and os.path.getsize(pool_p) > 0:
-        return pool_p
-
-    # 文件池中不存在，尝试从资产目录恢复
-    with _db_lock:
-        conn = _get_db()
-        row = conn.execute(
-            "SELECT file_path FROM assets WHERE file_hash=? AND file_ext=? AND expires_at>? "
-            "ORDER BY created_at DESC LIMIT 1",
-            (file_hash, ext, time.time()),
-        ).fetchone()
-        conn.close()
-
-    if row and row["file_path"] and os.path.exists(row["file_path"]):
-        try:
-            shutil.copy2(row["file_path"], pool_p)
-            logger.info(f"[Pool] 从资产目录恢复到文件池: {file_hash}{ext}")
-            return pool_p
-        except Exception as e:
-            logger.warning(f"[Pool] 恢复文件失败: {e}")
-
+    p = _store_path(file_hash, ext)
+    if os.path.exists(p) and os.path.getsize(p) > 0:
+        return p
     return ""
 
 
@@ -280,18 +268,25 @@ def _write_video_server(
                      f"size={os.path.getsize(audio_path) if os.path.exists(audio_path) else 0}), "
                      f"video={output_mp4}")
 
+        # 帧数校验：如果生成的帧数远少于预期，记录警告
+        logger.info(f"[Server] VideoWriter [{work_id}] 实际帧数: {frame_count}")
+
         command = (
             f'ffmpeg -loglevel warning -y -i {audio_path} -i {output_mp4} '
             f'-map 0:a -map 1:v '
             f'-c:a aac -c:v libx264 -profile:v baseline -level 3.1 '
             f'-pix_fmt yuv420p -crf 15 '
+            f'-shortest '
             f'-movflags +faststart -strict -2 {result_path}'
         )
         logger.info(f"[Server] ffmpeg: {command}")
         rc = subprocess.call(command, shell=True)
         if rc != 0:
             logger.warning(f"[Server] ffmpeg 退出码非零: {rc}")
-        logger.info(f"[Server] 视频生成完成: {result_path}")
+        # 校验结果文件
+        if not os.path.exists(result_path) or os.path.getsize(result_path) < 1024:
+            raise RuntimeError(f"ffmpeg 合并失败: 结果文件不存在或过小")
+        logger.info(f"[Server] 视频生成完成: {result_path} ({os.path.getsize(result_path)} bytes)")
         result_queue.put([True, result_path])
     except Exception as e:
         logger.error(f"[Server] VideoWriter [{work_id}] 异常: {e}")
@@ -313,6 +308,16 @@ service.trans_dh_service.write_video = _write_video_server
 # ============================================================
 app = Flask(__name__)
 
+# ── WebSocket 支持（PC 端直连进度推送） ──
+if _FLASK_SOCK_OK:
+    sock = Sock(app)
+else:
+    sock = None
+    try:
+        logger.info(logger_msg)
+    except Exception:
+        print(logger_msg)
+
 # ── CORS 支持（手机端 H5 跨域访问视频/接口） ──
 @app.after_request
 def _add_cors_headers(response):
@@ -329,10 +334,10 @@ def _add_cors_headers(response):
     return response
 
 _task_instance = None
-_task_instance_lock = threading.Lock()
+# 推理串行锁已移除：MAX_CONCURRENT=1 时 semaphore 已保证同一时刻只有一个任务
 
-_semaphore = threading.Semaphore(MAX_CONCURRENT)
-_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT + 4)
+_semaphore = threading.Semaphore(MAX_CONCURRENT)  # MAX_CONCURRENT=1，天然串行队列
+_executor = ThreadPoolExecutor(max_workers=5)  # 1个任务槽位 + 4个辅助线程
 
 _tasks = OrderedDict()
 _tasks_lock = threading.Lock()
@@ -436,6 +441,10 @@ def _update_task_progress(work_id, stage, frame_count):
         for t in _tasks.values():
             if t.get("_work_id") == work_id:
                 total = t.get("total_frames", 0) or 1
+                # 动态修正：实际帧数超过预估时，上调 total_frames
+                if frame_count > total:
+                    total = int(frame_count * 1.05)  # 留 5% 余量
+                    t["total_frames"] = total
                 pct = min(95, int(frame_count / total * 90) + 5)
                 t["status"] = stage
                 t["current_frame"] = frame_count
@@ -517,17 +526,32 @@ def _run_task(task_id, audio_path, video_path):
             raise RuntimeError(f"视频文件不存在: {video_path}")
 
         cap = cv2.VideoCapture(video_path)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
 
-        if total_frames <= 0 or width <= 0 or height <= 0:
-            raise RuntimeError(f"视频文件无效: frames={total_frames}, size={width}x{height}")
+        if video_frames <= 0 or width <= 0 or height <= 0:
+            raise RuntimeError(f"视频文件无效: frames={video_frames}, size={width}x{height}")
+
+        # 预期输出帧数 = 音频时长 × fps（引擎按音频时长生成，不是按输入视频帧数）
+        total_frames = video_frames  # 默认值
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+                capture_output=True, text=True, timeout=10,
+            )
+            audio_duration = float(probe.stdout.strip())
+            if audio_duration > 0 and fps > 0:
+                total_frames = max(video_frames, int(audio_duration * fps))
+                logger.info(f"[Server] 音频时长={audio_duration:.1f}s, 预期输出帧数={total_frames} (视频帧数={video_frames})")
+        except Exception as _e:
+            logger.warning(f"[Server] 获取音频时长失败，使用视频帧数: {_e}")
 
         _update_task(task_id, total_frames=total_frames,
-                     message=f"视频信息: {width}x{height} {fps:.1f}fps {total_frames}帧")
+                     message=f"视频信息: {width}x{height} {fps:.1f}fps 预计{total_frames}帧")
 
         work_id = str(uuid.uuid1())
         _update_task(task_id, _work_id=work_id)
@@ -576,11 +600,12 @@ def _run_task(task_id, audio_path, video_path):
             except Exception:
                 return ""
 
+        # ── 推理执行（MAX_CONCURRENT=1，无需额外锁，semaphore 已保证串行） ──
+        logger.info(f"[Server] 开始推理: {task_id}")
         _task_instance.task_dic[work_id] = ""
         try:
             _task_instance.work(audio_path, video_path, work_id, 0, 0, 0, 0)
         except Exception as work_err:
-            # work() 可能抛异常，也可能仅写 task_dic 的 Status.error
             logger.warning(f"[Server] 推理引擎 work() 抛异常: {work_err}")
 
         # 读取引擎输出（即使没有异常也要检查 Status）
@@ -590,9 +615,11 @@ def _run_task(task_id, audio_path, video_path):
         # 仅在格式错误时兜底重试一次，避免无意义重跑
         if _engine_entry_is_error(result_entry) and ("format video error" in (err_msg or "").lower()):
             logger.warning(f"[Server] 命中 format video error，准备兜底重试: {err_msg}")
-            work_dir = os.path.join(UPLOAD_DIR, "work")
-            os.makedirs(work_dir, exist_ok=True)
-            fallback_video = os.path.join(work_dir, f"{task_id}_fallback.mp4")
+            _temp_dir = _cfg.get("temp", "temp_dir", fallback="./temp")
+            if not os.path.isabs(_temp_dir):
+                _temp_dir = os.path.join(_BASE_DIR, _temp_dir)
+            os.makedirs(_temp_dir, exist_ok=True)
+            fallback_video = os.path.join(_temp_dir, f"{task_id}_fallback.mp4")
             _transcode_video_for_engine(video_path, fallback_video)
             _task_instance.task_dic[work_id] = ""
             try:
@@ -600,6 +627,7 @@ def _run_task(task_id, audio_path, video_path):
             except Exception as retry_err:
                 raise RuntimeError(f"推理引擎错误(重试后仍失败): {retry_err}")
             result_entry = _task_instance.task_dic.get(work_id, "")
+        logger.info(f"[Server] 推理完成: {task_id}")
 
         if isinstance(result_entry, (list, tuple)) and len(result_entry) > 2:
             raw_result = result_entry[2]
@@ -630,6 +658,10 @@ def _run_task(task_id, audio_path, video_path):
             dest = os.path.join(task_output_dir, f"{task_id}.mp4")
             shutil.move(raw_result, dest)
             result_path = os.path.realpath(dest)
+            # 校验结果文件大小（过小说明合成失败）
+            _rsize = os.path.getsize(result_path) if os.path.exists(result_path) else 0
+            if _rsize < 1024:
+                raise RuntimeError(f"合成结果文件异常: 大小仅 {_rsize} bytes，可能合成失败")
         else:
             # 搜索可能的结果文件：优先 -r.mp4（含音频的合并结果），排除 _format.mp4（预处理输入）
             possible_results = []
@@ -732,10 +764,10 @@ def check_files():
         h = item.get("hash", "").strip()
         ext = item.get("ext", "").strip()
         if h:
-            exists = _file_exists_in_pool(h, ext)
+            exists = _file_exists(h, ext)
             if exists:
                 # 刷新 mtime 避免被清理
-                p = _pool_path(h, ext)
+                p = _store_path(h, ext)
                 try:
                     os.utime(p, None)
                 except Exception:
@@ -769,7 +801,7 @@ def upload_single_file():
     if not ext:
         ext = os.path.splitext(uploaded.filename or "")[1] or ".bin"
 
-    dest = _pool_path(file_hash, ext)
+    dest = _store_path(file_hash, ext)
 
     # 如果已存在，跳过写入，只刷新 mtime
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
@@ -782,7 +814,7 @@ def upload_single_file():
         if actual_hash != file_hash:
             logger.warning(f"[Upload] hash 不匹配: 期望={file_hash}, 实际={actual_hash}")
             # 仍然保留文件，用实际 hash 重命名
-            real_dest = _pool_path(actual_hash, ext)
+            real_dest = _store_path(actual_hash, ext)
             if dest != real_dest:
                 shutil.move(dest, real_dest)
             dest = real_dest
@@ -827,8 +859,8 @@ def submit_task():
     if not audio_hash or not video_hash:
         return jsonify({"code": 400, "msg": "audio_hash 和 video_hash 不能为空"}), 400
 
-    audio_path = _resolve_to_pool(audio_hash, audio_ext)
-    video_path = _resolve_to_pool(video_hash, video_ext)
+    audio_path = _resolve_file(audio_hash, audio_ext)
+    video_path = _resolve_file(video_hash, video_ext)
 
     if not audio_path:
         return jsonify({"code": 404, "msg": f"音频文件不存在: {audio_hash}{audio_ext}，请先上传"}), 404
@@ -930,19 +962,17 @@ def upload_and_submit():
     })
 
 
-@app.route("/api/heygem/progress", methods=["GET"])
-@auth_required
-def query_progress():
-    """查询任务进度"""
-    task_id = request.args.get("task_id", "").strip()
-    if not task_id:
-        return jsonify({"code": 400, "msg": "缺少 task_id"}), 400
+def _build_progress_data(task_id: str) -> dict:
+    """构建任务进度数据（HTTP 和 WebSocket 共用）。
 
+    Returns:
+        进度数据 dict，如果任务不存在则返回 None。
+    """
     with _tasks_lock:
         task = _tasks.get(task_id)
 
     if not task:
-        return jsonify({"code": 404, "msg": f"任务 {task_id} 不存在"}), 404
+        return None
 
     queue_pos = 0
     if task["status"] == TaskStatus.QUEUED:
@@ -968,7 +998,6 @@ def query_progress():
             _base = os.path.dirname(os.path.abspath(__file__))
             _temp = _cfg.get("temp", "temp_dir", fallback="./temp")
             _temp = os.path.join(_base, _temp) if not os.path.isabs(_temp) else _temp
-            # 检查子进程错误文件
             _ef = os.path.join(_temp, f".error_{work_id}")
             try:
                 if os.path.exists(_ef):
@@ -976,7 +1005,6 @@ def query_progress():
                         _sub_error = f.read().strip()
             except Exception:
                 pass
-            # 读取进度文件
             _pf = os.path.join(_temp, f".progress_{work_id}")
             try:
                 if os.path.exists(_pf):
@@ -984,25 +1012,24 @@ def query_progress():
                         _real_frame = int(f.read().strip())
             except Exception:
                 pass
-        # 子进程报错 → 立即返回错误状态
         if _sub_error:
             status = TaskStatus.ERROR
             progress = 0
             message = f"合成失败: {_sub_error}"
-            # 同步更新 _tasks（主进程可能还没收到引擎的错误传递）
             _update_task(task_id, status=TaskStatus.ERROR, progress=0,
                          message=message, error=_sub_error, finished_at=time.time())
         elif _real_frame > 0 and total_frames > 0:
-            # 从子进程文件获取到真实进度
             current_frame = _real_frame
+            # 动态修正：实际帧数超过预估时，上调 total_frames
+            if current_frame > total_frames:
+                total_frames = int(current_frame * 1.05)
+                _update_task(task_id, total_frames=total_frames)
             pct = min(95, int(_real_frame / total_frames * 90) + 5)
             progress = pct
             status = TaskStatus.SYNTHESIZING
             message = f"合成中 {_real_frame}/{total_frames} 帧 ({pct}%)"
         elif total_frames > 0 and task.get("started_at", 0) > 0:
-            # 估算进度（fallback）：基于已消耗时间和经验速率
             elapsed = time.time() - task["started_at"]
-            # 预处理约 10s，之后约每秒 1 帧（含 chaofen）
             est_frame = max(0, int((elapsed - 10) * 1.0))
             est_frame = min(est_frame, total_frames - 1)
             if est_frame > current_frame:
@@ -1012,7 +1039,6 @@ def query_progress():
                 status = TaskStatus.SYNTHESIZING
                 message = f"合成中... 预计进度 {pct}%"
         elif total_frames == 0 and task.get("started_at", 0) > 0:
-            # 预处理阶段（视频帧数尚未确定），展示基于时间的假进度（5%~20%）
             elapsed = time.time() - task["started_at"]
             pct = min(20, 5 + int(elapsed / 2))
             if pct > progress:
@@ -1020,30 +1046,86 @@ def query_progress():
                 status = TaskStatus.PROCESSING
                 message = f"预处理中... ({int(elapsed)}s)"
         elif status == TaskStatus.QUEUED and task.get("created_at", 0) > 0:
-            # 排队中也展示假进度（1%~5%），避免客户端看到 0%
             elapsed = time.time() - task["created_at"]
             pct = min(5, 1 + int(elapsed / 10))
             if pct > progress:
                 progress = pct
                 message = f"排队等待中... (第{queue_pos}位)"
 
-    return jsonify({
-        "code": 0,
-        "data": {
-            "task_id": task["task_id"],
-            "status": status,
-            "progress": progress,
-            "message": message,
-            "total_frames": total_frames,
-            "current_frame": current_frame,
-            "queue_position": queue_pos,
-            "queue": _get_queue_info(),
-            "created_at": task["created_at"],
-            "started_at": task["started_at"],
-            "finished_at": task["finished_at"],
-            "error": task["error"],
-        }
-    })
+    return {
+        "task_id": task["task_id"],
+        "status": status,
+        "progress": progress,
+        "message": message,
+        "total_frames": total_frames,
+        "current_frame": current_frame,
+        "queue_position": queue_pos,
+        "queue": _get_queue_info(),
+        "created_at": task["created_at"],
+        "started_at": task["started_at"],
+        "finished_at": task["finished_at"],
+        "error": task["error"],
+    }
+
+
+@app.route("/api/heygem/progress", methods=["GET"])
+@auth_required
+def query_progress():
+    """查询任务进度（HTTP 轮询，兼容旧客户端）"""
+    task_id = request.args.get("task_id", "").strip()
+    if not task_id:
+        return jsonify({"code": 400, "msg": "缺少 task_id"}), 400
+    data = _build_progress_data(task_id)
+    if data is None:
+        return jsonify({"code": 404, "msg": f"任务 {task_id} 不存在"}), 404
+    return jsonify({"code": 0, "data": data})
+
+
+# ── WebSocket 进度推送（PC 端直连，替代 HTTP 轮询） ──
+if _FLASK_SOCK_OK and sock is not None:
+    @sock.route('/ws/progress/<task_id>')
+    def ws_progress(ws, task_id):
+        """WebSocket 进度推送：客户端连接后持续推送进度，直到 done/error。
+
+        连接方式: ws://<host>:<port>/ws/progress/<task_id>?token=<api_secret>
+        """
+        # ── 鉴权 ──
+        if API_SECRET:
+            token = request.args.get("token", "").strip()
+            if token != API_SECRET:
+                ws.send(json.dumps({"code": 401, "msg": "鉴权失败"}))
+                return
+
+        # ── 检查任务存在 ──
+        data = _build_progress_data(task_id)
+        if data is None:
+            ws.send(json.dumps({"code": 404, "msg": f"任务 {task_id} 不存在"}))
+            return
+
+        logger.info(f"[WS-Direct] 客户端已连接进度推送: task={task_id}")
+        last_sent = None
+        try:
+            while True:
+                data = _build_progress_data(task_id)
+                if data is None:
+                    ws.send(json.dumps({"code": 404, "msg": "任务已被清理"}))
+                    break
+
+                # 只在数据有变化时推送（减少带宽），终态始终推送
+                is_terminal = data["status"] in (TaskStatus.DONE, TaskStatus.ERROR)
+                data_key = (data["status"], data["progress"], data["current_frame"])
+                if is_terminal or data_key != last_sent:
+                    ws.send(json.dumps({"code": 0, "data": data}))
+                    last_sent = data_key
+
+                if is_terminal:
+                    break
+
+                time.sleep(1)
+        except Exception as e:
+            logger.info(f"[WS-Direct] 连接断开: task={task_id} ({e})")
+
+    logger.info("[Server] WebSocket 进度推送已启用: /ws/progress/<task_id>")
 
 
 @app.route("/api/heygem/download", methods=["GET"])
@@ -1132,11 +1214,9 @@ def upload_asset():
 
     ext = os.path.splitext(uploaded.filename or "")[1] or (".wav" if asset_type == "voice" else ".mp4")
 
-    # 保存到资产目录（先落临时文件，再计算 hash 做去重）
-    asset_subdir = os.path.join(ASSET_DIR, license_key, asset_type)
-    os.makedirs(asset_subdir, exist_ok=True)
+    # 先保存到临时文件，计算 hash 做去重
     tmp_id = str(uuid.uuid4()).replace("-", "")[:12]
-    tmp_path = os.path.join(asset_subdir, f"_tmp_{tmp_id}{ext}")
+    tmp_path = os.path.join(STORE_DIR, f"_tmp_{tmp_id}{ext}")
     uploaded.save(tmp_path)
 
     file_hash = _md5_of_file(tmp_path)
@@ -1161,11 +1241,11 @@ def upload_asset():
             except Exception:
                 pass
 
-            # 刷新文件池 mtime，避免被清理
-            pool_dest = _pool_path(file_hash, ext)
-            if os.path.exists(pool_dest):
+            # 刷新 store 文件 mtime，避免被清理
+            store_dest = _store_path(file_hash, ext)
+            if os.path.exists(store_dest):
                 try:
-                    os.utime(pool_dest, None)
+                    os.utime(store_dest, None)
                 except Exception:
                     pass
 
@@ -1182,23 +1262,13 @@ def upload_asset():
                 }
             })
 
-        # 文件落盘：用 hash 命名，避免同内容重复文件
-        dest_path = os.path.join(asset_subdir, f"{file_hash}{ext}")
+        # 文件落盘到统一存储：用 hash 命名，避免重复
+        dest_path = _store_path(file_hash, ext)
         if not os.path.exists(dest_path) or os.path.getsize(dest_path) == 0:
             shutil.move(tmp_path, dest_path)
         else:
             try:
                 os.remove(tmp_path)
-            except Exception:
-                pass
-
-        # 同时复制到文件池（供合成使用）
-        pool_dest = _pool_path(file_hash, ext)
-        if not os.path.exists(pool_dest):
-            shutil.copy2(dest_path, pool_dest)
-        else:
-            try:
-                os.utime(pool_dest, None)
             except Exception:
                 pass
 
@@ -1393,9 +1463,10 @@ def _handle_ws_task(task_msg: dict):
             file_ext = os.path.splitext(original_filename)[1] or os.path.splitext(file_path)[1]
             file_size = os.path.getsize(file_path)
 
-            # 保存到资产目录
-            asset_file_path = os.path.join(ASSET_DIR, f"{file_hash}{file_ext}")
-            shutil.copy2(file_path, asset_file_path)
+            # 保存到统一存储
+            asset_file_path = _store_path(file_hash, file_ext)
+            if not os.path.exists(asset_file_path) or os.path.getsize(asset_file_path) == 0:
+                shutil.copy2(file_path, asset_file_path)
 
             # 保存到数据库
             now = time.time()
@@ -1443,8 +1514,8 @@ def _handle_ws_task(task_msg: dict):
             if not audio_hash or not video_hash:
                 raise ValueError("缺少 audio_hash 或 video_hash")
 
-            audio_path = _resolve_to_pool(audio_hash, audio_ext)
-            video_path = _resolve_to_pool(video_hash, video_ext)
+            audio_path = _resolve_file(audio_hash, audio_ext)
+            video_path = _resolve_file(video_hash, video_ext)
 
             if not audio_path:
                 raise FileNotFoundError(f"音频文件不存在: {audio_hash}{audio_ext}")
@@ -1555,7 +1626,7 @@ def video_edit():
         video_path = os.path.join(work_dir, f"input{video_ext}")
         video_file.save(video_path)
     elif video_hash:
-        video_path = _pool_path(video_hash, video_ext)
+        video_path = _store_path(video_hash, video_ext)
         if not os.path.exists(video_path):
             return jsonify({"code": 404, "msg": "视频文件不存在，请先上传"}), 404
     else:
@@ -1597,11 +1668,11 @@ def video_edit():
         if not os.path.exists(output_path):
             raise RuntimeError("ffmpeg 未生成输出文件")
 
-        # 将结果存入文件池
+        # 将结果存入统一存储
         result_hash = _md5_of_file(output_path)
-        pool_result = _pool_path(result_hash, ".mp4")
-        if not os.path.exists(pool_result):
-            shutil.copy2(output_path, pool_result)
+        store_result = _store_path(result_hash, ".mp4")
+        if not os.path.exists(store_result):
+            shutil.copy2(output_path, store_result)
 
         logger.info(f"[VideoEdit] 完成: task={task_id} type={edit_type} result_hash={result_hash}")
 
@@ -1758,7 +1829,7 @@ def _edit_pip(video_path, output_path, work_dir):
         pip_path = os.path.join(work_dir, "pip_input.mp4")
         pip_file.save(pip_path)
     elif pip_video_hash:
-        pip_path = _resolve_to_pool(pip_video_hash, pip_video_ext)
+        pip_path = _resolve_file(pip_video_hash, pip_video_ext)
         if not pip_path:
             # 也试下直接作为 URL 下载
             pip_path = ""
@@ -1842,8 +1913,8 @@ def _cleanup_old_files():
             now = time.time()
             cleaned = 0
 
-            # 不清理的固定子目录（pool/assets 由各自策略管理）
-            _protected_dirs = {"pool", "assets", "work"}
+            # 不清理的固定子目录（store 由统一策略管理）
+            _protected_dirs = {"store"}
             for base_dir in [UPLOAD_DIR, OUTPUT_DIR]:
                 if not os.path.isdir(base_dir):
                     continue
@@ -1862,10 +1933,20 @@ def _cleanup_old_files():
                     except Exception as e:
                         logger.warning(f"[Cleanup] 清理失败 {path}: {e}")
 
-            # 清理 pool 目录内过期文件（合成音频保留 1 天）
-            if os.path.isdir(FILE_POOL_DIR):
-                for name in os.listdir(FILE_POOL_DIR):
-                    path = os.path.join(FILE_POOL_DIR, name)
+            # 清理 store 目录内过期文件（保留 1 天）
+            if os.path.isdir(STORE_DIR):
+                for name in os.listdir(STORE_DIR):
+                    if name.startswith("_tmp_"):
+                        # 临时文件超过 1 小时就清理
+                        path = os.path.join(STORE_DIR, name)
+                        try:
+                            if now - os.path.getmtime(path) > 3600:
+                                os.remove(path)
+                                cleaned += 1
+                        except Exception:
+                            pass
+                        continue
+                    path = os.path.join(STORE_DIR, name)
                     try:
                         mtime = os.path.getmtime(path)
                         if now - mtime > FILE_TTL:
@@ -1971,10 +2052,9 @@ def get_args():
 if __name__ == "__main__":
     args = get_args()
 
-    if args.max_concurrent is not None:
-        MAX_CONCURRENT = args.max_concurrent
-        _semaphore = threading.Semaphore(MAX_CONCURRENT)
-        logger.info(f"[Server] 命令行指定最大并发: {MAX_CONCURRENT}")
+    # 强制单任务模式，忽略命令行 --max-concurrent 参数
+    if args.max_concurrent is not None and args.max_concurrent != 1:
+        logger.warning(f"[Server] 忽略 --max-concurrent={args.max_concurrent}，强制使用串行模式(MAX_CONCURRENT=1)")
 
     _init_service()
 
@@ -1988,7 +2068,7 @@ if __name__ == "__main__":
     logger.info(f"[Server] 启动 API: {args.host}:{args.port} (最大并发={MAX_CONCURRENT})")
     logger.info("[Server] 接口列表:")
     logger.info("  POST /api/heygem/check_files   - 检查文件是否已在服务器(hash去重)")
-    logger.info("  POST /api/heygem/upload_file   - 上传单个文件到文件池")
+    logger.info("  POST /api/heygem/upload_file   - 上传单个文件到存储")
     logger.info("  POST /api/heygem/submit        - 通过hash提交合成任务")
     logger.info("  POST /api/heygem/upload         - 上传音视频并提交合成(兼容)")
     logger.info("  GET  /api/heygem/progress       - 查询任务进度")
@@ -2000,5 +2080,7 @@ if __name__ == "__main__":
     logger.info("  POST /api/asset/delete          - 删除音色/数字人")
     logger.info("  POST /api/video/edit            - 视频编辑(字幕/画中画/BGM)")
     logger.info("  GET  /api/video/edit/download   - 下载编辑后视频")
+    if _FLASK_SOCK_OK:
+        logger.info("  WS   /ws/progress/<task_id>     - WebSocket 进度推送(PC端直连)")
 
     app.run(host=args.host, port=args.port, threaded=True)
