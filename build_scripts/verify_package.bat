@@ -55,18 +55,13 @@ if exist "logo.ico" (
     echo   ✗ logo.ico 缺失
     set /a ERROR_COUNT+=1
 )
-if exist "logo.jpg" (
-    echo   ✓ logo.jpg
-) else (
-    echo   ⚠ logo.jpg 缺失（可选）
-)
 
 echo.
 echo [检查5] 验证启动器...
-if exist "ZhiMoAI_Launcher.exe" (
-    echo   ✓ ZhiMoAI_Launcher.exe
+if exist "织梦IP.exe" (
+    echo   ✓ 织梦IP.exe
 ) else (
-    echo   ⚠ ZhiMoAI_Launcher.exe 不存在（打包时会自动构建）
+    echo   ⚠ 织梦IP.exe 不存在（打包时会自动构建）
 )
 
 echo.

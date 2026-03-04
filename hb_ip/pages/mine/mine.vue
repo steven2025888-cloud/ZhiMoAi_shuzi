@@ -106,6 +106,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { getLicenseKey, getExpireTime, logout, isLoggedIn } from '@/utils/storage.js'
 import { listAssets, deleteAsset, uploadAsset } from '@/utils/api.js'
+import { pickAudioFile } from '@/utils/file-picker.js'
 
 const licenseKey = ref(getLicenseKey())
 const expireTime = ref(getExpireTime())
@@ -160,17 +161,16 @@ function formatSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(1) + 'MB'
 }
 
-function uploadVoice() {
-  uni.chooseMessageFile({
-    count: 1, type: 'file',
-    extension: ['.wav', '.mp3', '.m4a', '.aac', '.flac'],
-    success: async (res) => {
-      if (!res.tempFiles?.length) return
-      const file = res.tempFiles[0]
-      const name = file.name ? file.name.replace(/\.\w+$/, '') : '新音色'
-      await doUpload(file.path, 'voice', name)
-    },
-  })
+async function uploadVoice() {
+  try {
+    const { path, name: fileName } = await pickAudioFile()
+    const name = fileName ? fileName.replace(/\.\w+$/, '') : '新音色'
+    await doUpload(path, 'voice', name)
+  } catch (e) {
+    if (e.message !== 'cancel') {
+      uni.showToast({ title: e.message || '选择文件失败', icon: 'none' })
+    }
+  }
 }
 
 function uploadAvatarFile() {

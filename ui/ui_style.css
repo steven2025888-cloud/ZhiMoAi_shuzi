@@ -76,16 +76,16 @@ body,.gradio-container{
 }
 .workspace > .column{gap:12px!important;}
 
-/* ── 面板卡片 ── */
-.panel{
-  background:#000!important;
+/* ── 面板卡片（高优先级，覆盖 Gradio 内部 svelte 作用域 CSS） ── */
+body .gradio-container .panel{
+  background:#fff!important;
   border:1px solid #e5e7eb!important;
   border-radius:16px!important;
   padding:12px!important;
   box-shadow:0 2px 8px rgba(0,0,0,.06)!important;
   transition:all .3s!important;
 }
-.panel:hover{
+body .gradio-container .panel:hover{
   box-shadow:0 4px 16px rgba(0,0,0,.1)!important;
   border-color:#d1d5db!important;
 }
@@ -843,7 +843,7 @@ input[type=color]:hover{
 }
 
 /* ── 工作台面板阴影优化 ── */
-.panel {
+body .gradio-container .panel {
   box-shadow: 0 4px 20px rgba(0,0,0,.06)!important;
   border-radius: 16px!important;
 }
@@ -1039,14 +1039,7 @@ button[value*="AI优化"]:hover {
 }
 
 
-/* ── 强制所有步骤容器应用白色背景 ── */
-.workspace > .column.panel{
-  background:#fff!important;
-  border:1px solid #e5e7eb!important;
-  border-radius:16px!important;
-  padding:16px!important;
-  box-shadow:0 2px 8px rgba(0,0,0,.06)!important;
-}
+/* ── 步骤容器样式（由 .panel 统一控制） ── */
 
 /* Gradio内部容器保持默认 */
 .panel .form,
@@ -1058,14 +1051,7 @@ button[value*="AI优化"]:hover {
 
 
 /* ── 修复Gradio组件背景 ── */
-/* 只有明确标记为panel的才有白色背景和圆角 */
-.workspace > .column.panel{
-  background:#fff!important;
-  border:1px solid #e5e7eb!important;
-  border-radius:16px!important;
-  padding:16px!important;
-  box-shadow:0 2px 8px rgba(0,0,0,.06)!important;
-}
+/* panel 样式统一由 .panel 规则控制 */
 
 
 /* ── component-20 白色背景 ── */
@@ -1076,9 +1062,9 @@ button[value*="AI优化"]:hover {
 }
 
 
-/* ── 全局移除 svelte-1nguped 背景和边框 ── */
-div.svelte-1nguped,
-.svelte-1nguped{
+/* ── 全局移除 svelte-1nguped 背景和边框（排除 .panel） ── */
+div.svelte-1nguped:not(.panel),
+.svelte-1nguped:not(.panel){
   background:transparent!important;
   border:none!important;
 }

@@ -39,8 +39,8 @@
 
       <view class="login-tips">
         <text class="tip-text">· 手机端需要在线版卡密才能使用</text>
-        <text class="tip-text">· 每个卡密支持 1台电脑 + 1部手机</text>
-        <text class="tip-text">· 首次登录将自动绑定当前设备</text>
+        <text class="tip-text">· 每个卡密支持 1台电脑 + 1部手机同时在线</text>
+        <text class="tip-text">· 新手机登录将自动踢掉旧手机会话</text>
         <text class="tip-text">· 音色和数字人从手机直接上传管理</text>
       </view>
     </view>
@@ -51,6 +51,7 @@
 import { ref, onMounted } from 'vue'
 import { login as apiLogin } from '@/utils/api.js'
 import { saveLicense, isLoggedIn } from '@/utils/storage.js'
+import { connect as wsConnect } from '@/utils/websocket.js'
 
 const licenseKey = ref('')
 const loading = ref(false)
@@ -76,11 +77,13 @@ async function handleLogin() {
         license_key: key,
         expire_time: res.expire_time || '',
         online_enabled: res.online_enabled || 0,
-        // 如果服务器没有返回合成服务器配置，使用默认值
         synthesis_server_url: res.synthesis_server_url || 'http://117.50.91.129:8383',
         synthesis_api_secret: res.synthesis_api_secret || '',
+        session_token: res.session_token || '',
       })
       uni.showToast({ title: '登录成功', icon: 'success' })
+      // 登录成功后建立 WS 连接（onLaunch 时未登录所以跳过了）
+      wsConnect()
       setTimeout(() => {
         uni.switchTab({ url: '/pages/index/index' })
       }, 800)

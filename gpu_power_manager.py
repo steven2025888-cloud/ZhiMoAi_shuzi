@@ -62,6 +62,11 @@ class GPUPowerManager:
         self.start_api_template = None  # 兼容：旧模板文件
         self.stop_api_template = None  # 兼容：旧模板文件
 
+        # 日志去重
+        self._last_logged_status = None
+        self._api_params_logged = False
+        self._check_count = 0
+
         # ── 从 DescribeCompShareInstance 拦截到的动态参数 ──
         self._api_params = {
             "headers": {},       # 请求头 (含 u-csrf-token 等)
@@ -195,36 +200,54 @@ class GPUPowerManager:
             print(f"[API] 保存{desc}模板失败: {e}")
 
     def _bind_network_listeners(self):
-        """监听网络请求/响应，从 DescribeCompShareInstance 拦截认证参数和 GPU 状态"""
+        """监听网络请求/响应，拦截认证参数、GPU 状态以及 Start/Stop 操作请求"""
         if not self.page:
             return
 
         async def _on_request(request):
-            """拦截 DescribeCompShareInstance 请求，获取认证头和公共 body 参数"""
+            """拦截 CompShare API 请求，获取认证头和操作参数"""
             try:
                 url = request.url
                 post_data = request.post_data or ""
-                if "DescribeCompShareInstance" not in url and "DescribeCompShareInstance" not in post_data:
-                    return
 
                 headers = dict(request.headers or {})
                 body_pairs = parse_qsl(post_data, keep_blank_values=True)
                 body = {k: v for k, v in body_pairs}
+                action = body.get("Action", "")
 
-                # 保存认证头（u-csrf-token 是关键）
-                self._api_params["headers"] = {
-                    k: v for k, v in headers.items()
-                    if k.lower() not in ("content-length", "host", "cookie")
-                }
-                # 保存公共 body 参数（ProjectId, _user 等后续 Start/Stop 也需要）
-                self._api_params["base_body"] = {
-                    k: v for k, v in body.items()
-                    if k in ("ProjectId", "_user")
-                }
-                print(f"[API] ✓ 已拦截 DescribeCompShareInstance 请求参数")
+                # --- 拦截 DescribeCompShareInstance: 获取认证头和公共参数 ---
+                if "DescribeCompShareInstance" in url or action == "DescribeCompShareInstance":
+                    self._api_params["headers"] = {
+                        k: v for k, v in headers.items()
+                        if k.lower() not in ("content-length", "host", "cookie")
+                    }
+                    self._api_params["base_body"] = {
+                        k: v for k, v in body.items()
+                        if k in ("ProjectId", "_user")
+                    }
+                    if not self._api_params_logged:
+                        self._api_params_logged = True
+                        print(f"[API] 已拦截认证参数")
+
+                # --- 拦截 Start/Stop: 从页面真实点击中捕获完整请求作为模板 ---
+                elif action in ("StartCompShareInstance", "StopCompShareInstance"):
+                    clean_headers = {
+                        k: v for k, v in headers.items()
+                        if k.lower() not in ("content-length", "host", "cookie")
+                    }
+                    template = {"headers": clean_headers, "body": body}
+                    if action == "StartCompShareInstance":
+                        self.start_api_template = template
+                        self._save_api_template(template, START_API_TEMPLATE_FILE, "启动")
+                    else:
+                        self.stop_api_template = template
+                        self._save_api_template(template, STOP_API_TEMPLATE_FILE, "关机")
+                    # 同时更新认证头（页面点击时的 token 是最新的）
+                    self._api_params["headers"] = clean_headers
+                    print(f"[API] ✓ 已从页面点击捕获 {action} 完整参数")
 
             except Exception as e:
-                print(f"[API] 拦截请求参数失败: {e}")
+                print(f"[API] 拦截请求失败: {e}")
 
         async def _on_response(response):
             """拦截 DescribeCompShareInstance 响应，获取实例信息和 GPU 状态"""
@@ -255,9 +278,10 @@ class GPUPowerManager:
                     "Initializing": "starting",
                     "Stopping": "stopping",
                 }
-                self.gpu_status = state_map.get(state, "unknown")
-
-                print(f"[API] ✓ 已拦截实例信息: UHostId={inst.get('UHostId')}, State={state} → gpu_status={self.gpu_status}")
+                new_status = state_map.get(state, "unknown")
+                if new_status != self.gpu_status:
+                    print(f"[API] 实例状态变更: {self.gpu_status} → {new_status}")
+                self.gpu_status = new_status
 
             except Exception as e:
                 print(f"[API] 拦截响应失败: {e}")
@@ -265,66 +289,105 @@ class GPUPowerManager:
         self.page.on("request", lambda req: asyncio.create_task(_on_request(req)))
         self.page.on("response", lambda resp: asyncio.create_task(_on_response(resp)))
 
-    async def _call_compshare_api(self, action: str, extra_body: dict | None = None) -> dict | None:
-        """通用 CompShare API 调用，使用从 DescribeCompShareInstance 拦截到的认证参数。
-        返回响应 JSON dict，失败返回 None。
-        """
-        if not self.context:
-            print(f"[API] 浏览器上下文未就绪，跳过 {action}")
-            return None
+    def _build_api_body(self, action: str, extra_body: dict | None = None, use_template: bool = False) -> dict:
+        """构造 API 请求体。use_template=True 时优先用页面捕获的模板。"""
+        tpl = self.start_api_template if "Start" in action else self.stop_api_template
 
-        # 构造请求体
+        # 优先使用模板（从页面真实点击捕获的完整参数）
+        if use_template and tpl and tpl.get("body"):
+            body = dict(tpl["body"])
+            body["Action"] = action
+            body["_timestamp"] = str(int(time.time() * 1000))
+            if extra_body:
+                body.update(extra_body)
+            return body
+
+        # 从拦截参数构造
         inst = self._api_params.get("instance") or {}
         body = {
             "Action": action,
             "_timestamp": str(int(time.time() * 1000)),
         }
-        # 公共参数（ProjectId, _user 来自拦截的请求 body）
         body.update(self._api_params.get("base_body") or {})
-        # 实例参数（UHostId, Zone, Region 来自拦截的响应）
         if inst.get("UHostId"):
             body["UHostId"] = inst["UHostId"]
         if inst.get("Zone"):
             body["Zone"] = inst["Zone"]
         if inst.get("Region"):
             body["Region"] = inst["Region"]
-        # StopCompShareInstance 需要 BasicImageId
         if action == "StopCompShareInstance" and inst.get("BasicImageId"):
             body["BasicImageId"] = inst["BasicImageId"]
-        # 额外参数
         if extra_body:
             body.update(extra_body)
 
-        # 如果拦截参数未就绪，回退到旧模板文件
-        if not self._api_params.get("ready"):
-            tpl = self.start_api_template if "Start" in action else self.stop_api_template
-            if tpl and tpl.get("body"):
-                body = dict(tpl["body"])
-                body["Action"] = action
-                body["_timestamp"] = str(int(time.time() * 1000))
-                print(f"[API] 使用旧模板文件参数: {action}")
+        # 如果关键参数缺失，回退到模板
+        if not body.get("UHostId") and tpl and tpl.get("body"):
+            body = dict(tpl["body"])
+            body["Action"] = action
+            body["_timestamp"] = str(int(time.time() * 1000))
+            if extra_body:
+                body.update(extra_body)
+            print(f"[API] UHostId 缺失，回退模板")
 
+        return body
+
+    def _get_api_headers(self) -> dict:
+        """获取 API 请求头，优先拦截值，回退模板。"""
         headers = dict(self._api_params.get("headers") or {})
-        # 回退：如果拦截的 headers 为空，从旧模板文件读
         if not headers.get("u-csrf-token"):
             tpl = self.start_api_template or self.stop_api_template
             if tpl and tpl.get("headers"):
                 headers = {k: v for k, v in tpl["headers"].items()
                            if k.lower() not in ("content-length", "host", "cookie")}
+        return headers
 
+    async def _call_compshare_api(self, action: str, extra_body: dict | None = None) -> dict | None:
+        """通用 CompShare API 调用。
+        Start/Stop 操作：先用拦截参数尝试，失败后自动用模板重试一次。
+        返回响应 JSON dict，失败返回 None。
+        """
+        if not self.context:
+            print(f"[API] 浏览器上下文未就绪，跳过 {action}")
+            return None
+
+        headers = self._get_api_headers()
         url = f"https://api.compshare.cn/?Action={action}"
+        is_operation = action in ("StartCompShareInstance", "StopCompShareInstance")
 
+        # 第一次尝试：用拦截参数
+        body = self._build_api_body(action, extra_body, use_template=False)
+        result = await self._do_api_call(url, headers, body, action)
+        if result is not None:
+            return result
+
+        # 操作类 API 失败 → 用模板重试
+        if is_operation:
+            tpl = self.start_api_template if "Start" in action else self.stop_api_template
+            if tpl and tpl.get("body"):
+                print(f"[API] 拦截参数失败，用模板重试 {action}")
+                body = self._build_api_body(action, extra_body, use_template=True)
+                # 模板可能有自己的 headers
+                tpl_headers = tpl.get("headers") or {}
+                if tpl_headers.get("u-csrf-token"):
+                    headers = {k: v for k, v in tpl_headers.items()
+                               if k.lower() not in ("content-length", "host", "cookie")}
+                return await self._do_api_call(url, headers, body, action)
+
+        return None
+
+    async def _do_api_call(self, url: str, headers: dict, body: dict, action: str) -> dict | None:
+        """执行单次 API 请求"""
         try:
             data = urlencode(body)
             resp = await self.context.request.post(url, headers=headers, data=data)
             text = await resp.text()
-            print(f"[API] {action} HTTP {resp.status}: {text[:300]}")
+            print(f"[API] {action} HTTP {resp.status}: {text[:200]}")
 
             if resp.status >= 400:
                 return None
             result = json.loads(text)
             if result.get("RetCode") != 0:
-                print(f"[API] {action} 失败: RetCode={result.get('RetCode')}")
+                print(f"[API] {action} 失败: RetCode={result.get('RetCode')} {result.get('Message','')}")
                 return None
             return result
         except Exception as e:
@@ -418,25 +481,27 @@ class GPUPowerManager:
     #  GPU 状态检查和操作
     # ============================================================
 
-    async def check_gpu_status(self) -> str:
-        """检查 GPU 状态（优先 API，回退页面刷新）"""
+    async def check_gpu_status(self, quiet: bool = False) -> str:
+        """检查 GPU 状态（优先 API，回退页面刷新）。quiet=True 时仅状态变更才打印。"""
+        label_map = {"running": "运行中", "stopped": "已关机", "starting": "启动中", "stopping": "关闭中"}
         try:
             status = await self.check_gpu_status_via_api()
             if status != "unknown":
-                label = {"running": "运行中", "stopped": "已关机", "starting": "启动中", "stopping": "关闭中"}.get(status, status)
-                print(f"[GPU] 状态(API): {label}")
+                if not quiet or status != self._last_logged_status:
+                    print(f"[GPU] 状态: {label_map.get(status, status)}")
+                    self._last_logged_status = status
                 return status
         except Exception as e:
-            print(f"[GPU] API 查询状态失败: {e}")
+            print(f"[GPU] API 查询失败: {e}")
 
         # API 失败时回退到页面刷新
         try:
             await self.page.reload(wait_until="networkidle")
             await asyncio.sleep(2)
-            # 页面刷新会触发 DescribeCompShareInstance → 响应拦截器自动更新 gpu_status
             status = self.gpu_status
-            label = {"running": "运行中", "stopped": "已关机", "starting": "启动中", "stopping": "关闭中"}.get(status, status)
-            print(f"[GPU] 状态(页面): {label}")
+            if not quiet or status != self._last_logged_status:
+                print(f"[GPU] 状态(页面回退): {label_map.get(status, status)}")
+                self._last_logged_status = status
             return status
         except Exception as e:
             print(f"[GPU] 检查状态失败: {e}")
@@ -504,17 +569,32 @@ class GPUPowerManager:
 
         return None
 
-    async def start_gpu(self) -> bool:
-        """启动 GPU（优先 API，回退页面点击）"""
+    async def _ensure_fresh_params(self):
+        """确保 API 参数是最新的（先做一次 Describe 刷新实例信息）"""
+        if self._api_params.get("ready") and self._api_params.get("instance", {}).get("UHostId"):
+            return  # 参数已就绪且有 UHostId
+        print("[API] 参数不完整，刷新页面获取...")
         try:
-            print("[GPU] 开始启动...")
+            await self.ensure_on_console_page()
+            await self.page.reload(wait_until="networkidle")
+            await asyncio.sleep(3)
+        except Exception as e:
+            print(f"[API] 刷新页面失败: {e}")
+
+    async def start_gpu(self) -> bool:
+        """启动 GPU（优先 API，回退页面点击 → 点击时自动捕获参数供下次 API 使用）"""
+        try:
+            print("[GPU] === 开始启动 ===")
+
+            # 确保有最新参数再尝试 API
+            await self._ensure_fresh_params()
 
             # 优先走 API 启动
             api_started = await self._start_gpu_via_api()
             if api_started:
-                print("[GPU] ✓ 已通过 API 发起启动，进入状态轮询...")
+                print("[GPU] 已通过 API 发起启动")
             else:
-                print("[GPU] API 启动失败，回退到页面点击...")
+                print("[GPU] API 启动失败，回退页面点击（会自动捕获参数）")
 
             if not api_started:
                 # 确保在控制台页面并刷新，获取最新按钮状态
@@ -652,17 +732,21 @@ class GPUPowerManager:
             await asyncio.sleep(5)
 
             # 等待启动完成（最多等待5分钟）
-            print("[GPU] 等待 GPU 启动...")
+            print("[GPU] 等待启动...")
             for i in range(60):
                 await asyncio.sleep(5)
-                status = await self.check_gpu_status()
+                status = await self.check_gpu_status(quiet=True)
                 if status == "running":
-                    print("[GPU] ✓ GPU 启动成功")
+                    print("[GPU] ✓ 启动成功")
                     return True
+                if status in ("stopping", "stopped"):
+                    print(f"[GPU] 启动中断 — 检测到状态变为 {status}，放弃等待")
+                    return False
                 elapsed = (i + 1) * 5
-                print(f"[GPU] 等待启动... ({elapsed}s)")
+                if elapsed % 30 == 0:  # 每30秒打印一次
+                    print(f"[GPU] 等待启动... {elapsed}s")
 
-            print("[GPU] ⚠️  启动超时（5分钟）")
+            print("[GPU] ⚠ 启动超时(5min)")
             return False
 
         except Exception as e:
@@ -674,7 +758,18 @@ class GPUPowerManager:
     async def stop_gpu(self) -> bool:
         """关闭 GPU"""
         try:
-            print("[GPU] 开始关闭...")
+            print("[GPU] === 开始关机 ===")
+
+            # ★ 取消正在进行的开机任务
+            if self.gpu_start_task and not self.gpu_start_task.done():
+                self.gpu_start_task.cancel()
+                try:
+                    await self.gpu_start_task
+                except asyncio.CancelledError:
+                    pass
+                self.gpu_start_task = None
+                print("[GPU] 已取消进行中的开机任务")
+            self.has_pending_task = False
 
             # 确保在控制台页面
             await self.ensure_on_console_page()
@@ -797,38 +892,47 @@ class GPUPowerManager:
 
     def _schedule_gpu_start(self, trigger: str, request_id: str | None = None):
         """异步调度开机，避免阻塞 WS 消息循环"""
-        self.has_pending_task = True
-        self.last_task_time = datetime.now()
-
-        if self.gpu_start_task and not self.gpu_start_task.done():
-            print(f"[GPU] 开机任务已在进行中，忽略重复触发: trigger={trigger}")
+        # ★ 关机中不接受开机请求
+        if self.gpu_status in ("stopping",):
+            print(f"[GPU] 正在关机，忽略开机请求: {trigger}")
             return
 
+        if self.gpu_start_task and not self.gpu_start_task.done():
+            # 已有开机任务运行中，只更新时间，不重复调度
+            self.last_task_time = datetime.now()
+            return
+
+        self.has_pending_task = True
+        self.last_task_time = datetime.now()
+        print(f"[GPU] 调度开机: trigger={trigger}")
         self.gpu_start_task = asyncio.create_task(self._start_gpu_worker(trigger, request_id))
 
     async def _start_gpu_worker(self, trigger: str, request_id: str | None = None):
         """后台开机执行器（带锁，防重复开机）"""
         async with self.gpu_op_lock:
             try:
+                # ★ 再次检查，可能在等锁期间已被关机流程取消
+                if self.gpu_status in ("stopping",):
+                    print(f"[GPU] worker: 正在关机，取消开机")
+                    return
+
                 status = await self.check_gpu_status()
                 if status == "running":
                     self.has_pending_task = False
                     self.last_task_time = datetime.now()
-                    print(f"[GPU] 已在运行中，无需开机: trigger={trigger}")
-                    # 即使已在运行，也广播一次在线状态给所有客户端
+                    print(f"[GPU] 已在运行，无需开机")
                     await self._broadcast_gpu_online(request_id=request_id)
                     return
 
-                print(f"[GPU] 收到开机触发，开始开机: trigger={trigger}, request_id={request_id}")
+                print(f"[GPU] 开始开机: trigger={trigger}")
                 success = await self.start_gpu()
                 if success:
                     self.has_pending_task = False
                     self.last_task_time = datetime.now()
-                    print("[GPU] 后台开机成功")
-                    # 广播 gpu.power.online 给所有客户端
+                    print("[GPU] ✓ 开机成功")
                     await self._broadcast_gpu_online(request_id=request_id)
                 else:
-                    print("[GPU] 后台开机失败")
+                    print("[GPU] ✗ 开机失败")
                     if request_id:
                         await self._send_ws_message({
                             "type": "gpu.power.boot.result",
@@ -837,8 +941,11 @@ class GPUPowerManager:
                             "status": "failed",
                             "msg": "GPU 开机失败",
                         })
+            except asyncio.CancelledError:
+                print("[GPU] worker: 开机任务被取消")
+                raise
             except Exception as e:
-                print(f"[GPU] 后台开机异常: {e}")
+                print(f"[GPU] worker: 开机异常: {e}")
                 if request_id:
                     await self._send_ws_message({
                         "type": "gpu.power.boot.result",
@@ -849,12 +956,7 @@ class GPUPowerManager:
                     })
 
     async def _broadcast_gpu_online(self, request_id: str | None = None):
-        """通知客户端 GPU 机器已启动（但服务可能尚未就绪）。
-
-        注意：真正的 gpu.power.online 由 run_server.py 的 ws_client 在 Flask
-        服务就绪后发送。gpu_power_manager 只发送 gpu.power.booted 表示机器已开机，
-        避免客户端在服务未就绪时就尝试连接 API 导致 connection refused。
-        """
+        """通知客户端 GPU 机器已启动（但服务可能尚未就绪）。"""
         payload = {
             "type": "gpu.power.booted",
             "status": "booted",
@@ -864,10 +966,7 @@ class GPUPowerManager:
         if request_id:
             payload["request_id"] = request_id
         sent = await self._send_ws_message(payload)
-        if sent:
-            print("[WS] ✓ 已广播 gpu.power.booted（等待 run_server.py 发送 gpu.power.online）")
-        else:
-            print("[WS] ✗ 广播 gpu.power.booted 失败（WS 未连接）")
+        print(f"[WS] 广播 gpu.power.booted: {'OK' if sent else 'FAIL'}")
 
     async def _refresh_and_report_status(self, request_id: str):
         """后台刷新 GPU 精确状态并通过 WS 上报"""
@@ -912,56 +1011,40 @@ class GPUPowerManager:
 
                     try:
                         async for raw in ws:
-                            # 打印完整的消息内容（用于调试）
-                            print(f"[WS] 收到完整消息: {raw}")
                             try:
                                 data = json.loads(raw)
                                 msg_type = data.get("type", "")
 
                                 if msg_type == "registered":
-                                    print(f"[WS] ✓ 服务端确认注册: {data.get('role', '')}")
+                                    print(f"[WS] 注册成功: {data.get('role', '')}")
 
                                 elif msg_type == "pong":
-                                    # 心跳消息，不打印
                                     pass
 
-                                # 监听所有 GPU 任务类型
                                 elif msg_type in ["url", "chatglm_video", "gpu.job.submit", "gpu_task"]:
-                                    # 收到任务，标记有待处理任务
+                                    print(f"[WS] 收到任务: {msg_type}")
                                     self._schedule_gpu_start(trigger=msg_type)
-                                    print(f"[WS] ✓✓✓ 检测到 GPU 任务: {msg_type} ✓✓✓")
-                                    print(f"[WS] 任务详情: {data}")
-                                    print(f"[WS] 已设置 has_pending_task=True, last_task_time={self.last_task_time}")
 
-                                # 监听 GPU 开机请求
                                 elif msg_type == "gpu.power.boot":
-                                    print(f"[WS] ✓✓✓ 收到 GPU 开机请求: {data} ✓✓✓")
+                                    print(f"[WS] 收到开机请求 rid={data.get('request_id','')}")
                                     self._schedule_gpu_start(
                                         trigger=msg_type,
                                         request_id=data.get("request_id"),
                                     )
 
-                                # 监听 GPU 任务活跃通知（run_server.py 有任务在处理）
                                 elif msg_type == "gpu.task.active":
                                     self.has_pending_task = True
                                     self.last_task_time = datetime.now()
-                                    print(f"[WS] ✓ GPU 有活跃任务(push): task_id={data.get('task_id','')}, task_type={data.get('task_type','')}")
+                                    print(f"[WS] 活跃任务: {data.get('task_type','')}/{data.get('task_id','')}")
 
-                                # 监听 gpu.task.query 响应（主动拉取结果）
                                 elif msg_type == "gpu.task.query.response":
                                     active_count = data.get("active_count", 0)
                                     has_recent = data.get("has_recent_active", False)
-                                    worker_online = data.get("worker_online", False)
                                     if active_count > 0 or has_recent:
                                         self.last_task_time = datetime.now()
-                                        print(f"[WS] ✓ 远程有活跃任务(pull): count={active_count}, recent={has_recent}, worker={worker_online}")
-                                    else:
-                                        print(f"[WS] 远程无活跃任务: count={active_count}, worker={worker_online}")
+                                        print(f"[WS] 远程任务: count={active_count} recent={has_recent}")
 
-                                # 监听 GPU 状态查询请求
                                 elif msg_type == "gpu.status.query":
-                                    print(f"[WS] 收到 GPU 状态查询: {data}")
-                                    # 快速返回缓存状态，同时异步刷新
                                     cached = self.gpu_status
                                     await self._send_ws_message({
                                         "type": "gpu.status.response",
@@ -969,15 +1052,14 @@ class GPUPowerManager:
                                         "request_id": data.get("request_id", ""),
                                         "source": "gpu_monitor",
                                     })
-                                    # 后台刷新一次精确状态
                                     asyncio.create_task(self._refresh_and_report_status(
                                         data.get("request_id", "")))
 
                                 else:
-                                    print(f"[WS] 其他消息类型: {msg_type}, 完整数据: {data}")
+                                    print(f"[WS] {msg_type}: {raw[:120]}")
 
                             except json.JSONDecodeError:
-                                print(f"[WS] 无效 JSON: {raw}")
+                                print(f"[WS] 无效JSON: {raw[:80]}")
                     finally:
                         heartbeat.cancel()
                         try:
@@ -1032,51 +1114,39 @@ class GPUPowerManager:
 
     async def _check_and_manage_gpu(self):
         """检查并管理 GPU 状态"""
+        self._check_count += 1
         try:
-            # 检查 GPU 状态
-            status = await self.check_gpu_status()
-
-            # 检查是否有待处理任务
+            status = await self.check_gpu_status(quiet=True)
             has_task = self.has_pending_task
 
-            # 记录当前状态
-            idle_time_str = "N/A"
+            idle_sec = 0
             if self.last_task_time:
-                idle_time = (datetime.now() - self.last_task_time).total_seconds()
-                idle_time_str = f"{idle_time:.0f}s"
+                idle_sec = (datetime.now() - self.last_task_time).total_seconds()
 
-            print(f"[Check] GPU={status}, 有任务={has_task}, 最后任务时间={self.last_task_time}, 空闲={idle_time_str}")
+            # 每 30 次(~5min)输出一次摘要，或有待处理任务时输出
+            if self._check_count % 30 == 0 or has_task:
+                print(f"[Check] GPU={status} task={has_task} idle={idle_sec:.0f}s")
 
             if has_task and status == "stopped":
                 if self._is_start_in_progress():
-                    print("[Check] 开机流程进行中，跳过重复启动")
                     return
-                # 有任务且 GPU 已关机，启动 GPU
-                print("[Check] ✓✓✓ 检测到 GPU 任务，准备启动 GPU ✓✓✓")
+                print("[Check] 有任务+已关机 → 启动")
                 success = await self.start_gpu()
                 if success:
-                    # 重置任务标记和时间
                     self.has_pending_task = False
                     self.last_task_time = datetime.now()
-                    print(f"[Check] ✓ GPU 启动成功，开始计时")
+                    print("[Check] ✓ 启动成功")
                 else:
-                    print(f"[Check] ✗ GPU 启动失败")
+                    print("[Check] ✗ 启动失败")
 
             elif status == "running":
-                # GPU 运行中，检查空闲时间
                 if has_task:
-                    # 有新任务，更新最后任务时间
                     self.last_task_time = datetime.now()
                     self.has_pending_task = False
-                    print("[Check] ✓ 检测到新任务，更新最后任务时间")
                 elif self.last_task_time:
-                    # 无新任务，检查空闲时间
-                    idle_time = (datetime.now() - self.last_task_time).total_seconds()
-                    remaining = IDLE_TIMEOUT - idle_time
-                    print(f"[Check] GPU 空闲时间: {idle_time:.0f}s / {IDLE_TIMEOUT}s (还剩 {remaining:.0f}s)")
+                    remaining = IDLE_TIMEOUT - idle_sec
 
-                    # ── 主动拉取：每 30 秒查询 dsp.php 是否有活跃任务 ──
-                    # 这是推送通知 (gpu.task.active) 的可靠备份
+                    # 每 30 秒主动拉取远程任务状态
                     _now = time.time()
                     _just_queried = False
                     if _now - self._last_query_time > 30:
@@ -1087,34 +1157,30 @@ class GPUPowerManager:
                                 "type": "gpu.task.query",
                                 "request_id": f"tq_{int(_now)}",
                             })
-                            print("[Check] 已发送 gpu.task.query（主动拉取任务状态）")
-                        except Exception as qe:
-                            print(f"[Check] gpu.task.query 发送失败: {qe}")
+                        except Exception:
+                            pass
 
-                    if idle_time >= IDLE_TIMEOUT:
-                        # 刚发了查询还没收到响应 → 跳过本次关机判断，等下一轮
+                    if idle_sec >= IDLE_TIMEOUT:
                         if _just_queried:
-                            print(f"[Check] ⚠️  空闲达 {IDLE_TIMEOUT}s 但刚发了查询，等待响应后再决定")
+                            print(f"[Check] 空闲达标但刚查询，等下一轮")
                         else:
-                            print(f"[Check] ⚠️  GPU 空闲超过 {IDLE_TIMEOUT}s (30分钟)，准备关机")
+                            print(f"[Check] 空闲 {idle_sec:.0f}s ≥ {IDLE_TIMEOUT}s → 关机")
                             success = await self.stop_gpu()
                             if success:
                                 self.last_task_time = None
-                                print(f"[Check] ✓ GPU 已关机")
+                                print("[Check] ✓ 已关机")
                             else:
-                                print(f"[Check] ✗ GPU 关机失败")
+                                print("[Check] ✗ 关机失败")
+                    elif remaining <= 300 and self._check_count % 6 == 0:  # 最后5分钟每分钟提示
+                        print(f"[Check] 空闲 {idle_sec:.0f}s，还剩 {remaining:.0f}s 关机")
                 else:
-                    # 首次检测到 GPU 运行且无任务，记录时间
                     self.last_task_time = datetime.now()
-                    print("[Check] 首次检测到 GPU 运行，开始计时空闲时间")
+                    print("[Check] GPU运行中，开始计时")
 
-            elif status == "stopped":
-                # GPU 已关机且无任务，什么都不做
-                if not has_task:
-                    print("[Check] GPU 已关机，等待任务...")
+            # stopped + no task: 静默等待
 
         except Exception as e:
-            print(f"[Check] GPU 管理异常: {e}")
+            print(f"[Check] 异常: {e}")
             import traceback
             traceback.print_exc()
 

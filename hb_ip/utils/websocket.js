@@ -2,7 +2,7 @@
  * WebSocket 客户端工具
  * 手机端通过 WS 与服务器通信，服务器中转给 PC 端
  */
-import { getLicenseKey, getServerUrl } from './storage.js'
+import { getLicenseKey, getServerUrl, logout as storageClearLogin } from './storage.js'
 
 let _ws = null
 let _connected = false
@@ -81,6 +81,23 @@ export function connect() {
       const data = JSON.parse(res.data)
       const type = data.type || ''
       console.log('[WS] 收到:', type, JSON.stringify(data).substring(0, 200))
+
+      // 手机端被踢掉：新登录互踢
+      if (type === 'kicked') {
+        console.warn('[WS] 被踢下线:', data.msg)
+        storageClearLogin()
+        disconnect()
+        uni.showModal({
+          title: '下线通知',
+          content: data.msg || '您的账号已在其他设备登录',
+          showCancel: false,
+          success: () => {
+            uni.reLaunch({ url: '/pages/login/login' })
+          }
+        })
+        return
+      }
+
       _emit(type, data)
     } catch (e) {
       console.error('[WS] 解析失败:', res.data)
@@ -187,6 +204,26 @@ export function syncToDevice(targetDevice, syncData) {
     target_device: targetDevice,
     ...syncData,
   })
+}
+
+/**
+ * 发送 GPU 开机请求（与 PC 端行为一致）
+ * Dsp.php 收到 gpu.power.boot 后直接 _notifyGpuMonitors → gpu_power_manager.py
+ * @returns {string|null} requestId 或 null（未连接时）
+ */
+export function sendGpuBootRequest() {
+  const requestId = `boot_m_${Date.now()}`
+  const ok = send({
+    type: 'gpu.power.boot',
+    request_id: requestId,
+    msg: '手机端请求启动GPU',
+  })
+  if (ok) {
+    console.log('[WS] 已发送 gpu.power.boot:', requestId)
+    return requestId
+  }
+  console.warn('[WS] gpu.power.boot 发送失败（未连接）')
+  return null
 }
 
 /**

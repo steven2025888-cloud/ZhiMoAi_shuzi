@@ -3,7 +3,8 @@
  * PHP服务器：登录 / TTS
  * 合成服务器(run_server.py)：资产管理 / 视频合成 / 视频编辑
  */
-import { getLicenseKey, getMachineCode, getServerUrl, getSynthUrl, getSynthSecret, getLipvoiceSign } from './storage.js'
+import { getLicenseKey, getMachineCode, getServerUrl, getSynthUrl, getSynthSecret, getLipvoiceSign, getSessionToken } from './storage.js'
+import { sendGpuBootRequest } from './websocket.js'
 
 // ── PHP 服务器请求 ──
 function request(path, options = {}) {
@@ -12,6 +13,7 @@ function request(path, options = {}) {
   const url = `${baseUrl}${path}`
   const licenseKey = getLicenseKey()
   const machineCode = getMachineCode()
+  const sessionToken = getSessionToken()
 
   return new Promise((resolve, reject) => {
     uni.request({
@@ -22,6 +24,7 @@ function request(path, options = {}) {
         'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
         'X-Machine-Code': machineCode,
         'X-Device-Type': 'mobile',
+        ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
         ...(options.header || {}),
       },
       data: options.data || {},
@@ -46,14 +49,21 @@ export function downloadFileWithAuth(url, timeout = 60000) {
   const machineCode = getMachineCode()
   const lipvoiceSign = getLipvoiceSign()
 
-  // 如果没有sign，使用代理下载
-  if (!lipvoiceSign && url.includes('lipvoice.cn')) {
-    console.log('[下载] 没有sign，使用代理下载')
-    const baseUrl = getServerUrl().replace(/\/+$/, '')
-    url = `${baseUrl}/api/dsp/voice/tts/download?voice_url=${encodeURIComponent(url)}`
-  } else if (lipvoiceSign) {
-    console.log('[下载] 使用sign直接下载:', url)
+  if (url.includes('lipvoice.cn')) {
+    if (lipvoiceSign) {
+      // sign 同时加到 URL 参数和 header，确保兼容
+      const sep = url.includes('?') ? '&' : '?'
+      url = `${url}${sep}sign=${encodeURIComponent(lipvoiceSign)}`
+      console.log('[下载] 使用sign直接下载:', url)
+    } else {
+      // 没有 sign，走服务器代理
+      console.log('[下载] 没有sign，使用代理下载')
+      const baseUrl = getServerUrl().replace(/\/+$/, '')
+      url = `${baseUrl}/api/dsp/voice/tts/download?voice_url=${encodeURIComponent(url)}`
+    }
   }
+
+  const sessionToken = getSessionToken()
 
   return new Promise((resolve, reject) => {
     uni.downloadFile({
@@ -63,13 +73,18 @@ export function downloadFileWithAuth(url, timeout = 60000) {
         'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
         'X-Machine-Code': machineCode,
         'X-Device-Type': 'mobile',
-        'sign': lipvoiceSign,
+        ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+        ...(lipvoiceSign ? { 'sign': lipvoiceSign } : {}),
       },
       success: (res) => {
+        console.log('[下载] 结果:', res.statusCode, res.tempFilePath ? '有文件' : '无文件')
         if (res.statusCode === 200 && res.tempFilePath) resolve(res)
-        else reject(new Error('下载失败'))
+        else reject(new Error(`下载失败 HTTP ${res.statusCode}`))
       },
-      fail: reject,
+      fail: (err) => {
+        console.error('[下载] 网络错误:', err)
+        reject(new Error(err.errMsg || '下载失败'))
+      },
     })
   })
 }
@@ -98,7 +113,13 @@ function synthRequest(path, options = {}) {
           const d = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
           resolve(d)
         } else {
-          reject(new Error(`HTTP ${res.statusCode}`))
+          // 解析服务器返回的错误消息（如 404 文件不存在、401 鉴权失败等）
+          let errMsg = `HTTP ${res.statusCode}`
+          try {
+            const d = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+            if (d && d.msg) errMsg = d.msg
+          } catch (e) { /* ignore */ }
+          reject(new Error(errMsg))
         }
       },
       fail: reject,
@@ -139,6 +160,7 @@ export function uploadVoiceModel(filePath, name) {
   const baseUrl = getServerUrl()
   const licenseKey = getLicenseKey()
   const machineCode = getMachineCode()
+  const sessionToken = getSessionToken()
 
   return new Promise((resolve, reject) => {
     uni.uploadFile({
@@ -150,6 +172,7 @@ export function uploadVoiceModel(filePath, name) {
         'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
         'X-Machine-Code': machineCode,
         'X-Device-Type': 'mobile',
+        ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
       },
       timeout: 600000,
       success(res) {
@@ -184,6 +207,14 @@ export function ttsDownloadUrl(voiceUrl) {
   return `${baseUrl}/api/dsp/voice/tts/download?voice_url=${encodeURIComponent(voiceUrl)}`
 }
 
+// AI 文案优化
+export function aiOptimizeText(text) {
+  return request('/api/dsp/ai/optimize-text', {
+    data: { text },
+    timeout: 60000,
+  })
+}
+
 // 查询合成记录列表
 export function ttsHistory(page = 1, limit = 20) {
   return request('/api/dsp/voice/tts/history', {
@@ -207,6 +238,7 @@ export function ttsHistoryDetail(id) {
 export function uploadAsset(filePath, assetType, name) {
   const licenseKey = getLicenseKey()
   const machineCode = getMachineCode()
+  const sessionToken = getSessionToken()
 
   // 使用 API 端接口，而不是直接连接 GPU
   const baseUrl = getServerUrl().replace(/\/+$/, '')
@@ -224,6 +256,41 @@ export function uploadAsset(filePath, assetType, name) {
         'Authorization': licenseKey ? `Bearer ${licenseKey}` : '',
         'X-Machine-Code': machineCode,
         'X-Device-Type': 'mobile',
+        ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+      },
+      timeout: 600000,
+      success(res) {
+        if (res.statusCode === 200) {
+          const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+          resolve(data)
+        } else {
+          reject(new Error(`Upload HTTP ${res.statusCode}`))
+        }
+      },
+      fail: reject,
+    })
+  })
+}
+
+// 直连 GPU 服务器上传资产（跨过 PHP，适用于 GPU 在线时）
+export function synthUploadAsset(filePath, assetType, name) {
+  const baseUrl = getSynthUrl()
+  if (!baseUrl) return Promise.reject(new Error('合成服务器未配置'))
+  const secret = getSynthSecret()
+  const licenseKey = getLicenseKey()
+
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: `${baseUrl.replace(/\/+$/, '')}/api/asset/upload`,
+      filePath,
+      name: 'file',
+      formData: {
+        asset_type: assetType,
+        name: name,
+        license_key: licenseKey || '',
+      },
+      header: {
+        ...(secret ? { 'Authorization': `Bearer ${secret}` } : {}),
       },
       timeout: 600000,
       success(res) {
@@ -253,48 +320,133 @@ export function deleteAsset(assetId) {
 }
 
 // ── GPU 电源管理 ──
-// 检查 GPU 状态
-export function gpuStatus() {
-  return request('/api/gpu/status', { method: 'GET', timeout: 10000 })
+
+// 纯状态检查（不触发开机），用于页面初始化等只需要显示状态的场景
+export async function gpuStatusCheck() {
+  const synthUrl = getSynthUrl()
+  if (synthUrl) {
+    try {
+      const direct = await synthRequest('/api/heygem/health', { method: 'GET', timeout: 5000 })
+      if (direct && direct.code === 0) {
+        console.log('[GPU] 状态检查: 在线')
+        return { code: 0, data: { online: true }, msg: 'GPU在线' }
+      }
+    } catch (e) {
+      console.log('[GPU] 状态检查: 离线 -', e.message)
+    }
+  }
+  return { code: -1, data: { online: false }, msg: 'GPU离线' }
 }
 
-// 请求开机
-export function gpuPowerOn() {
-  return request('/api/gpu/power/on', { method: 'POST', timeout: 30000 })
+// 检查 GPU 状态 + 离线时自动发送开机请求（用于需要 GPU 的操作：合成、上传数字人等）
+export async function gpuStatus() {
+  // 先做纯检查
+  const checkRes = await gpuStatusCheck()
+  if (checkRes.data && checkRes.data.online) {
+    return checkRes
+  }
+  // 离线 → 发送开机请求
+  const bootReqId = sendGpuBootRequest()
+  const licenseKey = getLicenseKey()
+  try {
+    const proxyRes = await request('/api/heygem/health/proxy', {
+      method: 'POST',
+      data: { license_key: licenseKey },
+      timeout: 10000,
+    })
+    console.log('[GPU] health/proxy 返回:', JSON.stringify(proxyRes))
+  } catch (e) {
+    console.log('[GPU] health/proxy 调用失败:', e.message)
+  }
+  console.log(`[GPU] 状态: 离线，已发送开机请求 (boot_request=${bootReqId || 'ws未连接'})`)
+  return { code: -1, data: { online: false }, msg: 'GPU离线' }
 }
 
-// 轮询等待 GPU 上线
-export async function waitForGpuOnline(maxWaitMs = 180000, pollIntervalMs = 5000) {
+// 请求开机（显式调用）
+export async function gpuPowerOn() {
+  return gpuStatus()
+}
+
+// 轮询等待 GPU 上线（直连 GPU HTTP 健康检查）
+export async function waitForGpuOnline(maxWaitMs = 1800000, pollIntervalMs = 5000) {
   const startTime = Date.now()
   while (Date.now() - startTime < maxWaitMs) {
     try {
       const res = await gpuStatus()
-      if (res.code === 0 && res.data && res.data.online) {
+      if (res.data && res.data.online) {
         return { success: true, data: res.data }
       }
     } catch (e) {
       console.log('[GPU] 状态检查失败:', e.message)
     }
+    const elapsed = Math.round((Date.now() - startTime) / 1000)
+    console.log(`[GPU] 等待中... ${elapsed}s / ${maxWaitMs / 1000}s`)
     await new Promise(r => setTimeout(r, pollIntervalMs))
   }
   return { success: false, error: 'GPU 开机超时' }
 }
 
-// ── HeyGem 在线合成（直连合成服务器） ──
-export function heygemHealth() {
-  return synthRequest('/api/heygem/health', { method: 'GET', timeout: 10000 })
+// ── HeyGem 在线合成 ──
+// 健康检查：优先直连 GPU，失败则走 PHP 代理
+export async function heygemHealth() {
+  // 先尝试直连 GPU 服务器
+  const synthUrl = getSynthUrl()
+  if (synthUrl) {
+    try {
+      const direct = await synthRequest('/api/heygem/health', { method: 'GET', timeout: 5000 })
+      if (direct && direct.code === 0) return direct
+    } catch (e) {
+      console.log('[HeyGem] 直连健康检查失败，走代理:', e.message)
+    }
+  }
+  // 回退到 PHP 代理
+  const proxy = await gpuStatus()
+  if (proxy.data && proxy.data.online) {
+    return { code: 0, data: { initialized: true }, msg: 'GPU 在线（代理）' }
+  }
+  return { code: -1, msg: proxy.msg || 'GPU 离线' }
 }
 
-export function heygemSubmitByHash(audioHash, audioExt, videoHash, videoExt) {
-  return synthRequest('/api/heygem/submit', {
-    data: { audio_hash: audioHash, audio_ext: audioExt, video_hash: videoHash, video_ext: videoExt },
+// 任务提交：优先直连 GPU，失败则走 PHP 代理（支持离线排队）
+export async function heygemSubmitByHash(audioHash, audioExt, videoHash, videoExt) {
+  const synthUrl = getSynthUrl()
+  const licenseKey = getLicenseKey()  // WS 进度推送路由用
+  // 先尝试直连 GPU
+  if (synthUrl) {
+    try {
+      const direct = await synthRequest('/api/heygem/submit', {
+        data: { audio_hash: audioHash, audio_ext: audioExt, video_hash: videoHash, video_ext: videoExt, license_key: licenseKey },
+        timeout: 30000,
+      })
+      if (direct && direct.code === 0) return direct
+    } catch (e) {
+      console.log('[HeyGem] 直连提交失败，走代理:', e.message)
+    }
+  }
+  // 回退到 PHP 代理（HeyGemTaskController::submit，支持离线排队）
+  return request('/api/heygem/task/submit', {
+    data: { audio_hash: audioHash, audio_ext: audioExt, video_hash: videoHash, video_ext: videoExt, license_key: licenseKey },
     timeout: 30000,
   })
 }
 
-export function heygemProgress(taskId) {
-  return synthRequest(`/api/heygem/progress?task_id=${taskId}`, {
+// 进度查询：优先直连 GPU，失败则走 PHP 代理
+export async function heygemProgress(taskId) {
+  const synthUrl = getSynthUrl()
+  if (synthUrl) {
+    try {
+      const direct = await synthRequest(`/api/heygem/progress?task_id=${taskId}`, {
+        method: 'GET', timeout: 15000,
+      })
+      if (direct) return direct
+    } catch (e) {
+      console.log('[HeyGem] 直连进度查询失败，走代理:', e.message)
+    }
+  }
+  // 回退到 PHP 代理
+  return request('/api/heygem/task/status', {
     method: 'GET',
+    data: { task_id: taskId },
     timeout: 15000,
   })
 }
@@ -327,6 +479,37 @@ export function videoEditUpload(filePath, editType, formData = {}) {
           resolve(typeof res.data === 'string' ? JSON.parse(res.data) : res.data)
         } else {
           reject(new Error(`Edit HTTP ${res.statusCode}`))
+        }
+      },
+      fail: reject,
+    })
+  })
+}
+
+// 上传文件到 GPU 文件池（返回 hash）
+export async function uploadFileToPool(filePath) {
+  const baseUrl = getSynthUrl()
+  if (!baseUrl) throw new Error('合成服务器未配置')
+  const secret = getSynthSecret()
+
+  // 先计算文件 hash（用随机临时 hash）
+  const tmpHash = `tmp_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
+  const ext = '.mp4'
+
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: `${baseUrl}/api/heygem/upload_file`,
+      filePath,
+      name: 'file',
+      formData: { hash: tmpHash, ext },
+      header: secret ? { 'Authorization': `Bearer ${secret}` } : {},
+      timeout: 600000,
+      success(res) {
+        if (res.statusCode === 200) {
+          const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+          resolve(data) // { code: 0, data: { hash, server_path } }
+        } else {
+          reject(new Error(`Upload HTTP ${res.statusCode}`))
         }
       },
       fail: reject,

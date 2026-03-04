@@ -63,26 +63,26 @@
 			{
 				"pagePath": "pages/index/index",
 				"text": "首页",
-				"iconPath": "static/tab-home.png",
-				"selectedIconPath": "static/tab-home-active.png"
+				"iconPath": "/static/tab-home.png",
+				"selectedIconPath": "/static/tab-home-active.png"
 			},
 			{
 				"pagePath": "pages/tts/tts",
 				"text": "语音",
-				"iconPath": "static/tab-voice.png",
-				"selectedIconPath": "static/tab-voice-active.png"
+				"iconPath": "/static/tab-voice.png",
+				"selectedIconPath": "/static/tab-voice-active.png"
 			},
 			{
 				"pagePath": "pages/synthesis/synthesis",
 				"text": "合成",
-				"iconPath": "static/tab-video.png",
-				"selectedIconPath": "static/tab-video-active.png"
+				"iconPath": "/static/tab-video.png",
+				"selectedIconPath": "/static/tab-video-active.png"
 			},
 			{
 				"pagePath": "pages/mine/mine",
 				"text": "我的",
-				"iconPath": "static/tab-mine.png",
-				"selectedIconPath": "static/tab-mine-active.png"
+				"iconPath": "/static/tab-mine.png",
+				"selectedIconPath": "/static/tab-mine-active.png"
 			}
 		]
 	},

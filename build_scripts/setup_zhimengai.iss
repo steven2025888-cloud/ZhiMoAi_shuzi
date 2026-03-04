@@ -69,6 +69,8 @@ PrivilegesRequired=admin
 WizardStyle=modern
 WizardSizePercent=120,120
 DisableProgramGroupPage=yes
+; 始终显示安装目录选择页（防止覆盖安装时跳过）
+DisableDirPage=no
 ; 支持静默安装
 ; 自动关闭正在运行的应用程序
 CloseApplications=yes
@@ -113,21 +115,24 @@ Source: "{#SourceRoot}\ui\ui_init.js";     DestDir: "{app}\ui"; Flags: ignorever
 Source: "{#SourceRoot}\ui\ui_style.css";   DestDir: "{app}\ui"; Flags: ignoreversion
 
 ; ── 配置文件 ──
-; env.dat = 混淆后的配置（不打包明文 .env）
-Source: "{#SourceRoot}\env.dat";        DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
+; 加密配置（AES-256-CBC，不打包明文 .env）
 Source: "{#SourceRoot}\.license";       DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist
 Source: "{#SourceRoot}\pip.ini";        DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; ── Logo / 图标 ──
 Source: "{#SourceRoot}\logo.ico";       DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceRoot}\logo.jpg";       DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
-; ── 启动程序（exe）──
-Source: "{#SourceRoot}\ZhiMoAI_Launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
+; ── 启动程序（exe + onedir 运行时）──
+Source: "{#SourceRoot}\织梦IP.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRoot}\_launcher_runtime\*"; DestDir: "{app}\_launcher_runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceRoot}\启动应用.bat";        DestDir: "{app}"; Flags: ignoreversion
 
+; ── Visual C++ Redistributable（防止目标电脑缺少 DLL）──
+; 下载地址: https://aka.ms/vs/17/release/vc_redist.x64.exe
+; 将下载的文件放到 build_scripts\ 目录下
+Source: "{#SourceRoot}\build_scripts\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall skipifsourcedoesntexist
+
 ; ── 工具脚本 ──
-Source: "{#SourceRoot}\repair_env.bat";      DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRoot}\安装依赖.bat";       DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\安装抖音发布依赖.bat"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceRoot}\打包检查清单.bat";    DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -140,8 +145,8 @@ Source: "{#SourceRoot}\libs\.license";                    DestDir: "{app}\libs";
 ; 字体元数据（lib_subtitle.py 需要在 libs/ 下找到 fonts_merged.json）
 Source: "{#SourceRoot}\data\fonts_merged.json";           DestDir: "{app}\libs"; Flags: ignoreversion skipifsourcedoesntexist
 
-; -- tools / debug --
-Source: "{#SourceRoot}\debug_start.bat";   DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; -- tools --
+; debug_start.bat 和 repair_env.bat 不打包（仅开发用）
 
 ; -- docs --
 Source: "{#SourceRoot}\README.txt";                 DestDir: "{app}"; Flags: ignoreversion isreadme skipifsourcedoesntexist
@@ -199,18 +204,20 @@ Name: "{app}\_internal_sync"; Flags: uninsneveruninstall
 ;  快捷方式
 ; ============================================================
 [Icons]
-Name: "{group}\{#MyAppName}";            Filename: "{app}\ZhiMoAI_Launcher.exe"; IconFilename: "{app}\logo.ico"; WorkingDir: "{app}"
+Name: "{group}\{#MyAppName}";            Filename: "{app}\织梦IP.exe"; IconFilename: "{app}\logo.ico"; WorkingDir: "{app}"
 Name: "{group}\卸载 {#MyAppName}";        Filename: "{uninstallexe}"; IconFilename: "{app}\logo.ico"
-Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\ZhiMoAI_Launcher.exe"; IconFilename: "{app}\logo.ico"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}";       Filename: "{app}\织梦IP.exe"; IconFilename: "{app}\logo.ico"; WorkingDir: "{app}"; Tasks: desktopicon
 
 ; ============================================================
 ;  安装后运行
 ; ============================================================
 [Run]
+; 安装 VC++ 运行库（静默模式，已安装则跳过）
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 Visual C++ 运行库..."; Flags: waituntilterminated skipifdoesntexist
 ; 普通安装完成后询问是否启动（shellexec + runasoriginaluser 降权为普通用户）
-Filename: "{app}\ZhiMoAI_Launcher.exe"; WorkingDir: "{app}"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
+Filename: "{app}\织梦IP.exe"; WorkingDir: "{app}"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
 ; 静默安装完成后自动启动（用于自动更新）
-Filename: "{app}\ZhiMoAI_Launcher.exe"; WorkingDir: "{app}"; Flags: nowait skipifdoesntexist shellexec runasoriginaluser; Check: WizardSilent
+Filename: "{app}\织梦IP.exe"; WorkingDir: "{app}"; Flags: nowait skipifdoesntexist shellexec runasoriginaluser; Check: WizardSilent
 
 ; ============================================================
 ;  卸载时删除生成的文件（可选）
@@ -221,6 +228,7 @@ Type: filesandordirs; Name: "{app}\_internal_cache"
 Type: filesandordirs; Name: "{app}\_internal_logs"
 Type: filesandordirs; Name: "{app}\_internal_temp"
 Type: filesandordirs; Name: "{app}\logs"
+Type: filesandordirs; Name: "{app}\_launcher_runtime"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: files;          Name: "{app}\*.log"
 ; 注意：不删除 .license 文件，保留用户的卡密信息

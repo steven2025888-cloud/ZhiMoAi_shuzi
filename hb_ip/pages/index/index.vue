@@ -161,14 +161,13 @@ function goEditPage(editType) {
 }
 
 .func-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   padding: 0 30rpx;
   gap: 20rpx;
 }
 
 .func-card {
-  width: calc(50% - 10rpx);
   background: #fff;
   border-radius: 20rpx;
   padding: 30rpx;

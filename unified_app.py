@@ -46,12 +46,15 @@ from pathlib import Path
 _CONFIG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'ZhiMoAI')
 _CONFIG_FILE = os.path.join(_CONFIG_DIR, 'config.dat')
 
-# env.dat 混淆密钥（与 build_scripts/generate_env_dat.py 保持一致）
-_XOR_KEY = b"ZhiMoAI2025@Cfg"
+# ── 配置解密参数（与 build_scripts/generate_env_dat.py 保持一致）──
+import hashlib as _hashlib
+_CFG_PASSPHRASE = b"Zm@2025!Rt#Cfg$Init"
+_CFG_KDF_SALT = b"\xa3\x91\x0e\x7f\x44\xbc\x6d\x12\xee\x53\x01\xd8\x9a\xf7\x2c\x88"
+_CFG_KDF_ITER = 260000
 
 
-def _xor_bytes(data: bytes, key: bytes) -> bytes:
-    return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+def _derive_cfg_key():
+    return _hashlib.pbkdf2_hmac("sha256", _CFG_PASSPHRASE, _CFG_KDF_SALT, _CFG_KDF_ITER)
 
 
 def _read_config_lines(path):
@@ -72,23 +75,29 @@ def _read_config_lines(path):
     return cfg
 
 
-def _read_env_dat(path):
-    """读取 env.dat 混淆配置文件，返回 dict"""
+def _read_encrypted_cfg(path):
+    """读取 AES-256-CBC 加密配置文件，返回 dict"""
     cfg = {}
     if not os.path.exists(path):
         return cfg
     try:
-        with open(path, 'r', encoding='ascii') as f:
-            encoded = f.read().strip()
-        raw = _xor_bytes(base64.b64decode(encoded), _XOR_KEY).decode('utf-8')
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import unpad
+        with open(path, 'rb') as f:
+            payload = f.read()
+        if len(payload) < 32:
+            return cfg
+        iv, ct = payload[:16], payload[16:]
+        key = _derive_cfg_key()
+        raw = unpad(AES.new(key, AES.MODE_CBC, iv).decrypt(ct), AES.block_size).decode('utf-8')
         for line in raw.splitlines():
             line = line.strip()
             if not line or line.startswith('#') or '=' not in line:
                 continue
-            key, value = line.split('=', 1)
-            cfg[key.strip()] = value.strip()
+            k, v = line.split('=', 1)
+            cfg[k.strip()] = v.strip()
     except Exception as e:
-        print(f"[WARN] 读取 env.dat 失败: {e}")
+        print(f"[WARN] 读取配置失败: {e}")
     return cfg
 
 
@@ -115,20 +124,27 @@ def _migrate_env_to_config():
     if os.path.exists(_CONFIG_FILE):
         return  # 已经迁移过
     app_dir = os.path.dirname(os.path.abspath(__file__))
-    # 优先迁移 .env（开发环境），其次 env.dat（打包环境）
+    # 优先迁移 .env（开发环境），其次加密配置（打包环境）
     env_path = os.path.join(app_dir, '.env')
-    dat_path = os.path.join(app_dir, 'env.dat')
+    bin_path = os.path.join(app_dir, '_internal_data', '_rt_init.bin')
+    # 兼容旧版 env.dat
+    legacy_dat = os.path.join(app_dir, 'env.dat')
     cfg = {}
     if os.path.exists(env_path):
         cfg = _read_config_lines(env_path)
         if cfg:
             _write_config(cfg)
             print(f"[CONFIG] 已将 .env 配置迁移到 {_CONFIG_FILE}")
-    elif os.path.exists(dat_path):
-        cfg = _read_env_dat(dat_path)
+    elif os.path.exists(bin_path):
+        cfg = _read_encrypted_cfg(bin_path)
         if cfg:
             _write_config(cfg)
-            print(f"[CONFIG] 已将 env.dat 配置迁移到 {_CONFIG_FILE}")
+            print(f"[CONFIG] 已将加密配置迁移到 {_CONFIG_FILE}")
+    elif os.path.exists(legacy_dat):
+        cfg = _read_config_lines(legacy_dat)  # 旧版兼容
+        if cfg:
+            _write_config(cfg)
+            print(f"[CONFIG] 已将旧版配置迁移到 {_CONFIG_FILE}")
 
 
 # ── 加载配置 ──
@@ -142,9 +158,9 @@ def load_env_file():
 
     app_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # 1) 读取 env.dat（打包默认配置，最低优先级）
-    dat_path = os.path.join(app_dir, 'env.dat')
-    cfg = _read_env_dat(dat_path)
+    # 1) 读取加密配置（打包默认配置，最低优先级）
+    bin_path = os.path.join(app_dir, '_internal_data', '_rt_init.bin')
+    cfg = _read_encrypted_cfg(bin_path)
 
     # 2) 读取 .env（开发环境配置）
     env_path = os.path.join(app_dir, '.env')
@@ -429,6 +445,38 @@ def _patch_gradio_audio():
         print(f"[PATCH] Gradio audio 补丁失败: {e}")
 
 _patch_gradio_audio()
+
+# ── 修复 Gradio MatplotlibBackendMananger bug ──
+# __enter__ 中 import matplotlib 失败时不设置 _original_backend，
+# 但 __exit__ 直接访问 self._original_backend → AttributeError
+def _patch_matplotlib_backend_manager():
+    try:
+        import gradio.utils as _gu
+        _Cls = getattr(_gu, 'MatplotlibBackendMananger', None)
+        if _Cls is None:
+            return
+        def _safe_enter(self):
+            self._original_backend = None
+            try:
+                import matplotlib
+                self._original_backend = matplotlib.get_backend()
+                matplotlib.use("agg")
+            except Exception:
+                pass
+        def _safe_exit(self, *args):
+            try:
+                if self._original_backend is not None:
+                    import matplotlib
+                    matplotlib.use(self._original_backend)
+            except Exception:
+                pass
+        _Cls.__enter__ = _safe_enter
+        _Cls.__exit__ = _safe_exit
+        print("[PATCH] Gradio MatplotlibBackendMananger 已打补丁")
+    except Exception as e:
+        print(f"[PATCH] MatplotlibBackendMananger 补丁失败: {e}")
+
+_patch_matplotlib_backend_manager()
 
 # ── 视频合成质量预设 ──
 QUALITY_PRESETS = {
@@ -2085,6 +2133,36 @@ def _md5_of_local_file(path):
     return h.hexdigest()
 
 
+def _sim_wait_stage(elapsed):
+    """根据等待时间返回模拟的进度阶段信息（不提及 GPU / 服务器）。
+
+    Returns: (stage, step_label, overall_pct)
+    """
+    _stages = [
+        (0,   "环境检测", "检测系统配置"),
+        (6,   "环境检测", "验证运行环境"),
+        (15,  "加载引擎", "加载推理组件"),
+        (28,  "加载引擎", "初始化核心模块"),
+        (45,  "模型预热", "预热神经网络"),
+        (65,  "模型预热", "加载权重参数"),
+        (90,  "资源分配", "分配计算资源"),
+        (120, "资源分配", "优化内存布局"),
+        (160, "推理准备", "初始化推理通道"),
+        (210, "推理准备", "编译计算图"),
+        (270, "深度优化", "优化推理参数"),
+        (340, "深度优化", "预编译核函数"),
+        (420, "最终准备", "同步计算节点"),
+        (540, "最终准备", "验证就绪状态"),
+    ]
+    stage, step = "环境检测", "初始化"
+    for t, s, l in _stages:
+        if elapsed >= t:
+            stage, step = s, l
+    # 对数曲线，缓慢逼近 65%
+    pct = min(65, int(3 + 62 * elapsed / (elapsed + 90)))
+    return stage, step, pct
+
+
 def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=None,
                       output_path_override=None, **_kw):
     """使用 Linux HeyGem 服务器在线合成口型视频。
@@ -2263,8 +2341,11 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
             hdata = resp.json()
             if hdata.get("code") != 0 or not hdata.get("initialized"):
                 elapsed = int(time.time() - health_start_time)
-                fake_init_pct = min(10, 1 + int(elapsed / 5))
-                progress(fake_init_pct / 100, desc=f"GPU 服务器初始化中... ({elapsed}s) {fake_init_pct}%")
+                _stg, _stp, _pct = _sim_wait_stage(elapsed)
+                progress(_pct / 100, desc=f"{_stg}... {_pct}%")
+                if detail_cb:
+                    try: detail_cb(_dual_progress_html(_stg, _pct, _stp, min(95, _pct * 100 // max(1, 65)), elapsed))
+                    except Exception: pass
                 time.sleep(health_check_interval)
                 continue
 
@@ -2282,11 +2363,11 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
 
             if "Connection" in error_msg or "timeout" in error_msg.lower() or "Max retries" in error_msg:
                 gpu_was_offline = True
-                wait_minutes = elapsed // 60
-                wait_seconds = elapsed % 60
-                time_str = f"{wait_minutes}分{wait_seconds}秒" if wait_minutes > 0 else f"{wait_seconds}秒"
-                fake_wait_pct = min(10, 1 + int(elapsed / 10))
-                progress(fake_wait_pct / 100, desc=f"等待 GPU 服务器上线... (已等待 {time_str}) {fake_wait_pct}%")
+                _stg, _stp, _pct = _sim_wait_stage(elapsed)
+                progress(_pct / 100, desc=f"{_stg}... {_pct}%")
+                if detail_cb:
+                    try: detail_cb(_dual_progress_html(_stg, _pct, _stp, min(95, _pct * 100 // max(1, 65)), elapsed))
+                    except Exception: pass
                 time.sleep(health_check_interval)
                 continue
             else:
@@ -2370,6 +2451,16 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
         try: detail_cb(_dual_progress_html("提交任务", 10, "发送请求", 0, int(time.time() - t0)))
         except Exception: pass
 
+    # 读取卡密（用于 WS 进度推送路由）
+    _license_key = ""
+    try:
+        _lf = os.path.join(BASE_DIR, ".license")
+        if os.path.exists(_lf):
+            with open(_lf, "r", encoding="utf-8") as _f:
+                _license_key = json.load(_f).get("license_key", "")
+    except Exception:
+        pass
+
     try:
         resp = _req.post(
             f"{server_url}/api/heygem/submit",
@@ -2378,6 +2469,7 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
                 "audio_ext": audio_ext,
                 "video_hash": video_hash,
                 "video_ext": video_ext,
+                "license_key": _license_key,
             },
             headers=headers,
             timeout=30,
@@ -2437,8 +2529,8 @@ def run_heygem_online(video_path, audio_path, progress=gr.Progress(), detail_cb=
             if pct > 0:
                 safe_pct = max(12, min(95, pct))
             else:
-                # 服务器还没返回真实进度时，显示基于时间的假进度（25%~50%）
-                safe_pct = min(50, 25 + int(elapsed / 3))
+                # 服务器还没返回真实进度时，显示基于时间的假进度（25%~88%，对数曲线）
+                safe_pct = min(88, 25 + int(63 * elapsed / (elapsed + 120)))
             grad_pct = 0.12 + (safe_pct - 12) * 0.01
             display_msg = msg if msg else "合成处理中..."
             progress(min(0.95, grad_pct), desc=f"{display_msg} ({safe_pct}%)")
@@ -2509,7 +2601,7 @@ def run_heygem_auto(video_path, audio_path, progress=gr.Progress(), detail_cb=No
         else:
             mode = "local"
     if mode == "online":
-        return run_heygem_online(video_path, audio_path, progress, detail_cb=None,
+        return run_heygem_online(video_path, audio_path, progress, detail_cb=detail_cb,
                                 output_path_override=output_path_override)
     return run_heygem(video_path, audio_path, progress, detail_cb,
                       output_path_override, steps, if_gfpgan)
@@ -6047,7 +6139,7 @@ def build_ui():
                 dropdown_update,
             )
 
-        def _change_bgm(types_val, bgm_state_val, progress=gr.Progress()):
+        def _change_bgm(types_val, bgm_state_val, enable_val, vol_val, sub_vid, out_vid, progress=gr.Progress()):
             cur_path = ""
             cur_title = ""
             if isinstance(bgm_state_val, dict):
@@ -6064,11 +6156,40 @@ def build_ui():
                     if shown and cur_title and shown.strip() == cur_title.strip():
                         continue
                     new_state = {"bgm_path": local_path, "title": shown}
+
+                    # 自动合成BGM到视频（如果有视频可用）
+                    mixed_video = gr.update()
+                    if enable_val and local_path:
+                        base_video = None
+                        for v in (sub_vid, out_vid):
+                            if v and isinstance(v, str) and os.path.exists(v):
+                                base_video = v
+                                break
+                            if isinstance(v, dict):
+                                p = (v.get("video") or {}).get("path") or v.get("path") or v.get("value")
+                                if p and os.path.exists(p):
+                                    base_video = p
+                                    break
+                        if base_video:
+                            try:
+                                mixed_video = mix_bgm_into_video(base_video, local_path, float(vol_val or 0.3), progress=progress)
+                                return (
+                                    mixed_video,
+                                    gr.update(value=shown),
+                                    gr.update(value=local_path),
+                                    gr.update(value=local_path, visible=True),
+                                    _hint_html("ok", f"已更换并合成BGM：{shown}"),
+                                    new_state,
+                                )
+                            except Exception as mix_e:
+                                print(f"[BGM] 自动合成失败: {mix_e}")
+
                     return (
+                        mixed_video,
                         gr.update(value=shown),
                         gr.update(value=local_path),
                         gr.update(value=local_path, visible=True),
-                        _hint_html("ok", f"已更换BGM：{shown}"),  # 移除了✅，_hint_html会自动添加
+                        _hint_html("ok", f"已更换BGM：{shown}"),
                         new_state,
                     )
                 except Exception as e:
@@ -6076,10 +6197,11 @@ def build_ui():
                     continue
             raise gr.Error(f"更换BGM失败: {last_err}")
         
-        def _use_custom_bgm(custom_audio_path):
+        def _use_custom_bgm(custom_audio_path, enable_val, vol_val, sub_vid, out_vid):
             """使用自定义上传的BGM"""
             if not custom_audio_path or not os.path.exists(custom_audio_path):
                 return (
+                    gr.update(),
                     gr.update(),
                     gr.update(),
                     gr.update(),
@@ -6095,15 +6217,39 @@ def build_ui():
             try:
                 shutil.copy2(custom_audio_path, cache_path)
                 new_state = {"bgm_path": cache_path, "title": f"自定义：{filename}"}
+
+                # 自动合成BGM到视频（如果有视频可用）
+                mixed_video = gr.update()
+                hint_msg = f"已使用自定义BGM：{filename}"
+                if enable_val and cache_path:
+                    base_video = None
+                    for v in (sub_vid, out_vid):
+                        if v and isinstance(v, str) and os.path.exists(v):
+                            base_video = v
+                            break
+                        if isinstance(v, dict):
+                            p = (v.get("video") or {}).get("path") or v.get("path") or v.get("value")
+                            if p and os.path.exists(p):
+                                base_video = p
+                                break
+                    if base_video:
+                        try:
+                            mixed_video = mix_bgm_into_video(base_video, cache_path, float(vol_val or 0.3))
+                            hint_msg = f"已使用并合成自定义BGM：{filename}"
+                        except Exception as mix_e:
+                            print(f"[BGM] 自定义BGM自动合成失败: {mix_e}")
+
                 return (
+                    mixed_video,
                     gr.update(value=f"自定义：{filename}"),
                     gr.update(value=cache_path),
                     gr.update(value=cache_path, visible=True),
-                    _hint_html("ok", f"已使用自定义BGM：{filename}"),
+                    _hint_html("ok", hint_msg),
                     new_state,
                 )
             except Exception as e:
                 return (
+                    gr.update(),
                     gr.update(),
                     gr.update(),
                     gr.update(),
@@ -6113,15 +6259,15 @@ def build_ui():
 
         bgm_change_btn.click(
             _change_bgm,
-            inputs=[bgm_types, bgm_state],
-            outputs=[bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_hint, bgm_state]
+            inputs=[bgm_types, bgm_state, bgm_enable, bgm_volume, sub_video, output_video],
+            outputs=[bgm_video, bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_hint, bgm_state]
         )
         
         # 自定义BGM上传按钮
         bgm_custom_btn.upload(
             _use_custom_bgm,
-            inputs=[bgm_custom_btn],
-            outputs=[bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_hint, bgm_state]
+            inputs=[bgm_custom_btn, bgm_enable, bgm_volume, sub_video, output_video],
+            outputs=[bgm_video, bgm_selected, bgm_path_hidden, bgm_audio_preview, bgm_hint, bgm_state]
         )
         
         # BGM启用/禁用（不再需要显示/隐藏自定义上传，按钮始终可见）
@@ -7150,8 +7296,7 @@ if __name__ == "__main__":
                 quiet=True,
                 show_error=True,
                 share=False,
-                show_api=False,
-                # ★ 关键：允许 Gradio 静态服务访问 BASE_DIR（logo.jpg / 转换视频等）
+                # ★ 关键：允许 Gradio 静态服务访问 BASE_DIR（logo.ico / 转换视频等）
                 allowed_paths=[BASE_DIR, OUTPUT_DIR,
                               os.path.join(BASE_DIR,"avatars"),
                               os.path.join(BASE_DIR,"voices"),

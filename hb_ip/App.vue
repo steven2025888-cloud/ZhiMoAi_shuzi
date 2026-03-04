@@ -2,6 +2,7 @@
 	// #ifdef APP-PLUS
 	import { preloadCommonIcons } from '@/uni_modules/zhimo-ui/components/z-icon/preload.js'
 	// #endif
+	import { connect as wsConnect, disconnect as wsDisconnect } from '@/utils/websocket.js'
 
 	export default {
 		onLaunch: function() {
@@ -26,10 +27,16 @@
 				setTimeout(() => {
 					uni.redirectTo({ url: '/pages/login/login' })
 				}, 100)
+			} else {
+				// 已登录，建立 WebSocket 连接（用于 GPU 开机通知等）
+				wsConnect()
 			}
 		},
 		onShow: function() {
 			console.log('App Show')
+			// App 回到前台，重连 WS
+			const licenseKey = uni.getStorageSync('zm_license_key')
+			if (licenseKey) wsConnect()
 		},
 		onHide: function() {
 			console.log('App Hide')

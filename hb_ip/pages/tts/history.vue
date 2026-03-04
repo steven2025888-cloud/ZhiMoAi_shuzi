@@ -276,10 +276,12 @@ function useForVideo(record) {
     return
   }
 
-  // 跳转到视频合成页面，并传递音频 URL
-  uni.navigateTo({
-    url: `/pages/synthesis/synthesis?audioUrl=${encodeURIComponent(voiceUrl)}`,
-  })
+  // synthesis 是 tabbar 页面，必须用 switchTab（不能 navigateTo）
+  // switchTab 不支持 query 参数，通过 storage 传递
+  uni.setStorageSync('tts_result_url', voiceUrl)
+  uni.setStorageSync('tts_result_text', record.text || '')
+  uni.switchTab({ url: '/pages/synthesis/synthesis' })
+  uni.showToast({ title: '已传递到视频合成', icon: 'success' })
 }
 </script>
 

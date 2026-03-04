@@ -10,7 +10,9 @@
 import os
 import sys
 import subprocess
+import shutil
 import time
+import tempfile
 import logging
 from datetime import datetime
 import traceback
@@ -141,6 +143,28 @@ def bring_to_front(hwnd):
         log_warning(f"激活窗口失败: {e}")
 
 
+def _clean_stale_mei_dirs():
+    """清理上次运行残留的 _MEI* 临时目录（PyInstaller --onefile 遗留）"""
+    try:
+        tmp = tempfile.gettempdir()
+        mei_pass = getattr(sys, '_MEIPASS', None)
+        for name in os.listdir(tmp):
+            if not name.startswith('_MEI'):
+                continue
+            path = os.path.join(tmp, name)
+            # 不要删除当前正在使用的 _MEI 目录
+            if mei_pass and os.path.normcase(os.path.normpath(path)) == os.path.normcase(os.path.normpath(mei_pass)):
+                continue
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                    log_info(f"已清理残留 _MEI 目录: {name}")
+            except Exception:
+                pass
+    except Exception as e:
+        log_warning(f"清理 _MEI 目录失败: {e}")
+
+
 def clean_logs():
     """清理超大日志文件"""
     try:
@@ -155,10 +179,10 @@ def clean_logs():
         
         # 尝试多个可能的Python路径
         python_paths = [
-            os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
-            os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
+            os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
+            os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
         ]
         
         python_exe = None
@@ -193,12 +217,13 @@ def start_app():
         # 1. 检查环境（日志清理延后到启动后，减少用户等待时间）
         log_info("[1/3] 检查运行环境...")
         
-        # 尝试多个可能的Python路径（与 app_backend.py start_gradio() 保持一致）
+        # 尝试多个可能的Python路径
+        # 注意：根目录 python.exe 优先于 Scripts\python.exe（后者可能是 venv 壳）
         python_paths = [
-            os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
-            os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
+            os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
             os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
+            os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
         ]
         
         python_exe = None
@@ -243,6 +268,22 @@ def start_app():
             log_error(f"主程序未找到: {app_backend}")
             return False
         
+        # 2.5 设置 Tcl/Tk 环境变量（绕过打包后路径解析错误）
+        env_dir = os.path.dirname(python_exe)  # python.exe 所在目录即 env
+        # 搜索顺序: Conda布局 → 标准CPython布局 → lib/
+        for sub in ['Library/lib', 'tcl', 'lib']:
+            _tcl_dir = os.path.join(env_dir, sub, 'tcl8.6')
+            _tk_dir = os.path.join(env_dir, sub, 'tk8.6')
+            if os.path.isdir(_tcl_dir) and 'TCL_LIBRARY' not in os.environ:
+                os.environ['TCL_LIBRARY'] = _tcl_dir
+                log_info(f"  设置 TCL_LIBRARY={_tcl_dir}")
+            if os.path.isdir(_tk_dir) and 'TK_LIBRARY' not in os.environ:
+                os.environ['TK_LIBRARY'] = _tk_dir
+                log_info(f"  设置 TK_LIBRARY={_tk_dir}")
+        
+        if 'TCL_LIBRARY' not in os.environ:
+            log_warning("  未找到 tcl8.6 目录，tkinter 可能无法正常工作")
+
         # 3. 启动应用
         log_info("[3/3] 启动应用...")
         log_info(f"Python: {python_exe}")
@@ -252,6 +293,22 @@ def start_app():
         backend_log = os.path.join(LOG_DIR, "backend_startup.log")
         crash_log = os.path.join(LOG_DIR, "crash.log")
 
+        # ── 关键修复：清除 _MEI 临时目录对子进程的 PATH 污染 ──
+        # PyInstaller --onefile 会将 _MEI* 目录加入 PATH / DLL搜索路径，
+        # 子进程继承后会锁住 _MEI 中的 DLL，导致 launcher 退出时无法清理临时目录。
+        child_env = os.environ.copy()
+        mei_pass = getattr(sys, '_MEIPASS', None)
+        if mei_pass:
+            log_info(f"  检测到 _MEIPASS={mei_pass}，清理子进程 PATH")
+            # 从 PATH 中移除所有包含 _MEI 的路径
+            path_parts = child_env.get('PATH', '').split(os.pathsep)
+            clean_parts = [p for p in path_parts if '_MEI' not in p]
+            child_env['PATH'] = os.pathsep.join(clean_parts)
+            # 移除 PyInstaller 注入的内部变量
+            for key in list(child_env.keys()):
+                if key.startswith('_MEIPASS') or key == '_PYI_SPLASH_IPC':
+                    del child_env[key]
+
         # debug_console 模式：不使用 pythonw，不隐藏窗口，不重定向 stdout/stderr（直接在控制台显示）
         if debug_console:
             # launcher 自身是 --noconsole 构建的，因此这里强制创建新控制台窗口
@@ -259,6 +316,7 @@ def start_app():
             process = subprocess.Popen(
                 [python_exe, "-u", app_backend],
                 cwd=BASE_DIR,
+                env=child_env,
                 creationflags=flags,
             )
         else:
@@ -272,6 +330,7 @@ def start_app():
             process = subprocess.Popen(
                 [python_exe, "-u", app_backend],
                 cwd=BASE_DIR,
+                env=child_env,
                 stdout=log_f,
                 stderr=log_f,
                 creationflags=flags
@@ -372,6 +431,9 @@ def start_app():
 
 if __name__ == "__main__":
     try:
+        # 清理上次残留的 _MEI 临时目录
+        _clean_stale_mei_dirs()
+
         # 检查单实例
         if not check_single_instance():
             sys.exit(0)

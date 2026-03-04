@@ -83,6 +83,145 @@ except ImportError:
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 INDEXTTS_DIR = os.path.join(BASE_DIR, "_internal_tts")
 
+# ── 修复 Tcl/Tk 路径和版本冲突（打包环境中路径/版本号与 DLL 不匹配）──
+def _fix_tcl_tk_env():
+    """设置 TCL_LIBRARY / TK_LIBRARY 环境变量，确保 _tkinter 找到正确的 tcl/tk 脚本目录。
+    同时修补 init.tcl / tk.tcl 中硬编码的版本号与实际 DLL 版本的冲突。
+    """
+    import re as _re
+    try:
+        env_dir = os.path.join(INDEXTTS_DIR, "installer_files", "env")
+
+        # ── 1. 设置 TCL_LIBRARY / TK_LIBRARY 环境变量 ──
+        # 打包后 _tkinter 可能在 env/lib/ 而非 env/Library/lib/ 搜索，导致找不到或找到旧版
+        # 搜索顺序: Conda布局 → 标准CPython布局 → lib/
+        for sub in ['Library/lib', 'tcl', 'lib']:
+            tcl_dir = os.path.join(env_dir, sub, 'tcl8.6')
+            tk_dir = os.path.join(env_dir, sub, 'tk8.6')
+            if os.path.isdir(tcl_dir) and 'TCL_LIBRARY' not in os.environ:
+                os.environ['TCL_LIBRARY'] = tcl_dir
+                _safe_print(f"[FIX] 设置 TCL_LIBRARY={tcl_dir}")
+            if os.path.isdir(tk_dir) and 'TK_LIBRARY' not in os.environ:
+                os.environ['TK_LIBRARY'] = tk_dir
+                _safe_print(f"[FIX] 设置 TK_LIBRARY={tk_dir}")
+
+        # ── 2. 获取 Tcl DLL 实际版本 ──
+        actual_ver = None
+        dll_names = ['tcl86t.dll', 'tcl86.dll']
+        dll_dirs = [
+            os.path.join(env_dir, 'DLLs'),
+            os.path.join(env_dir, 'Library', 'bin'),
+            env_dir,
+            os.path.join(env_dir, 'bin'),
+        ]
+        for dll_dir in dll_dirs:
+            for dll_name in dll_names:
+                dll_path = os.path.join(dll_dir, dll_name)
+                if not os.path.exists(dll_path):
+                    continue
+                try:
+                    tcl_dll = ctypes.CDLL(dll_path)
+                    _major = ctypes.c_int()
+                    _minor = ctypes.c_int()
+                    _patch = ctypes.c_int()
+                    tcl_dll.Tcl_GetVersion(
+                        ctypes.byref(_major), ctypes.byref(_minor),
+                        ctypes.byref(_patch), None
+                    )
+                    actual_ver = f"{_major.value}.{_minor.value}.{_patch.value}"
+                    _safe_print(f"[FIX] Tcl DLL 实际版本: {actual_ver} ({dll_path})")
+                    break
+                except Exception as _dll_e:
+                    _safe_print(f"[FIX] 加载 {dll_path} 失败: {_dll_e}")
+                    continue
+            if actual_ver:
+                break
+
+        # 从目录名推断（备用方案）
+        if not actual_ver:
+            for scan_dir in [INDEXTTS_DIR, os.path.join(INDEXTTS_DIR, "installer_files"), BASE_DIR]:
+                if not os.path.isdir(scan_dir):
+                    continue
+                try:
+                    for entry in os.listdir(scan_dir):
+                        dm = _re.match(r'tcl(\d+\.\d+\.\d+)', entry)
+                        if dm:
+                            actual_ver = dm.group(1)
+                            _safe_print(f"[FIX] Tcl 版本 (目录推断): {actual_ver}")
+                            break
+                except Exception:
+                    continue
+                if actual_ver:
+                    break
+
+        if not actual_ver:
+            return  # 无法检测版本，跳过修补
+
+        # ── 3. 修补 init.tcl（Tcl 版本）──
+        # 注意：必须用 re.sub 而不是 str.replace，因为实际文件中
+        # 'package require -exact Tcl  8.6.9' 可能有多个空格，str.replace 匹配不到
+        _tcl_ver_re = _re.compile(r'(package\s+require\s+-exact\s+Tcl\s+)[\d.]+')
+        _tk_ver_re  = _re.compile(r'(package\s+require\s+-exact\s+Tk\s+)[\d.]+')
+
+        init_tcl_candidates = [
+            os.path.join(env_dir, "lib", "tcl8.6", "init.tcl"),
+            os.path.join(env_dir, "Library", "lib", "tcl8.6", "init.tcl"),
+        ]
+        for init_tcl_path in init_tcl_candidates:
+            if not os.path.exists(init_tcl_path):
+                continue
+            with open(init_tcl_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            m = _re.search(r'package\s+require\s+-exact\s+Tcl\s+([\d.]+)', content)
+            if m and m.group(1) != actual_ver:
+                old_ver = m.group(1)
+                new_content = _tcl_ver_re.sub(r'\g<1>' + actual_ver, content)
+                with open(init_tcl_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                _safe_print(f"[FIX] 已修补 init.tcl: Tcl {old_ver} -> {actual_ver} ({init_tcl_path})")
+
+        # ── 4. 修补所有可能被 _tkinter 搜到的 tk.tcl ──
+        # _tkinter 的搜索路径包括 TK_LIBRARY 以及多个回退目录，全部扫描并修补
+        tk_tcl_candidates = [
+            os.path.join(env_dir, "lib", "tk8.6", "tk.tcl"),
+            os.path.join(env_dir, "Library", "lib", "tk8.6", "tk.tcl"),
+            os.path.join(env_dir, "lib", "tcl8.6", "tk8.6", "tk.tcl"),
+            os.path.join(INDEXTTS_DIR, "installer_files", "lib", "tk8.6", "tk.tcl"),
+            os.path.join(INDEXTTS_DIR, "lib", "tk8.6", "tk.tcl"),
+        ]
+        _patched_tk = set()
+        for tk_tcl_path in tk_tcl_candidates:
+            rp = os.path.normcase(os.path.abspath(tk_tcl_path))
+            if rp in _patched_tk or not os.path.exists(tk_tcl_path):
+                continue
+            _patched_tk.add(rp)
+            with open(tk_tcl_path, 'r', encoding='utf-8') as f:
+                tk_content = f.read()
+            tk_m = _re.search(r'package\s+require\s+-exact\s+Tk\s+([\d.]+)', tk_content)
+            if tk_m and tk_m.group(1) != actual_ver:
+                tk_old_ver = tk_m.group(1)
+                new_tk_content = _tk_ver_re.sub(r'\g<1>' + actual_ver, tk_content)
+                with open(tk_tcl_path, 'w', encoding='utf-8') as f:
+                    f.write(new_tk_content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                # 验证写入
+                with open(tk_tcl_path, 'r', encoding='utf-8') as f:
+                    verify = f.read()
+                vk = _re.search(r'package\s+require\s+-exact\s+Tk\s+([\d.]+)', verify)
+                ok = vk and vk.group(1) == actual_ver
+                tag = '✓' if ok else '✗ 验证失败'
+                _safe_print(f"[FIX] 已修补 tk.tcl: Tk {tk_old_ver} -> {actual_ver} ({tk_tcl_path}) [{tag}]")
+
+    except Exception as e:
+        _safe_print(f"[FIX] Tcl/Tk 修复失败（非致命）: {e}")
+        import traceback as _tb
+        _safe_print(f"[FIX] {_tb.format_exc()}")
+
+_fix_tcl_tk_env()
+
 # ── 将 libs/ 加入模块搜索路径（lib_*.py 已移动到 libs/）──
 _LIBS_DIR = os.path.join(BASE_DIR, "libs")
 if _LIBS_DIR not in sys.path:
@@ -1045,7 +1184,6 @@ def _start_tray_icon():
             img = None
             for path in [
                 os.path.join(BASE_DIR, "logo.ico"),
-                os.path.join(BASE_DIR, "logo.jpg"),
             ]:
                 if os.path.exists(path):
                     try:
@@ -1327,12 +1465,15 @@ def cleanup():
 def start_gradio():
     global gradio_process
     
-    # 搜索 Python 解释器（与 launcher.py 保持一致的搜索路径）
+    # 搜索 Python 解释器
+    # 注意：根目录 python.exe 优先于 Scripts\python.exe
+    #   VC++ 运行库 DLL（msvcp140.dll 等）放在 env\ 根目录，
+    #   从 Scripts\ 启动会找不到这些 DLL 导致 0xC0000135 崩溃。
     python_candidates = [
-        os.path.join(INDEXTTS_DIR, "installer_files", "env", "Scripts", "python.exe"),
         os.path.join(INDEXTTS_DIR, "installer_files", "env", "python.exe"),
-        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
+        os.path.join(INDEXTTS_DIR, "installer_files", "env", "Scripts", "python.exe"),
         os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
+        os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
     ]
     python_path = None
     for p in python_candidates:
@@ -1375,12 +1516,23 @@ def start_gradio():
             )
             gradio_process.wait()
         if gradio_process.returncode not in (0, None):
-            try:
-                with open(log_path, 'r', encoding='utf-8', errors='replace') as lf:
-                    err = lf.read()[-3000:]
-            except Exception:
-                err = "(无法读取日志)"
-            _notify_error("Gradio 运行出错", f"退出码: {gradio_process.returncode}\n\n{err}")
+            rc = gradio_process.returncode
+            # Windows 0xC0000135 = STATUS_DLL_NOT_FOUND
+            if rc == 3221225781:
+                _notify_error(
+                    "缺少系统运行库",
+                    "程序启动失败，错误码 0xC0000135（DLL 文件缺失）。\n\n"
+                    "这通常是因为系统缺少 Microsoft Visual C++ 运行库。\n\n"
+                    "请下载并安装（选择 x64 版本）：\n"
+                    "https://aka.ms/vs/17/release/vc_redist.x64.exe\n\n"
+                    "安装完成后重新启动本程序即可。")
+            else:
+                try:
+                    with open(log_path, 'r', encoding='utf-8', errors='replace') as lf:
+                        err = lf.read()[-3000:]
+                except Exception:
+                    err = "(无法读取日志)"
+                _notify_error("Gradio 运行出错", f"退出码: {rc}\n\n{err}")
     except Exception:
         _notify_error("Gradio 启动失败", traceback.format_exc())
 
@@ -1486,12 +1638,12 @@ def build_splash(tts_mode='local'):
     logo_row = tk.Frame(card, bg="#ffffff")
     logo_row.pack(pady=(28, 0))
 
-    logo_path = os.path.join(BASE_DIR, "logo.jpg")
+    logo_path = os.path.join(BASE_DIR, "logo.ico")
     if os.path.exists(logo_path):
         try:
             from PIL import Image, ImageTk
             img = Image.open(logo_path).resize((52, 52), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
+            photo = ImageTk.PhotoImage(img, master=root)
             lbl = tk.Label(logo_row, image=photo, bg="#ffffff")
             lbl.image = photo
             lbl.pack(side="left", padx=(0, 14))
@@ -2158,10 +2310,10 @@ if __name__ == "__main__":
             btn_active_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, active_color1, active_color2, shadow=False)
             btn_disabled_img = create_rounded_gradient_button(btn_width, btn_height, corner_radius, disabled_color1, disabled_color2, shadow=False)
             
-            btn_normal_tk = ImageTk.PhotoImage(btn_normal_img)
-            btn_hover_tk = ImageTk.PhotoImage(btn_hover_img)
-            btn_active_tk = ImageTk.PhotoImage(btn_active_img)
-            btn_disabled_tk = ImageTk.PhotoImage(btn_disabled_img)
+            btn_normal_tk = ImageTk.PhotoImage(btn_normal_img, master=root)
+            btn_hover_tk = ImageTk.PhotoImage(btn_hover_img, master=root)
+            btn_active_tk = ImageTk.PhotoImage(btn_active_img, master=root)
+            btn_disabled_tk = ImageTk.PhotoImage(btn_disabled_img, master=root)
             
             btn_container = tk.Frame(card_frame, bg="#ffffff", height=70)
             btn_container.pack(fill="x", pady=(10, 0))
@@ -2364,28 +2516,14 @@ if __name__ == "__main__":
     try:
         debug_mode = ENV_CONFIG['DEBUG_MODE']
 
-        # logo.ico：优先使用已有 ico，否则从 logo.jpg 生成
         icon_path = os.path.join(BASE_DIR, "logo.ico")
         if not os.path.exists(icon_path):
-            logo_jpg = os.path.join(BASE_DIR, "logo.jpg")
-            if os.path.exists(logo_jpg):
-                try:
-                    from PIL import Image
-                    Image.open(logo_jpg).save(icon_path, format='ICO', sizes=[(256,256),(64,64),(32,32),(16,16)])
-                    print(f"[ICON] 已生成 logo.ico")
-                except Exception as e:
-                    print(f"[ICON] 生成 ico 失败: {e}")
-                    icon_path = None
-            else:
-                icon_path = None
+            icon_path = None
 
-        # 获取屏幕尺寸并设置窗口为屏幕的90%
-        import tkinter as tk
+        # 获取屏幕尺寸（使用 ctypes 避免创建多余的 Tk 实例）
         try:
-            temp_root = tk.Tk()
-            screen_width = temp_root.winfo_screenwidth()
-            screen_height = temp_root.winfo_screenheight()
-            temp_root.destroy()
+            screen_width = ctypes.windll.user32.GetSystemMetrics(0)   # SM_CXSCREEN
+            screen_height = ctypes.windll.user32.GetSystemMetrics(1)  # SM_CYSCREEN
             
             # 窗口大小为屏幕的80%
             window_width = int(screen_width * 0.8)
@@ -2461,36 +2599,166 @@ if __name__ == "__main__":
 
             def _show_confirm():
                 try:
-                    import ctypes
-                    # 使用原生 Windows MessageBox（线程安全，不依赖 tkinter 主线程）
-                    MB_YESNOCANCEL = 0x03
-                    MB_ICONQUESTION = 0x20
-                    MB_TOPMOST = 0x40000
-                    MB_SETFOREGROUND = 0x10000
+                    import tkinter as _tk
 
-                    result = ctypes.windll.user32.MessageBoxW(
-                        0,
-                        "选择操作：\n\n"
-                        "「是」- 最小化到通知区域（后台运行）\n"
-                        "「否」- 退出程序\n"
-                        "「取消」- 返回\n\n"
-                        "提示：快速连按两次 X 可强制退出",
-                        "关闭程序",
-                        MB_YESNOCANCEL | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND
-                    )
-                    # 6=IDYES, 7=IDNO, 2=IDCANCEL
+                    CW, CH = 420, 380       # 卡片尺寸（稍大一些更舒适）
+                    CARD = "#0f0d1a"        # 卡片背景（更深的暗色）
+                    BORDER = "#7c3aed"      # 边框高亮（紫色调，更醒目）
+                    TXT = "#ffffff"         # 主文字（纯白，高对比）
+                    SUB = "#a1a1b5"         # 次级文字（更亮一些）
+                    OVERLAY = "#0a0a12"     # 遮罩背景色
+                    _result = {"action": "cancel"}
 
-                    if result == 6:  # 是 - 最小化
+                    # ── 获取软件窗口位置，仅覆盖软件窗口区域 ──
+                    _app_hwnd = _get_main_hwnd()
+                    _win_x, _win_y, _win_w, _win_h = 0, 0, 0, 0
+                    try:
+                        if _app_hwnd:
+                            import ctypes as _ct
+                            class _RECT(_ct.Structure):
+                                _fields_ = [("left", _ct.c_long), ("top", _ct.c_long),
+                                            ("right", _ct.c_long), ("bottom", _ct.c_long)]
+                            _rc = _RECT()
+                            _ct.windll.user32.GetWindowRect(_app_hwnd, _ct.byref(_rc))
+                            _win_x = _rc.left
+                            _win_y = _rc.top
+                            _win_w = _rc.right - _rc.left
+                            _win_h = _rc.bottom - _rc.top
+                    except Exception:
+                        pass
+
+                    dlg = _tk.Tk()
+                    dlg.withdraw()
+                    dlg.title("织梦AI")
+                    dlg.overrideredirect(True)
+                    dlg.attributes("-topmost", True)
+
+                    # 仅覆盖软件窗口区域（如获取失败则回退到全屏）
+                    if _win_w > 100 and _win_h > 100:
+                        dlg.geometry(f"{_win_w}x{_win_h}+{_win_x}+{_win_y}")
+                    else:
+                        sw = dlg.winfo_screenwidth()
+                        sh = dlg.winfo_screenheight()
+                        _win_w, _win_h = sw, sh
+                        dlg.geometry(f"{sw}x{sh}+0+0")
+                    dlg.configure(bg=OVERLAY)
+
+                    # 图标
+                    try:
+                        _ico = os.path.join(BASE_DIR, "logo.ico")
+                        if os.path.exists(_ico):
+                            dlg.iconbitmap(_ico)
+                    except Exception:
+                        pass
+
+                    # ── Windows Acrylic Blur（毛玻璃）── 仅应用到软件窗口区域
+                    _blur_ok = False
+                    try:
+                        from ctypes import windll, Structure, c_int, POINTER, byref, sizeof, pointer
+                        class _AP(Structure):
+                            _fields_ = [("S", c_int), ("F", c_int), ("C", c_int), ("A", c_int)]
+                        class _WD(Structure):
+                            _fields_ = [("At", c_int), ("Da", POINTER(_AP)), ("Sz", c_int)]
+                        dlg.update_idletasks()
+                        _hwnd = windll.user32.GetParent(dlg.winfo_id())
+                        _ac = _AP()
+                        _ac.S = 4          # ACCENT_ENABLE_ACRYLICBLURBEHIND
+                        _ac.C = 0xCC0a0a12 # 深色调（ABGR），更深的半透明黑
+                        _ac.F = 2
+                        _wd = _WD()
+                        _wd.At = 19        # WCA_ACCENT_POLICY
+                        _wd.Da = pointer(_ac)
+                        _wd.Sz = sizeof(_ac)
+                        windll.user32.SetWindowCompositionAttribute(_hwnd, byref(_wd))
+                        _blur_ok = True
+                    except Exception:
+                        # 降级：半透明暗色遮罩
+                        dlg.attributes("-alpha", 0.85)
+
+                    # ── 居中卡片容器（相对于覆盖区域居中）──
+                    card_x = (_win_w - CW) // 2
+                    card_y = (_win_h - CH) // 2
+
+                    # 卡片外发光边框
+                    outer = _tk.Frame(dlg, bg=BORDER, padx=2, pady=2)
+                    outer.place(x=card_x, y=card_y, width=CW, height=CH)
+                    main = _tk.Frame(outer, bg=CARD)
+                    main.pack(fill="both", expand=True)
+
+                    # ── 标题 ──
+                    hdr = _tk.Frame(main, bg=CARD)
+                    hdr.pack(fill="x", padx=32, pady=(30, 0))
+                    _tk.Label(hdr, text="\U0001F5A5", font=("Segoe UI Emoji", 26),
+                              bg=CARD, fg="#a78bfa").pack(side="left")
+                    _tc = _tk.Frame(hdr, bg=CARD)
+                    _tc.pack(side="left", padx=(14, 0))
+                    _tk.Label(_tc, text="关闭程序",
+                              font=("Microsoft YaHei", 17, "bold"),
+                              bg=CARD, fg=TXT).pack(anchor="w")
+                    _tk.Label(_tc, text="请选择您要执行的操作",
+                              font=("Microsoft YaHei", 10),
+                              bg=CARD, fg=SUB).pack(anchor="w", pady=(4, 0))
+
+                    # ── 分隔线 ──
+                    _tk.Frame(main, bg="#2a2740", height=1).pack(fill="x", padx=32, pady=(20, 20))
+
+                    # ── 按钮区 ──
+                    ba = _tk.Frame(main, bg=CARD)
+                    ba.pack(fill="x", padx=32)
+                    _bs = dict(font=("Microsoft YaHei", 12, "bold"),
+                               cursor="hand2", relief="flat", bd=0, padx=18, pady=13)
+
+                    def _act(a):
+                        _result["action"] = a
+                        dlg.destroy()
+
+                    _tk.Button(ba, text="\U0001F4E5  最小化到托盘",
+                               bg="#7c3aed", fg="#ffffff",
+                               activebackground="#8b5cf6", activeforeground="#ffffff",
+                               command=lambda: _act("minimize"), **_bs).pack(fill="x", pady=(0, 10))
+
+                    _tk.Button(ba, text="\u2716  退出程序",
+                               bg="#1c1528", fg="#ef4444",
+                               activebackground="#2d1f3d", activeforeground="#f87171",
+                               command=lambda: _act("exit"), **_bs).pack(fill="x", pady=(0, 10))
+
+                    _tk.Button(ba, text="返回",
+                               bg="#16132a", fg="#c4b5fd",
+                               activebackground="#1e1a38", activeforeground="#e0e7ff",
+                               command=lambda: _act("cancel"), **_bs).pack(fill="x")
+
+                    # ── 提示 ──
+                    _tk.Label(main, text="提示：快速连按两次 X 可强制退出",
+                              font=("Microsoft YaHei", 8), bg=CARD, fg="#555370",
+                              anchor="center").pack(fill="x", pady=(16, 20))
+
+                    # ── 点击背景区域（卡片外）关闭弹窗 ──
+                    dlg.bind("<Button-1>", lambda e: _act("cancel")
+                             if e.widget == dlg else None)
+
+                    # ── 卡片拖动 ──
+                    _d = {"x": 0, "y": 0}
+                    def _pr(e): _d["x"], _d["y"] = e.x_root - outer.winfo_x(), e.y_root - outer.winfo_y()
+                    def _mv(e): outer.place(x=e.x_root - _d["x"], y=e.y_root - _d["y"])
+                    for _w in (main, hdr):
+                        _w.bind("<ButtonPress-1>", _pr)
+                        _w.bind("<B1-Motion>", _mv)
+
+                    # ── 显示 ──
+                    dlg.deiconify()
+
+                    dlg.bind("<Escape>", lambda e: _act("cancel"))
+                    dlg.focus_force()
+                    dlg.mainloop()
+
+                    if _result["action"] == "minimize":
                         try:
-                            hwnd = _get_main_hwnd()
-                            if hwnd:
-                                ctypes.windll.user32.ShowWindow(hwnd, 0)
+                            _api.minimize_to_tray()
                         except Exception:
                             pass
-                    elif result == 7:  # 否 - 退出
+                    elif _result["action"] == "exit":
                         _force_exit()
                     else:
-                        # 取消 — 重置计数
                         _close_attempts[0] = 0
 
                 except Exception as e:

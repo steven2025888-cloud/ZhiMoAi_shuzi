@@ -1,5 +1,32 @@
 <template>
   <view class="tts-page">
+    <!-- 文案提取区域 -->
+    <view class="card">
+      <view class="card-header">
+        <text class="card-icon">🔗</text>
+        <text class="card-title">智能文案提取</text>
+        <text class="extract-badge">AI</text>
+      </view>
+      <textarea
+        class="text-area extract-area"
+        v-model="extractInput"
+        placeholder="粘贴抖音/小红书/公众号等链接，一键提取文案..."
+        :maxlength="2000"
+        :auto-height="false"
+      />
+      <view class="extract-actions">
+        <z-button
+          type="primary"
+          size="sm"
+          :text="extracting ? '提取中...' : '✨ 提取文案'"
+          :loading="extracting"
+          :disabled="extracting || !extractInput.trim()"
+          @click="doExtractText"
+        />
+        <text v-if="extractMsg" class="extract-msg" :class="extractOk ? 'ok' : 'err'">{{ extractMsg }}</text>
+      </view>
+    </view>
+
     <!-- 输入区域 -->
     <view class="card">
       <view class="card-header">
@@ -9,11 +36,19 @@
       <textarea
         class="text-area"
         v-model="inputText"
-        placeholder="请输入要合成语音的文字..."
+        placeholder="请输入要合成语音的文字，或使用上方提取功能..."
         :maxlength="5000"
         :auto-height="false"
       />
       <view class="text-count">
+        <z-button
+          size="xs"
+          type="info"
+          :text="optimizing ? 'AI优化中...' : '✨ AI优化文案'"
+          :loading="optimizing"
+          :disabled="optimizing || !inputText.trim()"
+          @click="aiOptimize"
+        />
         <text class="count-text">{{ inputText.length }} / 5000</text>
       </view>
     </view>
@@ -99,11 +134,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import {
-  listVoiceModels,
+  listVoiceModels, uploadVoiceModel,
   ttsCreate, ttsResult, ttsDownloadUrl,
-  downloadFileWithAuth,
+  downloadFileWithAuth, aiOptimizeText,
 } from '@/utils/api.js'
 import { isLoggedIn } from '@/utils/storage.js'
+import { pickAudioFile } from '@/utils/file-picker.js'
+import { send as wsSend, on as wsOn, off as wsOff, isConnected as wsIsConnected, connect as wsConnect } from '@/utils/websocket.js'
 
 const inputText = ref('')
 const voices = ref([])
@@ -116,6 +153,11 @@ const resultUrl = ref('')
 const resultTaskId = ref('')
 const resultTempAudioPath = ref('')
 const playing = ref(false)
+const optimizing = ref(false)
+const extractInput = ref('')
+const extracting = ref(false)
+const extractMsg = ref('')
+const extractOk = ref(false)
 
 let audioCtx = null
 
@@ -152,63 +194,30 @@ async function loadVoices() {
   }
 }
 
-function uploadVoice() {
-  // 使用 uni.chooseFile 替代 chooseMessageFile，兼容 H5/App
-  // #ifdef H5 || APP-PLUS
-  uni.chooseFile({
-    count: 1,
-    extension: ['.wav', '.mp3', '.m4a', '.aac', '.flac'],
-    success: async (res) => {
-      if (!res.tempFilePaths || !res.tempFilePaths.length) return
-      const filePath = res.tempFilePaths[0]
-      const fileName = res.tempFiles && res.tempFiles[0] ? res.tempFiles[0].name : '新音色'
-      const name = fileName.replace(/\.\w+$/, '')
+async function uploadVoice() {
+  try {
+    const { path, name: fileName } = await pickAudioFile()
+    const name = fileName ? fileName.replace(/\.\w+$/, '') : '新音色'
 
-      uploading.value = true
-      try {
-        const upRes = await uploadVoiceModel(filePath, name)
-        if (upRes.code === 0) {
-          uni.showToast({ title: '上传成功', icon: 'success' })
-          await loadVoices()
-        } else {
-          uni.showToast({ title: upRes.msg || '上传失败', icon: 'none' })
-        }
-      } catch (e) {
-        uni.showModal({ title: '上传失败', content: e.message || '网络错误', showCancel: false })
-      } finally {
-        uploading.value = false
+    uploading.value = true
+    try {
+      const upRes = await uploadVoiceModel(path, name)
+      if (upRes.code === 0) {
+        uni.showToast({ title: '上传成功', icon: 'success' })
+        await loadVoices()
+      } else {
+        uni.showToast({ title: upRes.msg || '上传失败', icon: 'none' })
       }
-    },
-  })
-  // #endif
-
-  // #ifdef MP-WEIXIN
-  uni.chooseMessageFile({
-    count: 1,
-    type: 'file',
-    extension: ['.wav', '.mp3', '.m4a', '.aac', '.flac'],
-    success: async (res) => {
-      if (!res.tempFiles || !res.tempFiles.length) return
-      const file = res.tempFiles[0]
-      const name = file.name ? file.name.replace(/\.\w+$/, '') : '新音色'
-
-      uploading.value = true
-      try {
-        const upRes = await uploadVoiceModel(file.path, name)
-        if (upRes.code === 0) {
-          uni.showToast({ title: '上传成功', icon: 'success' })
-          await loadVoices()
-        } else {
-          uni.showToast({ title: upRes.msg || '上传失败', icon: 'none' })
-        }
-      } catch (e) {
-        uni.showModal({ title: '上传失败', content: e.message || '网络错误', showCancel: false })
-      } finally {
-        uploading.value = false
-      }
-    },
-  })
-  // #endif
+    } catch (e) {
+      uni.showModal({ title: '上传失败', content: e.message || '网络错误', showCancel: false })
+    } finally {
+      uploading.value = false
+    }
+  } catch (e) {
+    if (e.message !== 'cancel') {
+      uni.showToast({ title: e.message || '选择文件失败', icon: 'none' })
+    }
+  }
 }
 
 async function startSynthesize() {
@@ -250,7 +259,8 @@ async function startSynthesize() {
 
     progressMsg.value = '合成中，请稍候...'
     let retries = 0
-    const maxRetries = 60
+    const maxRetries = 300  // 300 × 2s = 600s = 10分钟（长文本需要更久）
+    const pollStartTime = Date.now()
 
     while (retries < maxRetries) {
       await sleep(2000)
@@ -275,7 +285,10 @@ async function startSynthesize() {
           throw new Error(d.msg || '合成失败')
         }
       }
-      progressMsg.value = `合成中... (${retries}/${maxRetries})`
+      const elapsedSec = Math.floor((Date.now() - pollStartTime) / 1000)
+      const mm = Math.floor(elapsedSec / 60)
+      const ss = elapsedSec % 60
+      progressMsg.value = `合成中... 已等待 ${mm}:${String(ss).padStart(2, '0')}`
     }
 
     throw new Error('合成超时，请重试')
@@ -353,6 +366,89 @@ function useForVideo() {
   uni.switchTab({ url: '/pages/synthesis/synthesis' })
   uni.showToast({ title: '已传递到视频合成', icon: 'success' })
 }
+
+function doExtractText() {
+  if (!extractInput.value.trim()) return
+
+  // 确保 WebSocket 已连接
+  if (!wsIsConnected()) {
+    wsConnect()
+    uni.showToast({ title: 'WebSocket 连接中，请稍后重试', icon: 'none' })
+    return
+  }
+
+  extracting.value = true
+  extractMsg.value = ''
+
+  // 超时定时器
+  const TIMEOUT = 30000
+  let timer = null
+  let handler = null
+  let errHandler = null
+
+  const cleanup = () => {
+    if (timer) { clearTimeout(timer); timer = null }
+    if (handler) { wsOff('result', handler); handler = null }
+    if (errHandler) { wsOff('error', errHandler); errHandler = null }
+    extracting.value = false
+  }
+
+  // 监听 "result" 类型响应（与 PC 端 TextExtractor 一致）
+  handler = (data) => {
+    cleanup()
+    const content = data.content || ''
+    const isError = data.error || false
+    if (!isError && content) {
+      inputText.value = content
+      extractMsg.value = '提取成功'
+      extractOk.value = true
+      uni.showToast({ title: '文案提取成功', icon: 'success' })
+    } else {
+      extractMsg.value = content || '提取失败'
+      extractOk.value = false
+      uni.showToast({ title: content || '提取失败', icon: 'none' })
+    }
+  }
+  wsOn('result', handler)
+
+  // 监听 "error" 类型
+  errHandler = (data) => {
+    cleanup()
+    extractMsg.value = data.message || '提取失败'
+    extractOk.value = false
+    uni.showToast({ title: data.message || '提取失败', icon: 'none' })
+  }
+  wsOn('error', errHandler)
+
+  // 超时处理
+  timer = setTimeout(() => {
+    cleanup()
+    extractMsg.value = '提取超时，请重试'
+    extractOk.value = false
+    uni.showToast({ title: '提取超时', icon: 'none' })
+  }, TIMEOUT)
+
+  // 发送提取请求（与 PC 端 TextExtractor 完全一致的消息格式）
+  wsSend({ type: 'url', url: extractInput.value.trim() })
+}
+
+async function aiOptimize() {
+  if (!inputText.value.trim()) return
+  optimizing.value = true
+  try {
+    const res = await aiOptimizeText(inputText.value.trim())
+    if (res.code === 0 && res.data && res.data.text) {
+      inputText.value = res.data.text
+      uni.showToast({ title: '优化完成', icon: 'success' })
+    } else {
+      uni.showToast({ title: res.msg || 'AI优化失败', icon: 'none' })
+    }
+  } catch (e) {
+    uni.showModal({ title: 'AI优化失败', content: e.message || '网络错误', showCancel: false })
+  } finally {
+    optimizing.value = false
+  }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -396,6 +492,34 @@ function useForVideo() {
   border-radius: 12rpx;
   border: 2rpx solid #e2e8f0;
   box-sizing: border-box;
+}
+
+.extract-area {
+  min-height: 120rpx;
+}
+
+.extract-badge {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #6366f1;
+  background: #eef2ff;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+}
+
+.extract-actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-top: 12rpx;
+}
+
+.extract-msg {
+  font-size: 22rpx;
+  font-weight: 600;
+
+  &.ok { color: #15803d; }
+  &.err { color: #be123c; }
 }
 
 .text-count {
