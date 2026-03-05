@@ -1,11 +1,11 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import os
 import sys
 
 # ── 在任何导入之前设置 HuggingFace 离线模式（避免连接 huggingface.co）──
 # 必须在导入 transformers/huggingface_hub 之前设置
-_INDEXTTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_internal_tts")
-_HF_CACHE_DIR = os.path.join(_INDEXTTS_DIR, "checkpoints", "hf_cache")
+_FUNCOSYVOICE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "FunCosyVoice3")
+_HF_CACHE_DIR = os.path.join(_FUNCOSYVOICE_DIR, "models", "hf_cache")
 if os.path.exists(_HF_CACHE_DIR):
     os.environ['HF_HOME'] = _HF_CACHE_DIR
     os.environ['HF_HUB_CACHE'] = _HF_CACHE_DIR
@@ -307,7 +307,7 @@ BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PLATFORM_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_ai_usage_agreement.txt")
 LEGACY_AGREEMENT_FILE = os.path.join(BASE_DIR, "platform_publish_agreement.txt")
 DOUYIN_AGREEMENT_FILE = os.path.join(BASE_DIR, "docs", "user_agreement.md")  # 兼容旧版本
-INDEXTTS_DIR   = os.path.join(BASE_DIR, "_internal_tts")
+FUNCOSYVOICE_DIR = os.path.join(BASE_DIR, "FunCosyVoice3")
 HEYGEM_DIR     = os.path.join(BASE_DIR, "heygem-win-50")
 OUTPUT_DIR     = os.path.join(BASE_DIR, "unified_outputs")
 WORKSPACE_RECORDS_FILE = os.path.join(OUTPUT_DIR, "workspace_records.json")
@@ -323,7 +323,7 @@ MUSIC_DATABASE_FILE = os.path.join(BASE_DIR, "data", "music_database.json")
 BGM_CACHE_DIR = os.path.join(BASE_DIR, "bgm_cache")  # 独立的BGM缓存目录
 os.makedirs(BGM_CACHE_DIR, exist_ok=True)
 
-HF_CACHE_DIR = os.path.abspath(os.path.join(INDEXTTS_DIR, "checkpoints", "hf_cache"))
+HF_CACHE_DIR = os.path.abspath(os.path.join(FUNCOSYVOICE_DIR, "models", "hf_cache"))
 os.makedirs(HF_CACHE_DIR, exist_ok=True)
 for _e, _v in [
     ('HF_HUB_CACHE', HF_CACHE_DIR), ('HF_HOME', HF_CACHE_DIR),
@@ -486,16 +486,9 @@ QUALITY_PRESETS = {
     "✨ 高质量": {"inference_steps": 20, "guidance_scale": 1.5},
 }
 
-# ── TTS 合成速度预设（主要控制 num_beams 和 max_mel_tokens）──
-TTS_SPEED_PRESETS = {
-    "⚡ 极快":   {"num_beams": 1, "max_mel_tokens": 1200},
-    "🚀 快速":   {"num_beams": 1, "max_mel_tokens": 1500},
-    "⚖️ 标准":   {"num_beams": 2, "max_mel_tokens": 2000},
-    "✨ 高质量": {"num_beams": 4, "max_mel_tokens": 2500},
-}
 
-sys.path.insert(0, INDEXTTS_DIR)
-sys.path.insert(0, os.path.join(INDEXTTS_DIR, "indextts"))
+sys.path.insert(0, FUNCOSYVOICE_DIR)
+sys.path.insert(0, os.path.join(FUNCOSYVOICE_DIR, "third_party", "Matcha-TTS"))
 
 import warnings; warnings.filterwarnings("ignore")
 import gradio as gr
@@ -694,7 +687,7 @@ except Exception as e:
 
 # ══════════════════════════════════════════════════════════════
 def auto_load_model():
-    """根据 TTS 模式选择决定是否加载 IndexTTS2 模型"""
+    """根据 TTS 模式选择决定是否加载 TTS 模型"""
     global tts
     
     # 等待门控文件被删除（登录完成后 app_backend 会删除此文件）
@@ -723,21 +716,21 @@ def auto_load_model():
     
     # 如果是在线版，跳过模型加载
     if tts_mode == 'online':
-        safe_print("[MODEL] 当前为在线版，跳过 IndexTTS2 模型加载")
+        safe_print("[MODEL] 当前为在线版，跳过 TTS 模型加载")
         tts = None
         return
     
     # 本地版才加载模型
-    safe_print("[MODEL] 当前为本地版，开始加载 IndexTTS2 模型...")
+    safe_print("[MODEL] 当前为本地版，开始加载 TTS 模型...")
     safe_print(f"[MODEL] HF离线模式: HF_HUB_OFFLINE={os.environ.get('HF_HUB_OFFLINE', 'not set')}")
     
-    model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
+    model_dir = os.path.join(FUNCOSYVOICE_DIR, "checkpoints")
     if not os.path.exists(model_dir):
         safe_print("[ERR] model dir not found"); return
     original_cwd = os.getcwd()
-    os.chdir(INDEXTTS_DIR)
+    os.chdir(FUNCOSYVOICE_DIR)
     try:
-        safe_print("[MODEL] 正在加载 IndexTTS2 声学模型...")
+        safe_print("[MODEL] 正在加载 TTS 声学模型...")
         
         # 检查CUDA是否可用
         import torch
@@ -824,12 +817,12 @@ def _restore_tts_gpu():
     if tts is None:
         try:
             safe_print("[GPU] TTS 模型已卸载，正在重新加载...")
-            model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
+            model_dir = os.path.join(FUNCOSYVOICE_DIR, "checkpoints")
             if not os.path.exists(model_dir):
                 safe_print("[GPU] 模型目录不存在，无法重新加载")
                 return
             original_cwd = os.getcwd()
-            os.chdir(INDEXTTS_DIR)
+            os.chdir(FUNCOSYVOICE_DIR)
             try:
                 from indextts.infer_v2 import IndexTTS2
                 tts = IndexTTS2(model_dir=model_dir,
@@ -1552,7 +1545,7 @@ def generate_speech_local(text, prompt_audio, top_p, top_k, temperature, num_bea
 
     ts  = int(time.time())
     out = os.path.join(OUTPUT_DIR, f"tts_{ts}.wav")
-    cwd = os.getcwd(); os.chdir(INDEXTTS_DIR)
+    cwd = os.getcwd(); os.chdir(FUNCOSYVOICE_DIR)
     try:
         progress(0.25, desc="🎯 配置生成参数...")
         kw = dict(
@@ -2762,7 +2755,7 @@ def generate_speech_batch(text, prompt_audio, out_path,
     # 确保 TTS 模型已加载且在 GPU 上（视频合成后模型已卸载，需重新加载）
     _restore_tts_gpu()
     if tts is None: raise RuntimeError("模型未加载")
-    cwd = os.getcwd(); os.chdir(INDEXTTS_DIR)
+    cwd = os.getcwd(); os.chdir(FUNCOSYVOICE_DIR)
     try:
         kw = dict(do_sample=True, top_p=float(top_p), top_k=int(top_k),
                   temperature=float(temperature), length_penalty=0.0,
@@ -3256,6 +3249,36 @@ def build_ui():
                                 placeholder="在此输入或粘贴文案内容，或使用上方提取功能...",
                                 lines=6)
 
+                            # ── 法务检查按钮 ──
+                            gr.HTML('<div style="font-size:11px;color:#94a3b8;padding:4px 8px;margin-top:4px;margin-bottom:4px;">'
+                                    'AI智能检测违禁词，适配抖音/小红书/B站/视频号/快手等平台规则</div>')
+                            legal_check_btn = gr.Button("📋 法务检查", variant="secondary", size="sm",
+                                                        elem_classes="legal-check-btn")
+                            legal_check_hint = gr.HTML(value="")
+
+                            # ── 法务检查结果面板（默认隐藏） ──
+                            with gr.Group(visible=False, elem_classes="legal-check-panel") as legal_check_panel:
+                                gr.HTML(
+                                    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+                                    '<span style="font-size:16px;">📋</span>'
+                                    '<span style="font-size:14px;font-weight:700;color:#1e293b;">法务检查结果</span>'
+                                    '<span style="font-size:11px;color:#dc2626;font-weight:600;">（红色标注为替换内容）</span>'
+                                    '</div>'
+                                )
+                                with gr.Row():
+                                    with gr.Column(scale=1):
+                                        gr.HTML('<div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">📄 原文</div>')
+                                        legal_check_original = gr.HTML(value="", elem_classes="legal-check-col")
+                                    with gr.Column(scale=1):
+                                        gr.HTML('<div style="font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">'
+                                                '✅ 检查结果 <span style="color:#dc2626;font-size:11px;font-weight:400;">（红色为修改词）</span></div>')
+                                        legal_check_result = gr.HTML(value="", elem_classes="legal-check-col")
+                                with gr.Row():
+                                    legal_check_close_btn = gr.Button("关闭", variant="secondary", size="sm")
+                                    legal_check_apply_btn = gr.Button("✅ 使用修改后的内容", variant="primary", size="sm")
+                                # 隐藏的状态组件，保存纯文本结果用于应用
+                                legal_check_result_text = gr.Textbox(visible=False, value="")
+
                         # ═══ 步骤 2：音频合成 ═══════════════════════════
                         gr.HTML(
                             '<div class="step-header">'
@@ -3302,32 +3325,13 @@ def build_ui():
                                 # 隐藏的 prompt_audio 组件（用于内部逻辑，不显示给用户）
                                 prompt_audio = gr.Audio(visible=False, type="filepath")
 
-                                # ── 语音风格预设（仅本地版可见）──
+                                # ── 语速设置（仅本地版可见）──
                                 _is_local_tts = (current_tts_mode == 'local')
                                 with gr.Group(visible=_is_local_tts) as local_only_settings_group:
-                                    voice_style = gr.Radio(
-                                        label="语音风格",
-                                        choices=["标准", "稳定播报", "活泼生动", "慢速朗读", "专业模式"],
-                                        value="标准",
-                                        elem_classes="voice-style-radio")
-                                    # ── 合成速度预设 ──
-                                    tts_speed_preset = gr.Radio(
-                                        label="合成速度",
-                                        choices=list(TTS_SPEED_PRESETS.keys()),
-                                        value="🚀 快速",
-                                        elem_classes="voice-style-radio")
-                                    gr.HTML(
-                                        '<div style="font-size:11px;color:#94a3b8;line-height:1.6;padding:2px 8px 8px;">'
-                                        '⚡极快：最快速度，适合预览试听<br>'
-                                        '🚀快速：速度优先，默认推荐（FP16）<br>'
-                                        '⚖️标准：速度与质量兼顾<br>'
-                                        '✨高质量：最佳语音质量，速度较慢</div>'
-                                    )
-
                                     voice_speed = gr.Slider(
                                         label="语速调节",
                                         info="← 慢  |  快 →",
-                                        minimum=0.5, maximum=1.5, value=1.0, step=0.05)
+                                        minimum=0.5, maximum=2.0, value=1.0, step=0.05)
 
                                 # ── 在线版设置（仅在线版可见）──
                                 with gr.Group(visible=not _is_local_tts) as online_only_settings_group:
@@ -3336,52 +3340,25 @@ def build_ui():
                                         info="← 慢  |  快 →",
                                         minimum=0.5, maximum=2.0, value=1.0, step=0.05)
 
-                                with gr.Group(visible=False) as pro_mode_group:
-                                    with gr.Row():
-                                        top_p = gr.Slider(label="词语多样性", info="越高越随机 0.7~0.9", minimum=0.1, maximum=1.0, value=0.8, step=0.05)
-                                        top_k = gr.Slider(label="候选词数量", info="越小越保守 20~50", minimum=1, maximum=100, value=30, step=1)
-                                    with gr.Row():
-                                        temperature = gr.Slider(label="语气活跃度", info="越高越有变化", minimum=0.1, maximum=2.0, value=0.7, step=0.1)
-                                        num_beams   = gr.Slider(label="搜索精度", info="越高越慢但更准", minimum=1, maximum=10, value=1, step=1)
-                                    with gr.Row():
-                                        repetition_penalty = gr.Slider(label="避免重复", info="越高越不重复", minimum=1.0, maximum=20.0, value=8.0, step=0.5)
-                                        max_mel_tokens     = gr.Slider(label="最大长度", info="长文本需加大", minimum=500, maximum=3000, value=1500, step=100)
-                                    gr.HTML('<div class="divider"></div>')
-                                    gr.Markdown("### 🎭 情感控制")
-                                    emo_mode = gr.Radio(
-                                        label="情感控制模式",
-                                        choices=["与音色参考音频相同","使用情感参考音频","使用情感向量控制","使用情感描述文本控制"],
-                                        value="与音色参考音频相同")
-                                    with gr.Group(visible=False) as emo_audio_group:
-                                        emo_audio  = gr.Audio(label="情感参考音频", sources=["upload"], type="filepath")
-                                        emo_weight = gr.Slider(label="情感强度", info="0=不混合情感，1=完全使用情感参考", minimum=0.0, maximum=1.0, value=0.6, step=0.1)
-                                    with gr.Group(visible=False) as emo_vec_group:
-                                        gr.Markdown("调整8个情感向量维度（-1.0 到 1.0）")
-                                        with gr.Row():
-                                            vec1 = gr.Slider(label="向量1", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                            vec2 = gr.Slider(label="向量2", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                        with gr.Row():
-                                            vec3 = gr.Slider(label="向量3", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                            vec4 = gr.Slider(label="向量4", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                        with gr.Row():
-                                            vec5 = gr.Slider(label="向量5", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                            vec6 = gr.Slider(label="向量6", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                        with gr.Row():
-                                            vec7 = gr.Slider(label="向量7", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                            vec8 = gr.Slider(label="向量8", minimum=-1.0, maximum=1.0, value=0.0, step=0.1)
-                                    with gr.Group(visible=False) as emo_text_group:
-                                        emo_text = gr.Textbox(
-                                            label="情感描述文本",
-                                            placeholder="例如：开心、悲伤、愤怒...",
-                                            lines=2)
-                                    def update_emo_visibility(mode):
-                                        return (
-                                            gr.update(visible=(mode=="使用情感参考音频")),
-                                            gr.update(visible=(mode=="使用情感向量控制")),
-                                            gr.update(visible=(mode=="使用情感描述文本控制")))
-                                    emo_mode.change(update_emo_visibility,
-                                                    inputs=[emo_mode],
-                                                    outputs=[emo_audio_group, emo_vec_group, emo_text_group])
+                                # ── 隐藏的默认参数（保持函数链兼容）──
+                                top_p = gr.Slider(visible=False, value=0.8)
+                                top_k = gr.Slider(visible=False, value=30)
+                                temperature = gr.Slider(visible=False, value=0.7)
+                                num_beams = gr.Slider(visible=False, value=1)
+                                repetition_penalty = gr.Slider(visible=False, value=8.0)
+                                max_mel_tokens = gr.Slider(visible=False, value=1500)
+                                emo_mode = gr.Textbox(visible=False, value="与音色参考音频相同")
+                                emo_audio = gr.Audio(visible=False, type="filepath")
+                                emo_weight = gr.Slider(visible=False, value=0.6)
+                                emo_text = gr.Textbox(visible=False, value="")
+                                vec1 = gr.Slider(visible=False, value=0.0)
+                                vec2 = gr.Slider(visible=False, value=0.0)
+                                vec3 = gr.Slider(visible=False, value=0.0)
+                                vec4 = gr.Slider(visible=False, value=0.0)
+                                vec5 = gr.Slider(visible=False, value=0.0)
+                                vec6 = gr.Slider(visible=False, value=0.0)
+                                vec7 = gr.Slider(visible=False, value=0.0)
+                                vec8 = gr.Slider(visible=False, value=0.0)
                                 gen_btn      = gr.Button("🎵  开始语音合成", variant="primary", size="lg")
                                 tts_hint = gr.HTML(value="")
                                 output_audio = gr.Audio(label="合成结果", interactive=False)
@@ -5125,40 +5102,6 @@ def build_ui():
                     workspace_record_hint, workspace_record_dropdown]
         )
 
-        # ── 语音风格预设
-        _VOICE_PRESETS = {
-            "标准":     dict(tp=0.8,  tk=30, temp=0.7, rp=8.0,  spd=1.0),
-            "稳定播报": dict(tp=0.6,  tk=10, temp=0.2, rp=14.0, spd=0.95),
-            "活泼生动": dict(tp=0.95, tk=60, temp=1.4, rp=4.0,  spd=1.1),
-            "慢速朗读": dict(tp=0.6,  tk=10, temp=0.15, rp=14.0, spd=0.9),
-        }
-        def _on_voice_style(style):
-            is_pro = (style == "专业模式")
-            if is_pro:
-                return [gr.update(visible=True), gr.update()] + [gr.update()] * 4
-            p = _VOICE_PRESETS.get(style, _VOICE_PRESETS["标准"])
-            return [
-                gr.update(visible=False),
-                gr.update(value=p["spd"]),
-                gr.update(value=p["tp"]),
-                gr.update(value=p["tk"]),
-                gr.update(value=p["temp"]),
-                gr.update(value=p["rp"]),
-            ]
-        voice_style.change(_on_voice_style,
-            inputs=[voice_style],
-            outputs=[pro_mode_group, voice_speed, top_p, top_k, temperature, repetition_penalty])
-
-        # ── TTS 合成速度预设 ──
-        def _on_tts_speed(preset):
-            p = TTS_SPEED_PRESETS.get(preset, TTS_SPEED_PRESETS["🚀 快速"])
-            return [
-                gr.update(value=p["num_beams"]),
-                gr.update(value=p["max_mel_tokens"]),
-            ]
-        tts_speed_preset.change(_on_tts_speed,
-            inputs=[tts_speed_preset],
-            outputs=[num_beams, max_mel_tokens])
 
         # 直接上传音频时自动填入 audio_for_ls
         def _on_direct_audio(audio_path):
@@ -5221,18 +5164,18 @@ def build_ui():
             # 如果切换到本地版且模型未加载，则加载模型
             if mode == "local" and tts is None:
                 try:
-                    safe_print("[TTS_MODE] 检测到切换到本地版，开始加载 IndexTTS2 模型...")
-                    model_dir = os.path.join(INDEXTTS_DIR, "checkpoints")
+                    safe_print("[TTS_MODE] 检测到切换到本地版，开始加载 TTS 模型...")
+                    model_dir = os.path.join(FUNCOSYVOICE_DIR, "checkpoints")
                     if os.path.exists(model_dir):
                         original_cwd = os.getcwd()
-                        os.chdir(INDEXTTS_DIR)
+                        os.chdir(FUNCOSYVOICE_DIR)
                         try:
                             from indextts.infer_v2 import IndexTTS2
                             tts = IndexTTS2(model_dir=model_dir,
                                           cfg_path=os.path.join(model_dir, "config.yaml"), 
                                           use_fp16=True)
                             _tts_on_gpu = True
-                            safe_print("[TTS_MODE] IndexTTS2 模型加载完成")
+                            safe_print("[TTS_MODE] TTS 模型加载完成")
                         finally:
                             os.chdir(original_cwd)
                     else:
@@ -5246,7 +5189,7 @@ def build_ui():
             filter_mode = mode  # "local" 或 "online"
             new_choices = _vc.get_choices(filter_mode) if _LIBS_OK else []
             
-            # 本地版显示语音风格/合成速度/语速，在线版显示在线语速
+            # 本地版显示语速设置，在线版显示在线语速
             is_local = (mode == "local")
             return gr.update(choices=new_choices, value=None), gr.update(visible=is_local), gr.update(visible=not is_local)
         
@@ -5801,6 +5744,107 @@ def build_ui():
             else:
                 return original_text, "", "", "", "", False, _hint_html("error", "AI改写失败，未返回内容")
         
+        def _legal_check_with_deepseek(original_text):
+            """使用DeepSeek AI进行法务检查，检测并替换不符合各大平台规则的词语"""
+            if not original_text or not original_text.strip():
+                return "", "", "", False, _hint_html("warning", "请先输入文案内容")
+            
+            prompt = f"""你是一个专业的短视频平台内容合规审核专家。请检查以下文案中是否有不符合抖音、小红书、哔哩哔哩、视频号、快手等平台规则的词语，并进行替换。
+
+检查范围包括但不限于：
+1. 极限用词：最、最佳、最好、第一、首个、首选、唯一、独一无二、前所未有、史无前例、万能、100%、绝对等
+2. 广告法违禁词：国家级、世界级、全网最低价、限时抢购、仿你网络废话词、声称功效等
+3. 诞导性用词：必须、一定、肯定、保证、承诺等绝对化表述
+4. 涉及健康、医疗、财务收益等敏感领域的违规表述
+5. 其他可能触发平台审核的敏感词汇
+
+重要要求：
+- 只替换违规的词语，不要改动其他内容
+- 替换后的词语要保持原文语义，只是用更合规的表述代替
+- 保持原文的格式、段落和结构完全不变
+- 如果文案没有违规词，请直接返回原文
+
+请严格按以下格式输出：
+检查结果：[安全/有风险]
+违规词数量：[N个]
+违规详情：
+- 「原词」→「替换词」（原因）
+修改后文案：[完整的修改后文案]
+
+原文案：
+{original_text}"""
+            
+            result, error = _call_deepseek_api(prompt, system_prompt="你是一个专业的短视频平台内容合规审核专家，熟悉抖音、小红书、哔哩哔哩、视频号、快手等各大平台的内容规则和广告法。")
+            
+            if error:
+                return "", "", "", False, _hint_html("error", error)
+            
+            if result:
+                lines = result.strip().split('\n')
+                modified_text = ""
+                check_status = "安全"
+                violation_count = 0
+                violations = []  # 保存违规详情
+                
+                in_modified = False
+                modified_lines = []
+                
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped.startswith("检查结果：") or stripped.startswith("检查结果:"):
+                        check_status = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                    elif stripped.startswith("违规词数量：") or stripped.startswith("违规词数量:"):
+                        try:
+                            violation_count = int(re.search(r'\d+', stripped).group())
+                        except Exception:
+                            pass
+                    elif stripped.startswith("- 「") or stripped.startswith("- \""):
+                        violations.append(stripped)
+                    elif stripped.startswith("修改后文案：") or stripped.startswith("修改后文案:"):
+                        first_line = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                        if first_line:
+                            modified_lines.append(first_line)
+                        in_modified = True
+                    elif in_modified and stripped:
+                        modified_lines.append(stripped)
+                
+                if modified_lines:
+                    modified_text = "\n".join(modified_lines)
+                else:
+                    modified_text = original_text
+                
+                # 生成原文HTML
+                import html as html_module
+                original_html = f'<div style="font-size:13px;line-height:1.8;color:#334155;white-space:pre-wrap;">{html_module.escape(original_text)}</div>'
+                
+                # 生成对比结果HTML，红色标注替换的词
+                if violations and violation_count > 0:
+                    # 有违规词，生成带红色标注的结果HTML
+                    result_display = html_module.escape(modified_text)
+                    # 从违规详情中提取替换词对
+                    for v in violations:
+                        m = re.search(r'[「\"](.+?)[」\"].*?[→➜\->]+.*?[「\"](.+?)[」\"]', v)
+                        if m:
+                            old_word = m.group(1)
+                            new_word = m.group(2)
+                            # 在修改后的文本中将替换词标红
+                            escaped_new = html_module.escape(new_word)
+                            red_span = f'<span style="color:#dc2626;background:#fef2f2;font-weight:700;padding:1px 3px;border-radius:3px;border-bottom:2px solid #dc2626;">{escaped_new}</span>'
+                            result_display = result_display.replace(html_module.escape(new_word), red_span, 1)
+                    
+                    result_html = f'<div style="font-size:13px;line-height:1.8;color:#334155;white-space:pre-wrap;">{result_display}</div>'
+                    
+                    # 违规摘要
+                    violation_summary = "\n".join(violations[:10])
+                    hint = _hint_html("warning", f"检测到 {violation_count} 个违规词，已自动替换")
+                else:
+                    result_html = f'<div style="font-size:13px;line-height:1.8;color:#334155;white-space:pre-wrap;">{html_module.escape(modified_text)}</div>'
+                    hint = _hint_html("ok", "文案检查通过，未发现违规词")
+                
+                return original_html, result_html, modified_text, True, hint
+            else:
+                return "", "", "", False, _hint_html("error", "法务检查失败，未返回内容")
+        
         def _optimize_title_with_deepseek(current_title, current_topics, video_text):
             """使用DeepSeek AI优化标题并生成话题标签"""
             if not video_text or not video_text.strip():
@@ -5902,6 +5946,38 @@ def build_ui():
                     ai_rewrite_done,
                     workspace_record_hint, workspace_record_dropdown])
         
+        # ── 法务检查按钮事件绑定 ──
+        def _do_legal_check(original_text):
+            """法务检查：调用AI检测违禁词并显示对比结果"""
+            original_html, result_html, modified_text, show_panel, hint = _legal_check_with_deepseek(original_text)
+            return (
+                gr.update(visible=show_panel),  # legal_check_panel
+                original_html,                   # legal_check_original
+                result_html,                     # legal_check_result
+                modified_text,                   # legal_check_result_text
+                hint,                            # legal_check_hint
+            )
+        legal_check_btn.click(
+            _do_legal_check,
+            inputs=[input_text],
+            outputs=[legal_check_panel, legal_check_original, legal_check_result,
+                     legal_check_result_text, legal_check_hint])
+        
+        # 法务检查 - 关闭按钮
+        legal_check_close_btn.click(
+            lambda: gr.update(visible=False),
+            outputs=[legal_check_panel])
+        
+        # 法务检查 - 应用修改后的内容
+        def _apply_legal_check(modified_text):
+            """将法务检查后的修改内容应用到文案输入框"""
+            if not modified_text or not modified_text.strip():
+                return gr.update(), gr.update(visible=True), _hint_html("warning", "没有可应用的内容")
+            return modified_text, gr.update(visible=False), _hint_html("ok", "已应用法务检查后的内容")
+        legal_check_apply_btn.click(
+            _apply_legal_check,
+            inputs=[legal_check_result_text],
+            outputs=[input_text, legal_check_panel, legal_check_hint])
         
         # 清空提示
         input_text.change(lambda: "", outputs=[tts_hint])

@@ -9,7 +9,7 @@ echo.
 echo 正在启动服务器...
 echo.
 
-start /B _internal_tts\installer_files\env\python.exe unified_app.py
+start /B FunCosyVoice3\python310\python.exe unified_app.py
 
 echo 等待服务器启动...
 timeout /t 5 /nobreak >nul

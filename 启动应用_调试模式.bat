@@ -7,7 +7,7 @@ echo 织梦AI大模型 - 调试模式启动
 echo ========================================
 echo.
 
-set PYTHON_PATH=_internal_tts\installer_files\env\python.exe
+set PYTHON_PATH=FunCosyVoice3\python310\python.exe
 set SCRIPT_PATH=app_backend.py
 
 echo [1/3] 检查 Python 解释器...

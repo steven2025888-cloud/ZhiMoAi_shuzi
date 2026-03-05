@@ -6,8 +6,8 @@ Set oFSO   = CreateObject("Scripting.FileSystemObject")
 Set oShell = CreateObject("WScript.Shell")
 
 sBase   = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\"))
-sPyw    = sBase & "_internal_tts\installer_files\env\pythonw.exe"
-sPy     = sBase & "_internal_tts\installer_files\env\python.exe"
+sPyw    = sBase & "FunCosyVoice3\python310\pythonw.exe"
+sPy     = sBase & "FunCosyVoice3\python310\python.exe"
 sScript = sBase & "app_backend.py"
 sLogFile = sBase & "logs\vbs_startup.log"
 

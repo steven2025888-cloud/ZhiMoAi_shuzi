@@ -51,6 +51,21 @@
         />
         <text class="count-text">{{ inputText.length }} / 5000</text>
       </view>
+
+      <!-- 法案检查按钮 -->
+      <view class="rewrite-btn-row">
+        <z-button
+          type="danger"
+          size="sm"
+          :text="rewriting ? '检查中...' : '📋 法案检查'"
+          :loading="rewriting"
+          :disabled="rewriting || !inputText.trim()"
+          block
+          round
+          @click="doRewriteText"
+        />
+        <text class="rewrite-hint">适配抖音/小红书/视频号/B站/快手，去除违禁词</text>
+      </view>
     </view>
 
     <!-- 音色选择 -->
@@ -128,15 +143,45 @@
     <view v-if="progressMsg" class="progress-bar">
       <text class="progress-text">{{ progressMsg }}</text>
     </view>
+
+    <!-- 文案改写弹窗 -->
+    <view v-if="showRewriteModal" class="rewrite-overlay" @tap="showRewriteModal = false">
+      <view class="rewrite-modal" @tap.stop>
+        <view class="rewrite-header">
+          <text class="rewrite-title">📋 文案平台改写</text>
+          <text class="rewrite-close" @tap="showRewriteModal = false">✕</text>
+        </view>
+        <view class="rewrite-body">
+          <view class="rewrite-col">
+            <text class="col-label">原文</text>
+            <scroll-view scroll-y class="col-scroll">
+              <text class="col-text">{{ rewriteOriginal }}</text>
+            </scroll-view>
+          </view>
+          <view class="rewrite-divider"></view>
+          <view class="rewrite-col">
+            <text class="col-label rewrite-label">改写结果 <text class="red-hint">（红色为修改内容）</text></text>
+            <scroll-view scroll-y class="col-scroll">
+              <rich-text class="col-text" :nodes="rewriteDiffHtml"></rich-text>
+            </scroll-view>
+          </view>
+        </view>
+        <view class="rewrite-footer">
+          <z-button type="light" text="关闭" round @click="showRewriteModal = false" />
+          <z-button type="primary" text="✅ 使用改写内容" round @click="applyRewrite" />
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import {
   listVoiceModels, uploadVoiceModel,
   ttsCreate, ttsResult, ttsDownloadUrl,
-  downloadFileWithAuth, aiOptimizeText,
+  downloadFileWithAuth, aiOptimizeText, aiRewriteText,
 } from '@/utils/api.js'
 import { isLoggedIn } from '@/utils/storage.js'
 import { pickAudioFile } from '@/utils/file-picker.js'
@@ -158,6 +203,16 @@ const extractInput = ref('')
 const extracting = ref(false)
 const extractMsg = ref('')
 const extractOk = ref(false)
+
+// 文案改写状态
+const showRewriteModal = ref(false)
+const rewriteOriginal = ref('')
+const rewriteResult = ref('')
+const rewriting = ref(false)
+
+const rewriteDiffHtml = computed(() => {
+  return generateDiffHtml(rewriteOriginal.value, rewriteResult.value)
+})
 
 let audioCtx = null
 
@@ -449,6 +504,64 @@ async function aiOptimize() {
     optimizing.value = false
   }
 }
+
+// ── 文案平台改写 ──
+async function doRewriteText() {
+  if (!inputText.value.trim()) {
+    uni.showToast({ title: '请先输入文案', icon: 'none' })
+    return
+  }
+  rewriting.value = true
+  rewriteOriginal.value = inputText.value.trim()
+  try {
+    const res = await aiRewriteText(inputText.value.trim())
+    if (res.code === 0 && res.data && res.data.text) {
+      rewriteResult.value = res.data.text
+      showRewriteModal.value = true
+    } else {
+      throw new Error(res.msg || '改写失败')
+    }
+  } catch (e) {
+    uni.showModal({ title: '改写失败', content: e.message || '网络错误', showCancel: false })
+  } finally {
+    rewriting.value = false
+  }
+}
+
+function applyRewrite() {
+  inputText.value = rewriteResult.value
+  showRewriteModal.value = false
+  uni.showToast({ title: '已应用改写内容', icon: 'success' })
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function generateDiffHtml(original, rewritten) {
+  if (!rewritten) return ''
+  if (!original) return escapeHtml(rewritten)
+
+  // 按标点符号分句对比
+  const splitClauses = (text) => {
+    return text.split(/(?<=[。！？\n；;，,、：:])/g).filter(s => s.trim())
+  }
+
+  const origClauses = splitClauses(original)
+  const newClauses = splitClauses(rewritten)
+  const origSet = new Set(origClauses.map(s => s.trim()))
+
+  let html = ''
+  for (const clause of newClauses) {
+    const trimmed = clause.trim()
+    if (origSet.has(trimmed)) {
+      html += escapeHtml(clause)
+    } else {
+      html += '<span style="color: #dc2626; background-color: #fef2f2;">' + escapeHtml(clause) + '</span>'
+    }
+  }
+  return html
+}
 </script>
 
 <style lang="scss" scoped>
@@ -523,8 +636,24 @@ async function aiOptimize() {
 }
 
 .text-count {
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 8rpx;
+}
+
+.rewrite-btn-row {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 2rpx dashed #e2e8f0;
+}
+
+.rewrite-hint {
+  display: block;
+  font-size: 20rpx;
+  color: #94a3b8;
+  margin-top: 8rpx;
+  text-align: center;
 }
 
 .count-text {
@@ -628,5 +757,109 @@ async function aiOptimize() {
 .progress-text {
   font-size: 24rpx;
   color: #e2e8f0;
+}
+
+// ── 文案改写弹窗 ──
+.rewrite-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rewrite-modal {
+  width: 94%;
+  max-height: 82vh;
+  background: #fff;
+  border-radius: 24rpx;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8rpx 40rpx rgba(0,0,0,0.15);
+}
+
+.rewrite-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28rpx 30rpx;
+  border-bottom: 2rpx solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.rewrite-title {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.rewrite-close {
+  font-size: 40rpx;
+  color: #94a3b8;
+  padding: 8rpx 12rpx;
+  line-height: 1;
+}
+
+.rewrite-body {
+  display: flex;
+  flex: 1;
+  min-height: 400rpx;
+  max-height: 60vh;
+}
+
+.rewrite-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20rpx;
+}
+
+.rewrite-divider {
+  width: 2rpx;
+  background: #e2e8f0;
+}
+
+.col-label {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 12rpx;
+  flex-shrink: 0;
+}
+
+.rewrite-label {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.red-hint {
+  font-size: 20rpx;
+  color: #dc2626;
+  font-weight: 400;
+}
+
+.col-scroll {
+  flex: 1;
+  max-height: 50vh;
+}
+
+.col-text {
+  font-size: 26rpx;
+  line-height: 1.8;
+  color: #334155;
+  word-break: break-all;
+}
+
+.rewrite-footer {
+  display: flex;
+  gap: 20rpx;
+  padding: 20rpx 30rpx;
+  border-top: 2rpx solid #e2e8f0;
+  justify-content: flex-end;
+  background: #f8fafc;
 }
 </style>

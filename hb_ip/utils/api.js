@@ -215,6 +215,19 @@ export function aiOptimizeText(text) {
   })
 }
 
+// AI 文案平台改写（适配抖音/小红书/视频号/哔哩哔哩/快手）
+// 复用 optimize-text 接口，通过 type 区分改写模式
+export function aiRewriteText(text) {
+  return request('/api/dsp/ai/optimize-text', {
+    data: {
+      text,
+      type: 'rewrite',
+      instruction: '请将文案改写为适合在抖音、小红书、视频号、哔哩哔哩、快手等平台发布的口播文案。要求：口播形式，自然流畅，适合朗读；严格符合各平台发布规则；不能出现任何违禁词和敏感词；保持原意不变；重新组织语言使其更适合短视频平台传播',
+    },
+    timeout: 60000,
+  })
+}
+
 // 查询合成记录列表
 export function ttsHistory(page = 1, limit = 20) {
   return request('/api/dsp/voice/tts/history', {

@@ -5,7 +5,7 @@ debug_tk.py — Tcl/Tk 环境诊断与自动修复工具
 用法：
   1. 将此文件复制到打包后的安装目录（如 D:\ZhiMoAI）
   2. 双击运行，或在 cmd 中执行：
-       D:\ZhiMoAI\_internal_tts\installer_files\env\python.exe debug_tk.py
+       D:\ZhiMoAI\FunCosyVoice3\python310\python.exe debug_tk.py
   3. 脚本会自动诊断、尝试修复、验证修复结果
 
 输出内容包括：
@@ -18,8 +18,8 @@ import os, sys, re, ctypes, glob, traceback
 
 # ── 基本路径 ──────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INDEXTTS_DIR = os.path.join(BASE_DIR, "_internal_tts")
-ENV_DIR = os.path.join(INDEXTTS_DIR, "installer_files", "env")
+INDEXTTS_DIR = os.path.join(BASE_DIR, "FunCosyVoice3")
+ENV_DIR = os.path.join(INDEXTTS_DIR, "python310")
 
 SEP = "=" * 64
 

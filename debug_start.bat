@@ -8,14 +8,8 @@ echo.
 cd /d "%~dp0"
 
 set "PYTHON_EXE="
-if exist "_internal_tts\installer_files\env\Scripts\python.exe" (
-    set "PYTHON_EXE=_internal_tts\installer_files\env\Scripts\python.exe"
-) else if exist "_internal_tts\installer_files\env\python.exe" (
-    set "PYTHON_EXE=_internal_tts\installer_files\env\python.exe"
-) else if exist "IndexTTS2-SonicVale\installer_files\env\Scripts\python.exe" (
-    set "PYTHON_EXE=IndexTTS2-SonicVale\installer_files\env\Scripts\python.exe"
-) else if exist "IndexTTS2-SonicVale\installer_files\env\python.exe" (
-    set "PYTHON_EXE=IndexTTS2-SonicVale\installer_files\env\python.exe"
+if exist "FunCosyVoice3\python310\python.exe" (
+    set "PYTHON_EXE=FunCosyVoice3\python310\python.exe"
 )
 
 if "%PYTHON_EXE%"=="" (

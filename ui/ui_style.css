@@ -1245,3 +1245,105 @@ div[class*="toast-close"]:hover {
     transform: translateY(0) scale(1);
   }
 }
+
+/* ══════════════════════════════════════
+   法案检查弹窗（Modal Overlay）
+   ══════════════════════════════════════ */
+#compliance-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10000 !important;
+  background: rgba(0,0,0,0.55) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 32px !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+#compliance-modal-card {
+  background: #fff !important;
+  border-radius: 16px !important;
+  padding: 28px !important;
+  max-width: 1100px !important;
+  width: 100% !important;
+  max-height: 85vh !important;
+  overflow-y: auto !important;
+  box-shadow: 0 25px 60px rgba(0,0,0,0.3) !important;
+  animation: compliance-modal-in 0.25s ease-out !important;
+}
+@keyframes compliance-modal-in {
+  from { opacity:0; transform:scale(.96) translateY(16px); }
+  to   { opacity:1; transform:scale(1)   translateY(0); }
+}
+
+/* 法案检查按钮加载状态动画 */
+@keyframes compliance-btn-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(124,58,237,.45); }
+  70%  { box-shadow: 0 0 0 10px rgba(124,58,237,0); }
+  100% { box-shadow: 0 0 0 0 rgba(124,58,237,0); }
+}
+
+/* ══════════════════════════════════════
+   法务检查功能样式
+   ══════════════════════════════════════ */
+
+/* 法务检查按钮 */
+.legal-check-btn {
+  background: linear-gradient(135deg, #fef2f2, #fee2e2) !important;
+  border: 1.5px solid #fca5a5 !important;
+  color: #dc2626 !important;
+  font-weight: 700 !important;
+  border-radius: 10px !important;
+  transition: all 0.2s !important;
+  min-width: 120px !important;
+}
+.legal-check-btn:hover {
+  background: linear-gradient(135deg, #fee2e2, #fecaca) !important;
+  border-color: #f87171 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25) !important;
+}
+
+/* 法务检查结果面板 */
+.legal-check-panel {
+  background: linear-gradient(135deg, #fefce8, #fef9c3) !important;
+  border: 2px solid #fbbf24 !important;
+  border-radius: 14px !important;
+  padding: 16px !important;
+  margin-top: 10px !important;
+  box-shadow: 0 4px 16px rgba(251, 191, 36, 0.15) !important;
+  animation: legal-check-fade-in 0.3s ease-out !important;
+}
+
+@keyframes legal-check-fade-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 法务检查对比列 */
+.legal-check-col {
+  background: #fff !important;
+  border: 1.5px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  padding: 14px !important;
+  min-height: 120px !important;
+  max-height: 300px !important;
+  overflow-y: auto !important;
+}
+.legal-check-col::-webkit-scrollbar {
+  width: 6px;
+}
+.legal-check-col::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 3px;
+}
+.legal-check-col::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.legal-check-col::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

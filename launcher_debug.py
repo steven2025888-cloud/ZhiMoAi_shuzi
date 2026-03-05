@@ -23,10 +23,7 @@ print()
 
 # 搜索 Python 解释器
 python_paths = [
-    os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "Scripts", "python.exe"),
-    os.path.join(BASE_DIR, "_internal_tts", "installer_files", "env", "python.exe"),
-    os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "Scripts", "python.exe"),
-    os.path.join(BASE_DIR, "IndexTTS2-SonicVale", "installer_files", "env", "python.exe"),
+    os.path.join(BASE_DIR, "FunCosyVoice3", "python310", "python.exe"),
 ]
 
 print("[1] 搜索 Python 解释器...")
@@ -41,7 +38,7 @@ for p in python_paths:
 if not python_exe:
     print()
     print("!!! 错误: 未找到 Python 解释器 !!!")
-    print("请确保 _internal_tts 文件夹已正确安装")
+    print("请确保 FunCosyVoice3 文件夹已正确安装")
     input("\n按回车键退出...")
     sys.exit(1)
 
@@ -82,7 +79,7 @@ print(f"  config.dat: {'✓ 存在' if os.path.exists(config_file) else '✗ 不
 # 检查关键目录
 print("\n[4] 检查关键目录...")
 for name, path in [
-    ("_internal_tts", os.path.join(BASE_DIR, "_internal_tts")),
+    ("FunCosyVoice3", os.path.join(BASE_DIR, "FunCosyVoice3")),
     ("heygem-win-50", os.path.join(BASE_DIR, "heygem-win-50")),
     ("libs", os.path.join(BASE_DIR, "libs")),
     ("logs", os.path.join(BASE_DIR, "logs")),

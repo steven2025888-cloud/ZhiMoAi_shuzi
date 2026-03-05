@@ -14,26 +14,14 @@ echo.>%LOG%
 echo [%date% %time%] repair_env start in: %CD%>>%LOG%
 
 set "PY="
-if exist "_internal_app\installer_files\env\Scripts\python.exe" (
-    set "PY=_internal_app\installer_files\env\Scripts\python.exe"
-) else if exist "_internal_app\installer_files\env\python.exe" (
-    set "PY=_internal_app\installer_files\env\python.exe"
-) else if exist "_internal_tts\installer_files\env\Scripts\python.exe" (
-    set "PY=_internal_tts\installer_files\env\Scripts\python.exe"
-) else if exist "_internal_tts\installer_files\env\python.exe" (
-    set "PY=_internal_tts\installer_files\env\python.exe"
-) else if exist "IndexTTS2-SonicVale\installer_files\env\Scripts\python.exe" (
-    set "PY=IndexTTS2-SonicVale\installer_files\env\Scripts\python.exe"
-) else if exist "IndexTTS2-SonicVale\installer_files\env\python.exe" (
-    set "PY=IndexTTS2-SonicVale\installer_files\env\python.exe"
+if exist "FunCosyVoice3\python310\python.exe" (
+    set "PY=FunCosyVoice3\python310\python.exe"
 )
 
 if "%PY%"=="" (
     echo [ERROR] Python not found!
     echo   Tried:
-    echo     _internal_app\installer_files\env\Scripts\python.exe
-    echo     _internal_tts\installer_files\env\Scripts\python.exe
-    echo     IndexTTS2-SonicVale\installer_files\env\Scripts\python.exe
+    echo     FunCosyVoice3\python310\python.exe
     echo [ERROR] Python not found!>>%LOG%
     pause
     exit /b 1

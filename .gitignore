@@ -48,6 +48,7 @@ HeyGem GPU后端/
 _internal_app/
 _internal_tts/
 _internal_tts2/
+FunCosyVoice3/
 
 .env
 env.dat
